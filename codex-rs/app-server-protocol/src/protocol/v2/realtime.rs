@@ -1,10 +1,12 @@
 use crate::JsonSchema;
 use crate::TS;
+use codex_protocol::models::MessagePhase;
 use codex_protocol::protocol::CodexResponseHandoffMode;
 use codex_protocol::protocol::ConversationTextRole;
 use codex_protocol::protocol::RealtimeAudioFrame as CoreRealtimeAudioFrame;
 use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::RealtimeOutputModality;
+use codex_protocol::protocol::RealtimeTranscriptEntry;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::RealtimeVoicesList;
 use serde::Deserialize;
@@ -68,6 +70,10 @@ impl From<ThreadRealtimeAudioChunk> for CoreRealtimeAudioFrame {
 #[ts(export_to = "v2/")]
 pub struct ThreadRealtimeStartParams {
     pub thread_id: String,
+    /// Selects whether Codex or the app-server client executes realtime handoffs.
+    /// Omitted values preserve Codex-owned execution.
+    #[ts(optional = nullable)]
+    pub handoff_owner: Option<ThreadRealtimeHandoffOwner>,
     /// Leaves Codex response handoffs to the client's explicit append calls instead of forwarding
     /// them automatically. Defaults to false.
     #[ts(optional = nullable)]
@@ -133,6 +139,15 @@ pub struct ThreadRealtimeStartParams {
     pub version: Option<RealtimeConversationVersion>,
     #[ts(optional = nullable)]
     pub voice: Option<RealtimeVoice>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/", rename_all = "camelCase")]
+pub enum ThreadRealtimeHandoffOwner {
+    #[default]
+    Codex,
+    Client,
 }
 
 /// EXPERIMENTAL - role-bearing text item included when a realtime V3 session starts.
@@ -216,6 +231,38 @@ pub struct ThreadRealtimeAppendSpeechParams {
 #[ts(export_to = "v2/")]
 pub struct ThreadRealtimeAppendSpeechResponse {}
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeHandoffAppendParams {
+    pub thread_id: String,
+    pub handoff_id: String,
+    pub text: String,
+    #[ts(optional = nullable)]
+    pub phase: Option<MessagePhase>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeHandoffAppendResponse {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeHandoffCompleteParams {
+    pub thread_id: String,
+    pub handoff_id: String,
+    pub text: String,
+    #[ts(optional = nullable)]
+    pub phase: Option<MessagePhase>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeHandoffCompleteResponse {}
+
 /// EXPERIMENTAL - stop thread realtime.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
@@ -261,6 +308,17 @@ pub struct ThreadRealtimeStartedNotification {
 pub struct ThreadRealtimeItemAddedNotification {
     pub thread_id: String,
     pub item: JsonValue,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeHandoffRequestedNotification {
+    pub thread_id: String,
+    pub handoff_id: String,
+    pub item_id: String,
+    pub input_transcript: String,
+    pub active_transcript: Vec<RealtimeTranscriptEntry>,
 }
 
 /// EXPERIMENTAL - flat transcript delta emitted whenever realtime

@@ -5687,6 +5687,26 @@
           "properties": {
             "method": {
               "enum": [
+                "thread/realtime/handoffRequested"
+              ],
+              "title": "Thread/realtime/handoffRequestedNotificationMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadRealtimeHandoffRequestedNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "title": "Thread/realtime/handoffRequestedNotification",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "thread/realtime/transcript/delta"
               ],
               "title": "Thread/realtime/transcript/deltaNotificationMethod",
@@ -17011,6 +17031,21 @@
         ],
         "type": "string"
       },
+      "RealtimeTranscriptEntry": {
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "text"
+        ],
+        "type": "object"
+      },
       "RealtimeVoice": {
         "enum": [
           "alloy",
@@ -21504,6 +21539,45 @@
           "threadId"
         ],
         "title": "ThreadRealtimeErrorNotification",
+        "type": "object"
+      },
+      "ThreadRealtimeHandoffOwner": {
+        "enum": [
+          "codex",
+          "client"
+        ],
+        "type": "string"
+      },
+      "ThreadRealtimeHandoffRequestedNotification": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "activeTranscript": {
+            "items": {
+              "$ref": "#/definitions/v2/RealtimeTranscriptEntry"
+            },
+            "type": "array"
+          },
+          "handoffId": {
+            "type": "string"
+          },
+          "inputTranscript": {
+            "type": "string"
+          },
+          "itemId": {
+            "type": "string"
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "activeTranscript",
+          "handoffId",
+          "inputTranscript",
+          "itemId",
+          "threadId"
+        ],
+        "title": "ThreadRealtimeHandoffRequestedNotification",
         "type": "object"
       },
       "ThreadRealtimeInitialItem": {

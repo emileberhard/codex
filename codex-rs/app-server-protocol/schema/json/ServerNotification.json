@@ -3259,6 +3259,21 @@
       ],
       "type": "string"
     },
+    "RealtimeTranscriptEntry": {
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "text"
+      ],
+      "type": "object"
+    },
     "ReasoningEffort": {
       "description": "A non-empty reasoning effort value advertised by the model.",
       "minLength": 1,
@@ -5082,6 +5097,36 @@
       },
       "required": [
         "message",
+        "threadId"
+      ],
+      "type": "object"
+    },
+    "ThreadRealtimeHandoffRequestedNotification": {
+      "properties": {
+        "activeTranscript": {
+          "items": {
+            "$ref": "#/definitions/RealtimeTranscriptEntry"
+          },
+          "type": "array"
+        },
+        "handoffId": {
+          "type": "string"
+        },
+        "inputTranscript": {
+          "type": "string"
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "activeTranscript",
+        "handoffId",
+        "inputTranscript",
+        "itemId",
         "threadId"
       ],
       "type": "object"
@@ -7494,6 +7539,26 @@
         "params"
       ],
       "title": "Thread/realtime/itemAddedNotification",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "method": {
+          "enum": [
+            "thread/realtime/handoffRequested"
+          ],
+          "title": "Thread/realtime/handoffRequestedNotificationMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadRealtimeHandoffRequestedNotification"
+        }
+      },
+      "required": [
+        "method",
+        "params"
+      ],
+      "title": "Thread/realtime/handoffRequestedNotification",
       "type": "object"
     },
     {

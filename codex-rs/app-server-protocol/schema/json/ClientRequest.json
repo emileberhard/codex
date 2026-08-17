@@ -4471,6 +4471,13 @@
       ],
       "type": "object"
     },
+    "ThreadRealtimeHandoffOwner": {
+      "enum": [
+        "codex",
+        "client"
+      ],
+      "type": "string"
+    },
     "ThreadRealtimeInitialItem": {
       "description": "EXPERIMENTAL - role-bearing text item included when a realtime V3 session starts.",
       "properties": {

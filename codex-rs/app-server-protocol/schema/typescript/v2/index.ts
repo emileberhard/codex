@@ -493,6 +493,8 @@ export type { ThreadReadResponse } from "./ThreadReadResponse";
 export type { ThreadRealtimeAudioChunk } from "./ThreadRealtimeAudioChunk";
 export type { ThreadRealtimeClosedNotification } from "./ThreadRealtimeClosedNotification";
 export type { ThreadRealtimeErrorNotification } from "./ThreadRealtimeErrorNotification";
+export type { ThreadRealtimeHandoffOwner } from "./ThreadRealtimeHandoffOwner";
+export type { ThreadRealtimeHandoffRequestedNotification } from "./ThreadRealtimeHandoffRequestedNotification";
 export type { ThreadRealtimeInitialItem } from "./ThreadRealtimeInitialItem";
 export type { ThreadRealtimeItemAddedNotification } from "./ThreadRealtimeItemAddedNotification";
 export type { ThreadRealtimeOutputAudioDeltaNotification } from "./ThreadRealtimeOutputAudioDeltaNotification";

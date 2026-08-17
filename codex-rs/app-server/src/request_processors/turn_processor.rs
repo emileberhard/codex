@@ -276,6 +276,26 @@ impl TurnRequestProcessor {
             .map(|response| response.map(Into::into))
     }
 
+    pub(crate) async fn thread_realtime_handoff_append(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadRealtimeHandoffAppendParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        self.thread_realtime_handoff_append_inner(request_id, params)
+            .await
+            .map(|response| response.map(Into::into))
+    }
+
+    pub(crate) async fn thread_realtime_handoff_complete(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadRealtimeHandoffCompleteParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        self.thread_realtime_handoff_complete_inner(request_id, params)
+            .await
+            .map(|response| response.map(Into::into))
+    }
+
     pub(crate) async fn thread_realtime_stop(
         &self,
         request_id: &ConnectionRequestId,
@@ -1118,10 +1138,14 @@ impl TurnRequestProcessor {
         else {
             return Ok(None);
         };
+        let op = match params.handoff_owner.unwrap_or_default() {
+            ThreadRealtimeHandoffOwner::Codex => Op::RealtimeConversationStart,
+            ThreadRealtimeHandoffOwner::Client => Op::RealtimeConversationStartClientHandoffs,
+        };
         self.submit_core_op(
             request_id,
             thread.as_ref(),
-            Op::RealtimeConversationStart(ConversationStartParams {
+            op(ConversationStartParams {
                 client_managed_handoffs: params.client_managed_handoffs.unwrap_or(false),
                 delegation_ack_filler: params.delegation_ack_filler,
                 flush_transcript_tail_on_session_end: params
@@ -1248,6 +1272,56 @@ impl TurnRequestProcessor {
             ))
         })?;
         Ok(Some(ThreadRealtimeAppendSpeechResponse::default()))
+    }
+
+    async fn thread_realtime_handoff_append_inner(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadRealtimeHandoffAppendParams,
+    ) -> Result<Option<ThreadRealtimeHandoffAppendResponse>, JSONRPCErrorError> {
+        let Some((_, thread)) = self
+            .prepare_realtime_conversation_thread(request_id, &params.thread_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        self.submit_core_op(
+            request_id,
+            thread.as_ref(),
+            Op::RealtimeConversationHandoffAppend(ConversationHandoffOutputParams {
+                handoff_id: params.handoff_id,
+                text: params.text,
+                phase: params.phase,
+            }),
+        )
+        .await
+        .map_err(|err| internal_error(format!("failed to append realtime handoff: {err}")))?;
+        Ok(Some(ThreadRealtimeHandoffAppendResponse::default()))
+    }
+
+    async fn thread_realtime_handoff_complete_inner(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadRealtimeHandoffCompleteParams,
+    ) -> Result<Option<ThreadRealtimeHandoffCompleteResponse>, JSONRPCErrorError> {
+        let Some((_, thread)) = self
+            .prepare_realtime_conversation_thread(request_id, &params.thread_id)
+            .await?
+        else {
+            return Ok(None);
+        };
+        self.submit_core_op(
+            request_id,
+            thread.as_ref(),
+            Op::RealtimeConversationHandoffComplete(ConversationHandoffOutputParams {
+                handoff_id: params.handoff_id,
+                text: params.text,
+                phase: params.phase,
+            }),
+        )
+        .await
+        .map_err(|err| internal_error(format!("failed to complete realtime handoff: {err}")))?;
+        Ok(Some(ThreadRealtimeHandoffCompleteResponse::default()))
     }
 
     async fn thread_realtime_stop_inner(

@@ -468,6 +468,13 @@ pub struct ConversationSpeechParams {
     pub text: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationHandoffOutputParams {
+    pub handoff_id: String,
+    pub text: String,
+    pub phase: Option<MessagePhase>,
+}
+
 /// Persistent thread-settings overrides that can be applied before user input or
 /// on their own.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -554,6 +561,9 @@ pub enum Op {
     /// Start a realtime conversation stream.
     RealtimeConversationStart(ConversationStartParams),
 
+    /// Start a realtime conversation whose handoffs are executed by the app-server client.
+    RealtimeConversationStartClientHandoffs(ConversationStartParams),
+
     /// Send audio input to the running realtime conversation stream.
     RealtimeConversationAudio(ConversationAudioParams),
 
@@ -562,6 +572,12 @@ pub enum Op {
 
     /// Append speakable text to the running realtime conversation stream.
     RealtimeConversationSpeech(ConversationSpeechParams),
+
+    /// Append progress to a client-executed realtime handoff.
+    RealtimeConversationHandoffAppend(ConversationHandoffOutputParams),
+
+    /// Complete a client-executed realtime handoff.
+    RealtimeConversationHandoffComplete(ConversationHandoffOutputParams),
 
     /// Close the running realtime conversation stream.
     RealtimeConversationClose,
@@ -874,9 +890,16 @@ impl Op {
             Self::Interrupt => "interrupt",
             Self::CleanBackgroundTerminals => "clean_background_terminals",
             Self::RealtimeConversationStart(_) => "realtime_conversation_start",
+            Self::RealtimeConversationStartClientHandoffs(_) => {
+                "realtime_conversation_start_client_handoffs"
+            }
             Self::RealtimeConversationAudio(_) => "realtime_conversation_audio",
             Self::RealtimeConversationText(_) => "realtime_conversation_text",
             Self::RealtimeConversationSpeech(_) => "realtime_conversation_speech",
+            Self::RealtimeConversationHandoffAppend(_) => "realtime_conversation_handoff_append",
+            Self::RealtimeConversationHandoffComplete(_) => {
+                "realtime_conversation_handoff_complete"
+            }
             Self::RealtimeConversationClose => "realtime_conversation_close",
             Self::RealtimeConversationListVoices => "realtime_conversation_list_voices",
             Self::TurnInput { .. } => "turn_input",

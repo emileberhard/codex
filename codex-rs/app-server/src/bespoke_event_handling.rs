@@ -58,6 +58,7 @@ use codex_app_server_protocol::ThreadGoalUpdatedNotification;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadRealtimeClosedNotification;
 use codex_app_server_protocol::ThreadRealtimeErrorNotification;
+use codex_app_server_protocol::ThreadRealtimeHandoffRequestedNotification;
 use codex_app_server_protocol::ThreadRealtimeItemAddedNotification;
 use codex_app_server_protocol::ThreadRealtimeOutputAudioDeltaNotification;
 use codex_app_server_protocol::ThreadRealtimeSdpNotification;
@@ -538,18 +539,15 @@ pub(crate) async fn apply_bespoke_event_handling(
             }
             RealtimeEvent::ConversationItemDone { .. } | RealtimeEvent::NoopRequested(_) => {}
             RealtimeEvent::HandoffRequested(handoff) => {
-                let notification = ThreadRealtimeItemAddedNotification {
+                let notification = ThreadRealtimeHandoffRequestedNotification {
                     thread_id: conversation_id.to_string(),
-                    item: serde_json::json!({
-                        "type": "handoff_request",
-                        "handoff_id": handoff.handoff_id,
-                        "item_id": handoff.item_id,
-                        "input_transcript": handoff.input_transcript,
-                        "active_transcript": handoff.active_transcript,
-                    }),
+                    handoff_id: handoff.handoff_id,
+                    item_id: handoff.item_id,
+                    input_transcript: handoff.input_transcript,
+                    active_transcript: handoff.active_transcript,
                 };
                 outgoing
-                    .send_server_notification(ServerNotification::ThreadRealtimeItemAdded(
+                    .send_server_notification(ServerNotification::ThreadRealtimeHandoffRequested(
                         notification,
                     ))
                     .await;

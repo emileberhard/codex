@@ -1,4 +1,7 @@
+use crate::realtime_conversation::RealtimeHandoffOwner;
 use crate::realtime_conversation::handle_audio as handle_realtime_conversation_audio;
+use crate::realtime_conversation::handle_client_handoff_append as handle_realtime_conversation_handoff_append;
+use crate::realtime_conversation::handle_client_handoff_complete as handle_realtime_conversation_handoff_complete;
 use crate::realtime_conversation::handle_close as handle_realtime_conversation_close;
 use crate::realtime_conversation::handle_speech as handle_realtime_conversation_speech;
 use crate::realtime_conversation::handle_start as handle_realtime_conversation_start;
@@ -533,8 +536,33 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::RealtimeConversationStart(params) => {
-                    if let Err(err) =
-                        handle_realtime_conversation_start(&sess, sub.id.clone(), params).await
+                    if let Err(err) = handle_realtime_conversation_start(
+                        &sess,
+                        sub.id.clone(),
+                        params,
+                        RealtimeHandoffOwner::Codex,
+                    )
+                    .await
+                    {
+                        sess.send_event_raw(Event {
+                            id: sub.id.clone(),
+                            msg: EventMsg::Error(ErrorEvent {
+                                message: err.to_string(),
+                                codex_error_info: Some(CodexErrorInfo::Other),
+                            }),
+                        })
+                        .await;
+                    }
+                    false
+                }
+                Op::RealtimeConversationStartClientHandoffs(params) => {
+                    if let Err(err) = handle_realtime_conversation_start(
+                        &sess,
+                        sub.id.clone(),
+                        params,
+                        RealtimeHandoffOwner::Client,
+                    )
+                    .await
                     {
                         sess.send_event_raw(Event {
                             id: sub.id.clone(),
@@ -557,6 +585,16 @@ pub(super) async fn submission_loop(
                 }
                 Op::RealtimeConversationSpeech(params) => {
                     handle_realtime_conversation_speech(&sess, sub.id.clone(), params).await;
+                    false
+                }
+                Op::RealtimeConversationHandoffAppend(params) => {
+                    handle_realtime_conversation_handoff_append(&sess, sub.id.clone(), params)
+                        .await;
+                    false
+                }
+                Op::RealtimeConversationHandoffComplete(params) => {
+                    handle_realtime_conversation_handoff_complete(&sess, sub.id.clone(), params)
+                        .await;
                     false
                 }
                 Op::RealtimeConversationClose => {

@@ -41,6 +41,7 @@ use codex_protocol::models::MessagePhase;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::CodexResponseHandoffMode;
 use codex_protocol::protocol::ConversationAudioParams;
+use codex_protocol::protocol::ConversationHandoffOutputParams;
 use codex_protocol::protocol::ConversationSpeechParams;
 use codex_protocol::protocol::ConversationStartParams;
 use codex_protocol::protocol::ConversationStartTransport;
@@ -79,6 +80,7 @@ use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
+use uuid::Uuid;
 
 mod bem;
 mod existing_call;
@@ -118,6 +120,12 @@ enum RealtimeConversationEnd {
     Requested,
     TransportClosed,
     Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RealtimeHandoffOwner {
+    Codex,
+    Client,
 }
 
 enum RealtimeFanoutTaskStop {
@@ -1024,6 +1032,67 @@ impl RealtimeConversationManager {
         Ok(())
     }
 
+    pub(crate) async fn append_client_handoff(
+        &self,
+        params: ConversationHandoffOutputParams,
+    ) -> CodexResult<()> {
+        self.send_client_handoff(params, /*complete*/ false).await
+    }
+
+    pub(crate) async fn complete_client_handoff(
+        &self,
+        params: ConversationHandoffOutputParams,
+    ) -> CodexResult<()> {
+        self.send_client_handoff(params, /*complete*/ true).await
+    }
+
+    async fn send_client_handoff(
+        &self,
+        params: ConversationHandoffOutputParams,
+        complete: bool,
+    ) -> CodexResult<()> {
+        let handoff = {
+            let guard = self.state.lock().await;
+            let Some(state) = guard.as_ref() else {
+                return Err(CodexErr::InvalidRequest(
+                    "conversation is not running".to_string(),
+                ));
+            };
+            state.handoff.clone()
+        };
+
+        let active_handoff = handoff.stream.lock().await.active_handoff.clone();
+        if active_handoff.as_deref() != Some(params.handoff_id.as_str()) {
+            return Err(CodexErr::InvalidRequest(format!(
+                "realtime handoff `{}` is not active",
+                params.handoff_id
+            )));
+        }
+
+        let output = if complete {
+            RealtimeOutbound::CompletedHandoff {
+                handoff_id: params.handoff_id,
+                text: realtime_backend_output(params.text, handoff.session_kind),
+                phase: params.phase,
+            }
+        } else {
+            RealtimeOutbound::HandoffAppend {
+                handoff_id: params.handoff_id,
+                text: realtime_backend_output(params.text, handoff.session_kind),
+                phase: params.phase,
+            }
+        };
+        handoff
+            .output_tx
+            .send(output)
+            .await
+            .map_err(|_| CodexErr::InvalidRequest("conversation is not running".to_string()))?;
+        if complete {
+            self.clear_active_handoff().await;
+        }
+        Ok(())
+    }
+
     pub(crate) async fn handoff_complete(&self) -> CodexResult<()> {
         let handoff = {
             let guard = self.state.lock().await;
@@ -1114,6 +1183,7 @@ pub(crate) async fn handle_start(
     sess: &Arc<Session>,
     sub_id: String,
     params: ConversationStartParams,
+    handoff_owner: RealtimeHandoffOwner,
 ) -> CodexResult<()> {
     let prepared_start = match prepare_realtime_start(sess, params).await {
         Ok(prepared_start) => prepared_start,
@@ -1131,7 +1201,7 @@ pub(crate) async fn handle_start(
         }
     };
 
-    if let Err(err) = handle_start_inner(sess, &sub_id, prepared_start).await {
+    if let Err(err) = handle_start_inner(sess, &sub_id, prepared_start, handoff_owner).await {
         error!("failed to start realtime conversation: {err}");
         let message = err.to_string();
         sess.send_event_raw(Event {
@@ -1490,6 +1560,7 @@ async fn handle_start_inner(
     sess: &Arc<Session>,
     sub_id: &str,
     prepared_start: PreparedRealtimeConversationStart,
+    handoff_owner: RealtimeHandoffOwner,
 ) -> CodexResult<()> {
     let PreparedRealtimeConversationStart {
         api_provider,
@@ -1509,6 +1580,8 @@ async fn handle_start_inner(
         session_config,
         transport,
     } = prepared_start;
+    let client_managed_handoffs =
+        client_managed_handoffs || handoff_owner == RealtimeHandoffOwner::Client;
     info!("starting realtime conversation");
     let (sdp, existing_call_id) = match transport {
         ConversationStartTransport::Websocket => (None, None),
@@ -1585,11 +1658,15 @@ async fn handle_start_inner(
             if let RealtimeEvent::Error(_) = &event {
                 end = RealtimeConversationEnd::Error;
             }
-            let maybe_routed_text = match &event {
-                RealtimeEvent::HandoffRequested(handoff) => {
-                    realtime_delegation_from_handoff(handoff)
+            let maybe_routed_text = if handoff_owner == RealtimeHandoffOwner::Codex {
+                match &event {
+                    RealtimeEvent::HandoffRequested(handoff) => {
+                        realtime_delegation_from_handoff(handoff)
+                    }
+                    _ => None,
                 }
-                _ => None,
+            } else {
+                None
             };
             if let Some(text) = maybe_routed_text {
                 debug!(text = %text, "[realtime-text] realtime conversation text output");
@@ -1605,7 +1682,23 @@ async fn handle_start_inner(
                 .await;
         }
         if let Ok(text) = transcript_tail_rx.recv().await {
-            sess_clone.route_realtime_text_input(text).await;
+            if handoff_owner == RealtimeHandoffOwner::Codex {
+                sess_clone.route_realtime_text_input(text).await;
+            } else {
+                let handoff_id = Uuid::now_v7().to_string();
+                sess_clone
+                    .send_event_raw(ev(EventMsg::RealtimeConversationRealtime(
+                        RealtimeConversationRealtimeEvent {
+                            payload: RealtimeEvent::HandoffRequested(RealtimeHandoffRequested {
+                                handoff_id: handoff_id.clone(),
+                                item_id: handoff_id,
+                                input_transcript: text,
+                                active_transcript: Vec::new(),
+                            }),
+                        },
+                    )))
+                    .await;
+            }
         }
         if fanout_realtime_active.swap(false, Ordering::Relaxed) {
             match end {
@@ -1773,6 +1866,26 @@ pub(crate) async fn handle_speech(
             send_conversation_error(sess, sub_id, err.to_string(), CodexErrorInfo::BadRequest)
                 .await;
         }
+    }
+}
+
+pub(crate) async fn handle_client_handoff_append(
+    sess: &Arc<Session>,
+    sub_id: String,
+    params: ConversationHandoffOutputParams,
+) {
+    if let Err(err) = sess.conversation.append_client_handoff(params).await {
+        send_conversation_error(sess, sub_id, err.to_string(), CodexErrorInfo::BadRequest).await;
+    }
+}
+
+pub(crate) async fn handle_client_handoff_complete(
+    sess: &Arc<Session>,
+    sub_id: String,
+    params: ConversationHandoffOutputParams,
+) {
+    if let Err(err) = sess.conversation.complete_client_handoff(params).await {
+        send_conversation_error(sess, sub_id, err.to_string(), CodexErrorInfo::BadRequest).await;
     }
 }
 
@@ -2372,26 +2485,33 @@ async fn handle_realtime_server_event(
                     stream.active_handoff = Some(handoff.handoff_id.clone());
                 }
                 RealtimeSessionKind::V2 => {
-                    let active_handoff = handoff_state.stream.lock().await.active_handoff.clone();
-                    match active_handoff {
-                        Some(_) => {
-                            if let Err(err) = writer
-                                .send_conversation_function_call_output(
-                                    handoff.handoff_id.clone(),
-                                    REALTIME_V2_STEER_ACKNOWLEDGEMENT.to_string(),
-                                )
-                                .await
-                            {
-                                warn!("failed to send handoff steering acknowledgement: {err}");
-                                return Err(err.into());
+                    if handoff_state.client_managed_handoffs {
+                        let mut stream = handoff_state.stream.lock().await;
+                        stream.items.clear();
+                        stream.active_handoff = Some(handoff.handoff_id.clone());
+                    } else {
+                        let active_handoff =
+                            handoff_state.stream.lock().await.active_handoff.clone();
+                        match active_handoff {
+                            Some(_) => {
+                                if let Err(err) = writer
+                                    .send_conversation_function_call_output(
+                                        handoff.handoff_id.clone(),
+                                        REALTIME_V2_STEER_ACKNOWLEDGEMENT.to_string(),
+                                    )
+                                    .await
+                                {
+                                    warn!("failed to send handoff steering acknowledgement: {err}");
+                                    return Err(err.into());
+                                }
+                                response_create_queue
+                                    .request_create(writer, "handoff steering")
+                                    .await?;
                             }
-                            response_create_queue
-                                .request_create(writer, "handoff steering")
-                                .await?;
-                        }
-                        None => {
-                            handoff_state.stream.lock().await.active_handoff =
-                                Some(handoff.handoff_id.clone());
+                            None => {
+                                handoff_state.stream.lock().await.active_handoff =
+                                    Some(handoff.handoff_id.clone());
+                            }
                         }
                     }
                 }

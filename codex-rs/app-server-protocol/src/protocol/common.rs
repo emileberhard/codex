@@ -999,6 +999,18 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadRealtimeAppendSpeechResponse,
     },
+    #[experimental("thread/realtime/handoff/append")]
+    ThreadRealtimeHandoffAppend => "thread/realtime/handoff/append" {
+        params: v2::ThreadRealtimeHandoffAppendParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRealtimeHandoffAppendResponse,
+    },
+    #[experimental("thread/realtime/handoff/complete")]
+    ThreadRealtimeHandoffComplete => "thread/realtime/handoff/complete" {
+        params: v2::ThreadRealtimeHandoffCompleteParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRealtimeHandoffCompleteResponse,
+    },
     #[experimental("thread/realtime/stop")]
     ThreadRealtimeStop => "thread/realtime/stop" {
         params: v2::ThreadRealtimeStopParams,
@@ -1908,6 +1920,8 @@ server_notification_definitions! {
     ThreadRealtimeStarted => "thread/realtime/started" (v2::ThreadRealtimeStartedNotification),
     #[experimental("thread/realtime/itemAdded")]
     ThreadRealtimeItemAdded => "thread/realtime/itemAdded" (v2::ThreadRealtimeItemAddedNotification),
+    #[experimental("thread/realtime/handoffRequested")]
+    ThreadRealtimeHandoffRequested => "thread/realtime/handoffRequested" (v2::ThreadRealtimeHandoffRequestedNotification),
     #[experimental("thread/realtime/transcript/delta")]
     ThreadRealtimeTranscriptDelta => "thread/realtime/transcript/delta" (v2::ThreadRealtimeTranscriptDeltaNotification),
     #[experimental("thread/realtime/transcript/done")]
@@ -3858,6 +3872,7 @@ mod tests {
         let request = ClientRequest::ThreadRealtimeStart {
             request_id: RequestId::Integer(9),
             params: v2::ThreadRealtimeStartParams {
+                handoff_owner: Some(v2::ThreadRealtimeHandoffOwner::Client),
                 client_managed_handoffs: Some(true),
                 delegation_ack_filler: Some(false),
                 flush_transcript_tail_on_session_end: Some(true),
@@ -3901,6 +3916,7 @@ mod tests {
                 "id": 9,
                 "params": {
                     "threadId": "thr_123",
+                    "handoffOwner": "client",
                     "clientManagedHandoffs": true,
                     "delegationAckFiller": false,
                     "flushTranscriptTailOnSessionEnd": true,
@@ -3944,6 +3960,7 @@ mod tests {
         let default_prompt_request = ClientRequest::ThreadRealtimeStart {
             request_id: RequestId::Integer(9),
             params: v2::ThreadRealtimeStartParams {
+                handoff_owner: None,
                 client_managed_handoffs: None,
                 delegation_ack_filler: None,
                 flush_transcript_tail_on_session_end: None,
@@ -3971,6 +3988,7 @@ mod tests {
                 "id": 9,
                 "params": {
                     "threadId": "thr_123",
+                    "handoffOwner": null,
                     "clientManagedHandoffs": null,
                     "delegationAckFiller": null,
                     "flushTranscriptTailOnSessionEnd": null,
@@ -3996,6 +4014,7 @@ mod tests {
         let null_prompt_request = ClientRequest::ThreadRealtimeStart {
             request_id: RequestId::Integer(9),
             params: v2::ThreadRealtimeStartParams {
+                handoff_owner: None,
                 client_managed_handoffs: None,
                 delegation_ack_filler: None,
                 flush_transcript_tail_on_session_end: None,
@@ -4023,6 +4042,7 @@ mod tests {
                 "id": 9,
                 "params": {
                     "threadId": "thr_123",
+                    "handoffOwner": null,
                     "clientManagedHandoffs": null,
                     "delegationAckFiller": null,
                     "flushTranscriptTailOnSessionEnd": null,
@@ -4103,6 +4123,56 @@ mod tests {
                 }
             }),
             serde_json::to_value(&request)?,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn serialize_thread_realtime_handoff_output() -> Result<()> {
+        let append = ClientRequest::ThreadRealtimeHandoffAppend {
+            request_id: RequestId::Integer(11),
+            params: v2::ThreadRealtimeHandoffAppendParams {
+                thread_id: "thr_123".to_string(),
+                handoff_id: "handoff_456".to_string(),
+                text: "Working".to_string(),
+                phase: Some(codex_protocol::models::MessagePhase::Commentary),
+            },
+        };
+        assert_eq!(
+            json!({
+                "method": "thread/realtime/handoff/append",
+                "id": 11,
+                "params": {
+                    "threadId": "thr_123",
+                    "handoffId": "handoff_456",
+                    "text": "Working",
+                    "phase": "commentary"
+                }
+            }),
+            serde_json::to_value(&append)?,
+        );
+
+        let complete = ClientRequest::ThreadRealtimeHandoffComplete {
+            request_id: RequestId::Integer(12),
+            params: v2::ThreadRealtimeHandoffCompleteParams {
+                thread_id: "thr_123".to_string(),
+                handoff_id: "handoff_456".to_string(),
+                text: "Done".to_string(),
+                phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+            },
+        };
+        assert_eq!(
+            json!({
+                "method": "thread/realtime/handoff/complete",
+                "id": 12,
+                "params": {
+                    "threadId": "thr_123",
+                    "handoffId": "handoff_456",
+                    "text": "Done",
+                    "phase": "final_answer"
+                }
+            }),
+            serde_json::to_value(&complete)?,
         );
         Ok(())
     }
@@ -4248,6 +4318,7 @@ mod tests {
         let request = ClientRequest::ThreadRealtimeStart {
             request_id: RequestId::Integer(1),
             params: v2::ThreadRealtimeStartParams {
+                handoff_owner: None,
                 client_managed_handoffs: None,
                 delegation_ack_filler: None,
                 flush_transcript_tail_on_session_end: None,

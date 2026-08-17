@@ -21,6 +21,12 @@ use codex_app_server_protocol::ThreadRealtimeAppendTextResponse;
 use codex_app_server_protocol::ThreadRealtimeAudioChunk;
 use codex_app_server_protocol::ThreadRealtimeClosedNotification;
 use codex_app_server_protocol::ThreadRealtimeErrorNotification;
+use codex_app_server_protocol::ThreadRealtimeHandoffAppendParams;
+use codex_app_server_protocol::ThreadRealtimeHandoffAppendResponse;
+use codex_app_server_protocol::ThreadRealtimeHandoffCompleteParams;
+use codex_app_server_protocol::ThreadRealtimeHandoffCompleteResponse;
+use codex_app_server_protocol::ThreadRealtimeHandoffOwner;
+use codex_app_server_protocol::ThreadRealtimeHandoffRequestedNotification;
 use codex_app_server_protocol::ThreadRealtimeInitialItem;
 use codex_app_server_protocol::ThreadRealtimeItemAddedNotification;
 use codex_app_server_protocol::ThreadRealtimeListVoicesParams;
@@ -365,6 +371,7 @@ impl RealtimeE2eHarness {
         let start_request_id = self
             .mcp
             .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+                handoff_owner: None,
                 client_managed_handoffs,
                 delegation_ack_filler,
                 flush_transcript_tail_on_session_end: None,
@@ -426,6 +433,7 @@ impl RealtimeE2eHarness {
         let start_request_id = self
             .mcp
             .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+                handoff_owner: None,
                 thread_id: self.thread_id.clone(),
                 client_managed_handoffs: None,
                 delegation_ack_filler: None,
@@ -458,6 +466,7 @@ impl RealtimeE2eHarness {
 
     async fn start_frameless_bidi_realtime(
         &mut self,
+        handoff_owner: Option<ThreadRealtimeHandoffOwner>,
         codex_response_handoff_mode: Option<CodexResponseHandoffMode>,
         codex_response_handoff_channel_prefixes: Option<BTreeMap<String, Vec<String>>>,
         initial_items: Option<Vec<ThreadRealtimeInitialItem>>,
@@ -465,6 +474,7 @@ impl RealtimeE2eHarness {
         let start_request_id = self
             .mcp
             .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+                handoff_owner,
                 thread_id: self.thread_id.clone(),
                 client_managed_handoffs: None,
                 delegation_ack_filler: None,
@@ -736,6 +746,7 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
 
     let start_request_id = mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
@@ -877,25 +888,27 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
     assert_eq!(final_transcript_done.role, "assistant");
     assert_eq!(final_transcript_done.text, "working on it");
 
-    let handoff_item_added = read_notification::<ThreadRealtimeItemAddedNotification>(
+    let handoff_requested = read_notification::<ThreadRealtimeHandoffRequestedNotification>(
         &mut mcp,
-        "thread/realtime/itemAdded",
+        "thread/realtime/handoffRequested",
     )
     .await?;
-    assert_eq!(handoff_item_added.thread_id, output_audio.thread_id);
-    assert_eq!(handoff_item_added.item["type"], json!("handoff_request"));
-    assert_eq!(handoff_item_added.item["handoff_id"], json!("handoff_1"));
-    assert_eq!(handoff_item_added.item["item_id"], json!("item_2"));
+    assert_eq!(handoff_requested.thread_id, output_audio.thread_id);
+    assert_eq!(handoff_requested.handoff_id, "handoff_1");
+    assert_eq!(handoff_requested.item_id, "item_2");
+    assert_eq!(handoff_requested.input_transcript, "delegate now");
     assert_eq!(
-        handoff_item_added.item["input_transcript"],
-        json!("delegate now")
-    );
-    assert_eq!(
-        handoff_item_added.item["active_transcript"],
-        json!([
-            {"role": "user", "text": "delegate now"},
-            {"role": "assistant", "text": "working on it"}
-        ])
+        handoff_requested.active_transcript,
+        vec![
+            codex_protocol::protocol::RealtimeTranscriptEntry {
+                role: "user".to_string(),
+                text: "delegate now".to_string(),
+            },
+            codex_protocol::protocol::RealtimeTranscriptEntry {
+                role: "assistant".to_string(),
+                text: "working on it".to_string(),
+            },
+        ]
     );
 
     let realtime_error =
@@ -1018,6 +1031,7 @@ async fn realtime_start_can_skip_startup_context() -> Result<()> {
 
     let start_request_id = mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
@@ -1116,6 +1130,7 @@ async fn realtime_text_output_modality_requests_text_output_and_final_transcript
 
     let start_request_id = mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
@@ -1295,6 +1310,7 @@ async fn realtime_conversation_stop_emits_closed_notification() -> Result<()> {
 
     let start_request_id = mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
@@ -1368,6 +1384,7 @@ async fn realtime_mode_uses_client_instructions_on_entry_and_exit() -> Result<()
     let start_request_id = harness
         .mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             thread_id: harness.thread_id.clone(),
             client_managed_handoffs: None,
             delegation_ack_filler: None,
@@ -1504,6 +1521,7 @@ async fn realtime_webrtc_start_emits_sdp_notification() -> Result<()> {
     let thread_id = thread_start.thread.id;
     let start_request_id = mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
@@ -1723,6 +1741,7 @@ async fn existing_call_attaches_without_reinitializing_the_client_session(
         .mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
             thread_id: harness.thread_id.clone(),
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
@@ -1811,6 +1830,7 @@ async fn existing_call_rejects_client_owned_session_configuration(option: &str) 
     .await?;
     let mut params = ThreadRealtimeStartParams {
         thread_id: harness.thread_id.clone(),
+        handoff_owner: None,
         client_managed_handoffs: None,
         delegation_ack_filler: None,
         flush_transcript_tail_on_session_end: None,
@@ -2473,6 +2493,7 @@ async fn websocket_v3_passes_initial_items_through_session_start() -> Result<()>
 
     let started = harness
         .start_frameless_bidi_realtime(
+            /*handoff_owner*/ None,
             /*codex_response_handoff_mode*/ None,
             /*codex_response_handoff_channel_prefixes*/ None,
             Some(vec![
@@ -2623,7 +2644,12 @@ async fn websocket_v3_routes_handoffs_by_session_mode() -> Result<()> {
         .await?;
 
         let started = harness
-            .start_frameless_bidi_realtime(mode, channel_prefixes, /*initial_items*/ None)
+            .start_frameless_bidi_realtime(
+                /*handoff_owner*/ None,
+                mode,
+                channel_prefixes,
+                /*initial_items*/ None,
+            )
             .await?;
         assert_eq!(started.version, RealtimeConversationVersion::V3);
         let _ = harness
@@ -2672,6 +2698,125 @@ async fn websocket_v3_routes_handoffs_by_session_mode() -> Result<()> {
 
         harness.shutdown().await;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn websocket_v3_client_owned_handoff_skips_codex_and_accepts_correlated_output() -> Result<()>
+{
+    skip_if_no_network!(Ok(()));
+
+    let mut harness = RealtimeE2eHarness::new(
+        RealtimeTestVersion::V1,
+        no_main_loop_responses(),
+        realtime_sideband(vec![realtime_sideband_connection(vec![
+            vec![
+                session_started("sess_external_executor"),
+                json!({
+                    "type": "delegation.created",
+                    "offset_ms": 100,
+                    "item": {
+                        "id": "delegation_external",
+                        "type": "delegation",
+                        "target": "client",
+                        "content": [{
+                            "type": "input_text",
+                            "text": "inspect the repository"
+                        }]
+                    }
+                }),
+            ],
+            vec![],
+            vec![],
+        ])]),
+    )
+    .await?;
+
+    let started = harness
+        .start_frameless_bidi_realtime(
+            Some(ThreadRealtimeHandoffOwner::Client),
+            Some(CodexResponseHandoffMode::BemTags),
+            /*codex_response_handoff_channel_prefixes*/ None,
+            /*initial_items*/ None,
+        )
+        .await?;
+    assert_eq!(started.version, RealtimeConversationVersion::V3);
+
+    let requested = harness
+        .read_notification::<ThreadRealtimeHandoffRequestedNotification>(
+            "thread/realtime/handoffRequested",
+        )
+        .await?;
+    assert_eq!(requested.thread_id, harness.thread_id);
+    assert_eq!(requested.handoff_id, "delegation_external");
+    assert_eq!(requested.input_transcript, "inspect the repository");
+
+    let codex_turn = timeout(
+        Duration::from_millis(200),
+        harness.read_notification::<TurnStartedNotification>("turn/started"),
+    )
+    .await;
+    assert!(
+        codex_turn.is_err(),
+        "client-owned handoffs must not start a Codex turn"
+    );
+    assert!(harness.main_loop_responses_requests().await?.is_empty());
+
+    let append_request_id = harness
+        .mcp
+        .send_thread_realtime_handoff_append_request(ThreadRealtimeHandoffAppendParams {
+            thread_id: harness.thread_id.clone(),
+            handoff_id: requested.handoff_id.clone(),
+            text: "[COMMENTARY]Inspecting the repository".to_string(),
+            phase: Some(codex_protocol::models::MessagePhase::Commentary),
+        })
+        .await?;
+    let _: ThreadRealtimeHandoffAppendResponse = timeout(
+        DEFAULT_TIMEOUT,
+        harness.mcp.read_response(append_request_id),
+    )
+    .await??;
+    assert_eq!(
+        harness.sideband_outbound_request(/*request_index*/ 1).await,
+        json!({
+            "type": "delegation.context.append",
+            "delegation_item_id": "delegation_external",
+            "content": [{
+                "type": "input_text",
+                "text": "[COMMENTARY]Inspecting the repository"
+            }],
+            "channel": "commentary"
+        })
+    );
+
+    let complete_request_id = harness
+        .mcp
+        .send_thread_realtime_handoff_complete_request(ThreadRealtimeHandoffCompleteParams {
+            thread_id: harness.thread_id.clone(),
+            handoff_id: requested.handoff_id,
+            text: "[FINAL]The repository is healthy".to_string(),
+            phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+        })
+        .await?;
+    let _: ThreadRealtimeHandoffCompleteResponse = timeout(
+        DEFAULT_TIMEOUT,
+        harness.mcp.read_response(complete_request_id),
+    )
+    .await??;
+    assert_eq!(
+        harness.sideband_outbound_request(/*request_index*/ 2).await,
+        json!({
+            "type": "delegation.context.append",
+            "delegation_item_id": "delegation_external",
+            "content": [{
+                "type": "input_text",
+                "text": "[FINAL]The repository is healthy"
+            }],
+            "channel": "speakable"
+        })
+    );
+
+    harness.shutdown().await;
     Ok(())
 }
 
@@ -3330,6 +3475,7 @@ async fn realtime_webrtc_start_surfaces_backend_error() -> Result<()> {
 
     let start_request_id = mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
@@ -3396,6 +3542,7 @@ async fn realtime_conversation_requires_feature_flag() -> Result<()> {
 
     let start_request_id = mcp
         .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            handoff_owner: None,
             client_managed_handoffs: None,
             delegation_ack_filler: None,
             flush_transcript_tail_on_session_end: None,
