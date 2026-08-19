@@ -670,28 +670,58 @@ impl ModelClient {
         session_config: ApiRealtimeSessionConfig,
         mut extra_headers: ApiHeaderMap,
         api_provider_override: Option<ApiProvider>,
+        session_telemetry: &SessionTelemetry,
     ) -> Result<RealtimeWebrtcCallStart> {
         // Create the media call over HTTP first, then retain matching auth so realtime can attach
         // the server-side control WebSocket to the call id from that HTTP response.
-        let client_setup = self.current_client_setup().await?;
         if let Some(header_value) = self.generate_attestation_header_for().await {
             extra_headers.insert(X_OAI_ATTESTATION_HEADER, header_value);
         }
-        let mut sideband_headers = extra_headers.clone();
-        sideband_headers.extend(sideband_websocket_auth_headers(
-            client_setup.api_auth.as_ref(),
-        ));
-        let api_provider = api_provider_override.unwrap_or(client_setup.api_provider);
-        let transport = self.build_api_transport(&api_provider, REALTIME_CALLS_ENDPOINT)?;
-        let response = ApiRealtimeCallClient::new(transport, api_provider, client_setup.api_auth)
-            .create_with_session_and_headers(sdp, session_config, extra_headers)
-            .await
-            .map_err(|error| self.state.provider.map_api_error(error))?;
-        Ok(RealtimeWebrtcCallStart {
-            sdp: response.sdp,
-            call_id: response.call_id,
-            sideband_headers,
-        })
+        let auth_manager = self.state.provider.auth_manager();
+        let mut auth_recovery = auth_manager
+            .as_ref()
+            .map(AuthManager::unauthorized_recovery);
+        let mut provider_auth_recovery_attempted = false;
+        loop {
+            let client_setup = self.current_client_setup().await?;
+            let mut sideband_headers = extra_headers.clone();
+            sideband_headers.extend(sideband_websocket_auth_headers(
+                client_setup.api_auth.as_ref(),
+            ));
+            let api_provider = api_provider_override
+                .clone()
+                .unwrap_or(client_setup.api_provider);
+            let transport = self.build_api_transport(&api_provider, REALTIME_CALLS_ENDPOINT)?;
+            let result = ApiRealtimeCallClient::new(transport, api_provider, client_setup.api_auth)
+                .create_with_session_and_headers(
+                    sdp.clone(),
+                    session_config.clone(),
+                    extra_headers.clone(),
+                )
+                .await;
+            match result {
+                Ok(response) => {
+                    return Ok(RealtimeWebrtcCallStart {
+                        sdp: response.sdp,
+                        call_id: response.call_id,
+                        sideband_headers,
+                    });
+                }
+                Err(ApiError::Transport(
+                    unauthorized_transport @ TransportError::Http { status, .. },
+                )) if status == StatusCode::UNAUTHORIZED => {
+                    handle_unauthorized(
+                        unauthorized_transport,
+                        &mut auth_recovery,
+                        &mut provider_auth_recovery_attempted,
+                        session_telemetry,
+                        &self.state.provider,
+                    )
+                    .await?;
+                }
+                Err(error) => return Err(self.state.provider.map_api_error(error)),
+            }
+        }
     }
 
     pub(crate) async fn realtime_sideband_headers(

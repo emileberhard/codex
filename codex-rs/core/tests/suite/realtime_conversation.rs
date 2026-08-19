@@ -8,6 +8,9 @@ use codex_core::test_support::auth_manager_from_auth;
 use codex_history::InitialHistory;
 use codex_history::RolloutItem;
 use codex_login::CodexAuth;
+use codex_login::ExternalAuth;
+use codex_login::ExternalAuthFuture;
+use codex_login::ExternalAuthRefreshContext;
 use codex_login::OPENAI_API_KEY_ENV_VAR;
 use codex_protocol::ThreadId;
 use codex_protocol::mcp::ClientMcpExtensions;
@@ -67,6 +70,7 @@ use wiremock::Match;
 use wiremock::Mock;
 use wiremock::Request as WiremockRequest;
 use wiremock::ResponseTemplate;
+use wiremock::matchers::header;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
 use wiremock::matchers::path_regex;
@@ -80,6 +84,46 @@ const MEMORY_PROMPT_PHRASE: &str =
     "You have access to a memory folder with guidance from prior runs.";
 const REALTIME_CONVERSATION_TEST_SUBPROCESS_ENV_VAR: &str =
     "CODEX_REALTIME_CONVERSATION_TEST_SUBPROCESS";
+const CHATGPT_ACCOUNT_ID: &str = "workspace-one";
+const INITIAL_ACCESS_TOKEN: &str = "header.e30.initial";
+const REFRESHED_ACCESS_TOKEN: &str = "header.e30.refreshed";
+
+struct ScriptedExternalAuth {
+    current: Mutex<CodexAuth>,
+    refreshed: CodexAuth,
+}
+
+impl ExternalAuth for ScriptedExternalAuth {
+    fn resolve(&self) -> ExternalAuthFuture<'_, CodexAuth> {
+        let auth = self
+            .current
+            .lock()
+            .map_err(|_| std::io::Error::other("external auth lock is poisoned"))
+            .map(|current| current.clone());
+        Box::pin(async move { auth })
+    }
+
+    fn refresh(&self, context: ExternalAuthRefreshContext) -> ExternalAuthFuture<'_, CodexAuth> {
+        let auth = if context.previous_account_id.as_deref() != Some(CHATGPT_ACCOUNT_ID) {
+            Err(std::io::Error::other(
+                "external auth refresh changed the ChatGPT workspace",
+            ))
+        } else {
+            self.current
+                .lock()
+                .map_err(|_| std::io::Error::other("external auth lock is poisoned"))
+                .map(|mut current| {
+                    *current = self.refreshed.clone();
+                    self.refreshed.clone()
+                })
+        };
+        Box::pin(async move { auth })
+    }
+}
+
+fn external_chatgpt_auth(access_token: &str) -> std::io::Result<CodexAuth> {
+    CodexAuth::from_external_chatgpt_tokens(access_token, CHATGPT_ACCOUNT_ID, Some("enterprise"))
+}
 
 #[derive(Debug, Clone)]
 struct RealtimeCallRequestCapture {
@@ -703,6 +747,138 @@ async fn conversation_webrtc_frameless_chatgpt_sends_codex_headers_to_backend() 
         _ => None,
     })
     .await;
+    realtime_server.shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn conversation_webrtc_retries_after_chatgpt_auth_refresh() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = start_mock_server().await;
+    Mock::given(method("POST"))
+        .and(path_regex(".*/backend-api/codex/realtime/calls$"))
+        .and(header(
+            "authorization",
+            format!("Bearer {INITIAL_ACCESS_TOKEN}"),
+        ))
+        .and(header("chatgpt-account-id", CHATGPT_ACCOUNT_ID))
+        .respond_with(ResponseTemplate::new(401).set_body_string("unauthorized"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex(".*/backend-api/codex/realtime/calls$"))
+        .and(header(
+            "authorization",
+            format!("Bearer {REFRESHED_ACCESS_TOKEN}"),
+        ))
+        .and(header("chatgpt-account-id", CHATGPT_ACCOUNT_ID))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Location", "/v1/live/rtc_auth_refresh")
+                .set_body_string("v=answer\r\n"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let realtime_server = start_websocket_server(vec![vec![vec![json!({
+        "type": "session.started",
+        "session": { "id": "rtc_auth_refresh", "instructions": "backend prompt" }
+    })]]])
+    .await;
+
+    let backend_base_url = format!("{}/backend-api/codex", server.uri());
+    let realtime_ws_base_url = realtime_server.uri().to_string();
+    let mut builder = test_codex()
+        .with_auth(CodexAuth::from_api_key("seed"))
+        .with_config(move |config| {
+            config.model_provider.base_url = Some(backend_base_url);
+            config.experimental_realtime_ws_backend_prompt = Some("backend prompt".to_string());
+            config.experimental_realtime_ws_base_url = Some(realtime_ws_base_url);
+        });
+    let test = builder.build(&server).await?;
+    test.thread_manager
+        .auth_manager()
+        .set_external_auth(Arc::new(ScriptedExternalAuth {
+            current: Mutex::new(external_chatgpt_auth(INITIAL_ACCESS_TOKEN)?),
+            refreshed: external_chatgpt_auth(REFRESHED_ACCESS_TOKEN)?,
+        }))
+        .await?;
+
+    test.codex
+        .submit(Op::RealtimeConversationStart(ConversationStartParams {
+            client_managed_handoffs: false,
+            delegation_ack_filler: None,
+            flush_transcript_tail_on_session_end: false,
+            codex_responses_as_items: false,
+            codex_response_item_prefix: None,
+            codex_response_handoff_mode:
+                codex_protocol::protocol::CodexResponseHandoffMode::Thinking,
+            codex_response_handoff_channel_prefixes: None,
+            model: Some("session-override-model".to_string()),
+            output_modality: RealtimeOutputModality::Audio,
+            include_startup_context: false,
+            initial_items: Vec::new(),
+            realtime_start_instructions: None,
+            realtime_end_instructions: None,
+            prompt: Some(Some("backend prompt".to_string())),
+            realtime_session_id: None,
+            transport: Some(ConversationStartTransport::Webrtc {
+                sdp: "v=offer\r\n".to_string(),
+            }),
+            version: Some(RealtimeConversationVersion::V3),
+            voice: None,
+        }))
+        .await?;
+
+    let created = wait_for_event_match(&test.codex, |msg| match msg {
+        EventMsg::RealtimeConversationSdp(created) => Some(Ok(created.clone())),
+        EventMsg::Error(err) => Some(Err(err.clone())),
+        _ => None,
+    })
+    .await
+    .expect("conversation call create failed");
+    assert_eq!(created.sdp, "v=answer\r\n");
+    assert!(
+        realtime_server
+            .wait_for_handshakes(/*expected*/ 1, Duration::from_secs(2))
+            .await
+    );
+    assert_eq!(
+        realtime_server
+            .single_handshake()
+            .header("authorization")
+            .as_deref(),
+        Some("Bearer header.e30.refreshed")
+    );
+
+    server.verify().await;
+    let requests = server
+        .received_requests()
+        .await
+        .expect("mock server should capture requests");
+    let authorization_headers = requests
+        .iter()
+        .filter(|request| {
+            request
+                .url
+                .path()
+                .ends_with("/backend-api/codex/realtime/calls")
+        })
+        .filter_map(|request| request.headers.get("authorization"))
+        .filter_map(|value| value.to_str().ok())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        authorization_headers,
+        vec![
+            format!("Bearer {INITIAL_ACCESS_TOKEN}"),
+            format!("Bearer {REFRESHED_ACCESS_TOKEN}"),
+        ]
+    );
+
+    test.codex.submit(Op::RealtimeConversationClose).await?;
     realtime_server.shutdown().await;
     Ok(())
 }

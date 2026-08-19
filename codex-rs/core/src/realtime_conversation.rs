@@ -34,6 +34,7 @@ use codex_login::default_client::add_originator_header;
 use codex_login::default_client::default_headers;
 use codex_login::read_openai_api_key_from_env;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_otel::SessionTelemetry;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
@@ -486,6 +487,7 @@ struct RealtimeStart {
     codex_response_handoff_channel_prefixes: Option<BTreeMap<String, Vec<String>>>,
     realtime_call_api_provider: Option<ApiProvider>,
     session_config: RealtimeSessionConfig,
+    session_telemetry: SessionTelemetry,
     model_client: ModelClient,
     sdp: Option<String>,
     existing_call_id: Option<String>,
@@ -564,6 +566,7 @@ impl RealtimeConversationManager {
             codex_response_handoff_channel_prefixes,
             realtime_call_api_provider,
             session_config,
+            session_telemetry,
             model_client,
             sdp,
             existing_call_id,
@@ -622,6 +625,7 @@ impl RealtimeConversationManager {
                     session_config.clone(),
                     extra_headers.unwrap_or_default(),
                     realtime_call_api_provider,
+                    &session_telemetry,
                 )
                 .await?;
             let task = spawn_webrtc_sideband_input_task(RealtimeWebrtcSidebandInputTask {
@@ -1604,6 +1608,7 @@ async fn handle_start_inner(
         codex_response_handoff_channel_prefixes,
         realtime_call_api_provider,
         session_config,
+        session_telemetry: sess.services.session_telemetry.clone(),
         model_client: sess.services.model_client.clone(),
         sdp,
         existing_call_id,
