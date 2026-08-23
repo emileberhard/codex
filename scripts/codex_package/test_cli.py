@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from codex_package.cli import parse_package_version
+from codex_package.cli import parse_package_version, resolve_source_commit
 
 
 class PackageVersionTest(unittest.TestCase):
@@ -42,6 +46,49 @@ class PackageVersionTest(unittest.TestCase):
             with self.subTest(version=version):
                 with self.assertRaises(argparse.ArgumentTypeError):
                     parse_package_version(version)
+
+
+class SourceProvenanceTest(unittest.TestCase):
+    def test_source_commit_comes_from_a_clean_git_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.email", "test@example.com"],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "-C", str(root), "config", "user.name", "Test"], check=True
+            )
+            tracked = root / "tracked"
+            tracked.write_text("clean", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "tracked"], check=True)
+            subprocess.run(
+                ["git", "-C", str(root), "commit", "-m", "test"],
+                check=True,
+                capture_output=True,
+            )
+            expected = subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+            with patch.dict(
+                os.environ,
+                {"CODEX_REPO_ROOT": str(root)},
+                clear=False,
+            ):
+                os.environ.pop("CODEX_SOURCE_COMMIT", None)
+                self.assertEqual(resolve_source_commit(), expected)
+                os.environ["CODEX_SOURCE_COMMIT"] = "wrong"
+                with self.assertRaisesRegex(RuntimeError, "does not match Git HEAD"):
+                    resolve_source_commit()
+                os.environ.pop("CODEX_SOURCE_COMMIT", None)
+                tracked.write_text("dirty", encoding="utf-8")
+                with self.assertRaisesRegex(RuntimeError, "source tree is dirty"):
+                    resolve_source_commit()
 
 
 if __name__ == "__main__":

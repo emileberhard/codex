@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import os
 import shutil
 import stat
 from pathlib import Path
@@ -36,6 +35,8 @@ def build_package_dir(
     variant: PackageVariant,
     spec: TargetSpec,
     inputs: PackageInputs,
+    *,
+    source_commit: str,
 ) -> None:
     bin_dir = package_dir / "bin"
     resources_dir = package_dir / "codex-resources"
@@ -89,6 +90,7 @@ def build_package_dir(
         "entrypoint": f"bin/{entrypoint_name}",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
+        "sourceCommit": source_commit,
         "binaries": {
             f"bin/{entrypoint_name}": {
                 "sha256": sha256(bin_dir / entrypoint_name),
@@ -98,8 +100,6 @@ def build_package_dir(
             },
         },
     }
-    if source_commit := os.environ.get("CODEX_SOURCE_COMMIT"):
-        metadata["sourceCommit"] = source_commit
     write_json(package_dir / "codex-package.json", metadata)
 
 

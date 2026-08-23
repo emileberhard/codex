@@ -1,7 +1,9 @@
 """Command-line interface for building Codex package directories."""
 
 import argparse
+import os
 import re
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -28,6 +30,49 @@ SEMVER_PATTERN = re.compile(
     r"(?:-(?P<prerelease>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
     r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
 )
+
+
+def resolve_source_commit() -> str:
+    repo_root = Path(
+        os.environ.get("CODEX_REPO_ROOT", Path(__file__).resolve().parents[2])
+    ).resolve()
+    try:
+        git_root = Path(
+            subprocess.run(
+                ["git", "-C", str(repo_root), "rev-parse", "--show-toplevel"],
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        ).resolve()
+        commit = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(
+            f"Could not establish Codex source provenance: {exc}"
+        ) from None
+    if git_root != repo_root:
+        raise RuntimeError(
+            f"Codex source root {repo_root} does not match Git root {git_root}"
+        )
+    if dirty:
+        raise RuntimeError(f"Codex source tree is dirty: {repo_root}")
+    claimed_commit = os.environ.get("CODEX_SOURCE_COMMIT")
+    if claimed_commit is not None and claimed_commit != commit:
+        raise RuntimeError(
+            f"CODEX_SOURCE_COMMIT {claimed_commit} does not match Git HEAD {commit}"
+        )
+    return commit
 
 
 def parse_package_version(value: str) -> str:
@@ -224,7 +269,14 @@ def main() -> int:
         codex_windows_sandbox_setup_bin=source_outputs.codex_windows_sandbox_setup_bin,
     )
     prepare_package_dir(package_dir, force=args.force)
-    build_package_dir(package_dir, args.package_version, variant, spec, inputs)
+    build_package_dir(
+        package_dir,
+        args.package_version,
+        variant,
+        spec,
+        inputs,
+        source_commit=resolve_source_commit(),
+    )
     validate_package_dir(
         package_dir, variant, spec, include_zsh=inputs.zsh_bin is not None
     )

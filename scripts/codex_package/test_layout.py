@@ -2,12 +2,10 @@
 
 import hashlib
 import json
-import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -47,7 +45,14 @@ class PackageLayoutTest(unittest.TestCase):
                             codex_windows_sandbox_setup_bin=None,
                         )
 
-                        build_package_dir(package_dir, "1.2.3", variant, spec, inputs)
+                        build_package_dir(
+                            package_dir,
+                            "1.2.3",
+                            variant,
+                            spec,
+                            inputs,
+                            source_commit="abc123",
+                        )
                         validate_package_dir(
                             package_dir, variant, spec, include_zsh=True
                         )
@@ -90,6 +95,7 @@ class PackageLayoutTest(unittest.TestCase):
                 PACKAGE_VARIANTS["codex-app-server"],
                 TARGET_SPECS["x86_64-unknown-linux-musl"],
                 inputs,
+                source_commit="abc123",
             )
             validate_package_dir(
                 package_dir,
@@ -119,14 +125,14 @@ class PackageLayoutTest(unittest.TestCase):
                 codex_windows_sandbox_setup_bin=None,
             )
 
-            with patch.dict(os.environ, {"CODEX_SOURCE_COMMIT": "abc123"}):
-                build_package_dir(
-                    package_dir,
-                    "1.2.3",
-                    PACKAGE_VARIANTS["codex-app-server"],
-                    TARGET_SPECS["x86_64-unknown-linux-musl"],
-                    inputs,
-                )
+            build_package_dir(
+                package_dir,
+                "1.2.3",
+                PACKAGE_VARIANTS["codex-app-server"],
+                TARGET_SPECS["x86_64-unknown-linux-musl"],
+                inputs,
+                source_commit="abc123",
+            )
 
             metadata = json.loads(
                 (package_dir / "codex-package.json").read_text(encoding="utf-8")
