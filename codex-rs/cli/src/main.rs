@@ -677,7 +677,7 @@ enum AppServerSubcommand {
     /// Manage the local app-server daemon.
     Daemon(AppServerDaemonCommand),
 
-    /// Proxy stdio bytes to the running app-server control socket.
+    /// Bridge JSONL stdio to the running app-server WebSocket control socket.
     Proxy(AppServerProxyCommand),
 
     /// [experimental] Generate TypeScript bindings for the app server protocol.

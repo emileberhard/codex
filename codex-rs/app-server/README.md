@@ -39,9 +39,10 @@ Websocket transport is currently experimental and unsupported. Do not rely on it
 Pass `--code-mode-host URL` to connect this app-server process to a remote code-mode host instead of starting a local host. Use `ws://` or `wss://` for the WebSocket protocol, or a root `http://` or `https://` URL without a path or query for gRPC. Remote hosts require the `code_mode_host` feature. This outbound connection is independent of `--listen` and is shared by the process's threads.
 
 The unix socket transport is intended for local app-server control-plane clients. `codex app-server proxy`
-opens exactly one raw stream connection to `$CODEX_HOME/app-server-control/app-server-control.sock`
-by default, or to `--sock PATH` when provided, and proxies bytes between that socket and stdin/stdout.
-The proxied stream carries the websocket HTTP Upgrade handshake followed by websocket frames.
+opens one websocket connection to `$CODEX_HOME/app-server-control/app-server-control.sock` by default,
+or to `--sock PATH` when provided. It reads newline-delimited JSON-RPC from stdin, sends each line as a
+websocket text frame, and writes received text frames to stdout as JSONL. On stdin EOF, it drains responses
+for requests already sent before closing the websocket.
 
 Tracing/log output:
 

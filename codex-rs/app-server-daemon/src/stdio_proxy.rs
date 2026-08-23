@@ -1,8 +1,11 @@
+use std::collections::HashSet;
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use codex_app_server_protocol::JSONRPCMessage;
 use futures::SinkExt;
 use futures::StreamExt;
 use tokio::io::AsyncBufReadExt;
@@ -10,10 +13,14 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
+use tokio::time::Instant;
+use tokio::time::sleep_until;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::client;
+
+const EOF_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Relays newline-delimited JSON-RPC between stdio and the app-server's
 /// WebSocket control socket.
@@ -33,20 +40,51 @@ where
     W: AsyncWrite + Unpin,
 {
     let mut input_lines = BufReader::new(input).lines();
+    let mut input_closed = false;
+    let mut pending_requests = HashSet::new();
+    let mut drain_deadline = Instant::now();
     loop {
+        if input_closed && pending_requests.is_empty() {
+            websocket.close(None).await.ok();
+            break;
+        }
+
         tokio::select! {
-            line = input_lines.next_line() => match line.context("failed to read proxy stdin")? {
-                Some(line) => websocket
-                    .send(Message::Text(line.into()))
-                    .await
-                    .context("failed to send app-server message")?,
-                None => {
-                    websocket.close(None).await.ok();
-                    break;
+            line = input_lines.next_line(), if !input_closed => match line.context("failed to read proxy stdin")? {
+                Some(line) => {
+                    if let Ok(JSONRPCMessage::Request(request)) = serde_json::from_str(&line)
+                    {
+                        pending_requests.insert(request.id);
+                    }
+                    websocket
+                        .send(Message::Text(line.into()))
+                        .await
+                        .context("failed to send app-server message")?;
                 }
+                None => {
+                    input_closed = true;
+                    drain_deadline = Instant::now() + EOF_DRAIN_TIMEOUT;
+                }
+            },
+            () = sleep_until(drain_deadline), if input_closed => {
+                bail!(
+                    "timed out draining {} app-server response(s) after proxy stdin closed",
+                    pending_requests.len()
+                );
             },
             message = websocket.next() => match message {
                 Some(Ok(Message::Text(text))) => {
+                    if let Ok(message) = serde_json::from_str(&text) {
+                        match message {
+                            JSONRPCMessage::Response(response) => {
+                                pending_requests.remove(&response.id);
+                            }
+                            JSONRPCMessage::Error(error) => {
+                                pending_requests.remove(&error.id);
+                            }
+                            JSONRPCMessage::Request(_) | JSONRPCMessage::Notification(_) => {}
+                        }
+                    }
                     output
                         .write_all(text.as_bytes())
                         .await
@@ -62,7 +100,15 @@ where
                     .await
                     .context("failed to answer app-server ping")?,
                 Some(Ok(Message::Pong(_))) => {}
-                Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(Message::Close(_))) | None => {
+                    if input_closed && !pending_requests.is_empty() {
+                        bail!(
+                            "app-server closed with {} pending response(s) after proxy stdin closed",
+                            pending_requests.len()
+                        );
+                    }
+                    break;
+                },
                 Some(Ok(Message::Binary(_))) => {
                     bail!("app-server sent unexpected binary WebSocket content")
                 }
@@ -83,7 +129,6 @@ mod tests {
     use tokio::io::AsyncBufReadExt;
     use tokio::io::AsyncWriteExt;
     use tokio::io::BufReader;
-    use tokio::time::Duration;
     use tokio::time::timeout;
     use tokio_tungstenite::accept_async;
 
@@ -118,6 +163,49 @@ mod tests {
         )
         .await??;
         assert_eq!(response, "response\n");
+
+        timeout(Duration::from_secs(1), server).await???;
+        timeout(Duration::from_secs(1), proxy).await???;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn drains_pending_response_after_input_eof() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let socket_path = temp_dir.path().join("app-server.sock");
+        let mut listener = UnixListener::bind(&socket_path).await?;
+
+        let server = tokio::spawn(async move {
+            let stream = listener.accept().await?;
+            let mut websocket = accept_async(stream).await?;
+            assert_eq!(
+                websocket.next().await.transpose()?,
+                Some(Message::Text(r#"{"id":1,"method":"config/read"}"#.into()))
+            );
+            websocket
+                .send(Message::Text(r#"{"id":1,"result":{}}"#.into()))
+                .await?;
+            websocket.close(None).await?;
+            anyhow::Ok(())
+        });
+
+        let websocket = client::connect(&socket_path).await?;
+        let (mut input_writer, input_reader) = tokio::io::duplex(1024);
+        let (output_writer, output_reader) = tokio::io::duplex(1024);
+        let proxy = tokio::spawn(proxy_streams(websocket, input_reader, output_writer));
+
+        input_writer
+            .write_all(b"{\"id\":1,\"method\":\"config/read\"}\n")
+            .await?;
+        drop(input_writer);
+
+        let mut response = String::new();
+        timeout(
+            Duration::from_secs(1),
+            BufReader::new(output_reader).read_line(&mut response),
+        )
+        .await??;
+        assert_eq!(response, "{\"id\":1,\"result\":{}}\n");
 
         timeout(Duration::from_secs(1), server).await???;
         timeout(Duration::from_secs(1), proxy).await???;
