@@ -13,6 +13,7 @@ use std::time::Duration;
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::anyhow;
+use anyhow::bail;
 pub use backend::BackendKind;
 use backend::BackendPaths;
 use codex_app_server_protocol::RemoteControlConnectionStatus;
@@ -40,6 +41,8 @@ const STATE_DIR_NAME: &str = "app-server-daemon";
 pub enum LifecycleCommand {
     Start,
     Restart,
+    PrepareRestart,
+    CancelRestart,
     Stop,
     Version,
 }
@@ -151,6 +154,8 @@ pub struct RemoteControlOutput {
     pub status: RemoteControlStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<BackendKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
     pub remote_control_enabled: bool,
     pub socket_path: PathBuf,
     pub cli_version: String,
@@ -288,6 +293,14 @@ impl Daemon {
                 let _operation_lock = self.acquire_operation_lock().await?;
                 self.restart().await
             }
+            LifecycleCommand::PrepareRestart => {
+                let _operation_lock = self.acquire_operation_lock().await?;
+                self.set_restart_prepared(true).await
+            }
+            LifecycleCommand::CancelRestart => {
+                let _operation_lock = self.acquire_operation_lock().await?;
+                self.set_restart_prepared(false).await
+            }
             LifecycleCommand::Stop => {
                 let _operation_lock = self.acquire_operation_lock().await?;
                 self.stop().await
@@ -299,31 +312,44 @@ impl Daemon {
     async fn start(&self) -> Result<LifecycleOutput> {
         let settings = self.load_settings().await?;
         if let Ok(info) = client::probe(&self.socket_path).await {
-            return Ok(self
-                .output(
-                    LifecycleStatus::AlreadyRunning,
-                    self.running_backend(&settings).await?,
-                    /*pid*/ None,
-                    Some(info.app_server_version),
-                )
-                .await);
-        }
-
-        if self.running_backend_instance(&settings).await?.is_some() {
-            let info = self.wait_until_ready().await?;
+            let Some(backend) = self.running_backend_instance(&settings).await? else {
+                return Err(anyhow!(
+                    "app server is running but is not managed by codex app-server daemon"
+                ));
+            };
+            let pid = self.verify_probe_owner(&backend, info.process_id).await?;
             return Ok(self
                 .output(
                     LifecycleStatus::AlreadyRunning,
                     Some(BackendKind::Pid),
-                    /*pid*/ None,
+                    Some(pid),
                     Some(info.app_server_version),
                 )
                 .await);
         }
 
+        if let Some(backend) = self.running_backend_instance(&settings).await? {
+            let pid = backend
+                .running_pid()
+                .await?
+                .ok_or_else(|| anyhow!("managed app server disappeared before readiness probe"))?;
+            let info = self.wait_until_ready(pid).await?;
+            return Ok(self
+                .output(
+                    LifecycleStatus::AlreadyRunning,
+                    Some(BackendKind::Pid),
+                    Some(pid),
+                    Some(info.app_server_version),
+                )
+                .await);
+        }
+
+        self.ensure_app_server_absent().await?;
         self.ensure_managed_codex_bin()?;
         let pid = self.start_managed_backend(&settings).await?;
-        let info = self.wait_until_ready().await?;
+        let expected_pid =
+            pid.ok_or_else(|| anyhow!("managed app server start omitted its pid"))?;
+        let info = self.wait_until_ready(expected_pid).await?;
         Ok(self
             .output(
                 LifecycleStatus::Started,
@@ -336,12 +362,13 @@ impl Daemon {
 
     async fn restart(&self) -> Result<LifecycleOutput> {
         let settings = self.load_settings().await?;
-        if client::probe(&self.socket_path).await.is_ok()
-            && self.running_backend(&settings).await?.is_none()
-        {
-            return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
-            ));
+        if let Ok(info) = client::probe(&self.socket_path).await {
+            let Some(backend) = self.running_backend_instance(&settings).await? else {
+                return Err(anyhow!(
+                    "app server is running but is not managed by codex app-server daemon"
+                ));
+            };
+            self.verify_probe_owner(&backend, info.process_id).await?;
         }
 
         self.ensure_managed_codex_bin()?;
@@ -349,8 +376,11 @@ impl Daemon {
             backend.stop().await?;
         }
 
+        self.ensure_app_server_absent().await?;
         let pid = self.start_managed_backend(&settings).await?;
-        let info = self.wait_until_ready().await?;
+        let expected_pid =
+            pid.ok_or_else(|| anyhow!("managed app server start omitted its pid"))?;
+        let info = self.wait_until_ready(expected_pid).await?;
         Ok(self
             .output(
                 LifecycleStatus::Restarted,
@@ -359,6 +389,154 @@ impl Daemon {
                 Some(info.app_server_version),
             )
             .await)
+    }
+
+    async fn set_restart_prepared(&self, prepared: bool) -> Result<LifecycleOutput> {
+        let settings = self.load_settings().await?;
+        let Some(backend) = self.running_backend_instance(&settings).await? else {
+            self.ensure_app_server_absent().await?;
+            return Ok(self
+                .output(
+                    LifecycleStatus::NotRunning,
+                    /*backend*/ None,
+                    /*pid*/ None,
+                    /*app_server_version*/ None,
+                )
+                .await);
+        };
+
+        let pid = backend
+            .running_pid()
+            .await?
+            .ok_or_else(|| anyhow!("managed app server disappeared before restart preparation"))?;
+        let initial = client::probe_new_work_admission_fenced(&self.socket_path)
+            .await
+            .context("managed app server does not support verified restart admission fencing")?;
+        self.verify_probe_owner(&backend, initial.process_id)
+            .await?;
+        let desired = if prepared {
+            initial.closed && initial.fenced
+        } else {
+            !initial.closed && !initial.fenced
+        };
+        if desired {
+            return Ok(self
+                .output(
+                    LifecycleStatus::Running,
+                    Some(BackendKind::Pid),
+                    Some(pid),
+                    Some(initial.app_server_version),
+                )
+                .await);
+        }
+
+        backend.signal_restart_prepared(pid, prepared).await?;
+        let info = match self
+            .wait_for_restart_preparation(&backend, pid, prepared)
+            .await
+        {
+            Ok(info) => info,
+            Err(error) if prepared => {
+                let cancellation = async {
+                    backend.signal_restart_prepared(pid, false).await?;
+                    self.wait_for_restart_preparation(&backend, pid, false)
+                        .await
+                }
+                .await;
+                return match cancellation {
+                    Ok(_) => Err(error).context(
+                        "restart preparation was not acknowledged; admission was reopened",
+                    ),
+                    Err(cancel_error) => Err(error).context(format!(
+                        "restart preparation was not acknowledged and admission could not be reopened: {cancel_error:#}"
+                    )),
+                };
+            }
+            Err(error) => return Err(error),
+        };
+        Ok(self
+            .output(
+                LifecycleStatus::Running,
+                Some(BackendKind::Pid),
+                Some(pid),
+                Some(info.app_server_version),
+            )
+            .await)
+    }
+
+    async fn wait_for_restart_preparation(
+        &self,
+        backend: &backend::PidBackend,
+        expected_pid: u32,
+        prepared: bool,
+    ) -> Result<client::WorkAdmissionProbe> {
+        let deadline = tokio::time::Instant::now() + START_TIMEOUT;
+        loop {
+            match client::probe_new_work_admission_fenced(&self.socket_path).await {
+                Ok(info)
+                    if info.process_id == expected_pid
+                        && ((prepared && info.closed && info.fenced)
+                            || (!prepared && !info.closed && !info.fenced)) =>
+                {
+                    return Ok(info);
+                }
+                Ok(info) if info.process_id != expected_pid => {
+                    return Err(anyhow!(
+                        "app-server socket owner changed from pid {expected_pid} to {} while waiting for restart preparation",
+                        info.process_id
+                    ));
+                }
+                Ok(_) if tokio::time::Instant::now() < deadline => {}
+                Err(error) => {
+                    match backend.running_pid().await? {
+                        Some(pid) if pid == expected_pid => {}
+                        Some(pid) => {
+                            return Err(anyhow!(
+                                "managed app server changed from pid {expected_pid} to {pid} while waiting for restart preparation"
+                            ));
+                        }
+                        None => {
+                            return Err(error).context(format!(
+                                "managed app server pid {expected_pid} disappeared while waiting for restart preparation"
+                            ));
+                        }
+                    }
+                    if tokio::time::Instant::now() >= deadline {
+                        return Err(error).context("restart admission probe timed out");
+                    }
+                }
+                Ok(_) => {
+                    return Err(anyhow!(
+                        "app server did not acknowledge restart admission {}",
+                        if prepared { "fencing" } else { "reopening" }
+                    ));
+                }
+            }
+            sleep(START_POLL_INTERVAL).await;
+        }
+    }
+
+    async fn ensure_app_server_absent(&self) -> Result<()> {
+        match client::probe(&self.socket_path).await {
+            Ok(_) => Err(anyhow!(
+                "app server is running but is not managed by codex app-server daemon"
+            )),
+            Err(probe_error) => match self.socket_path.try_exists() {
+                Ok(false) => Ok(()),
+                Ok(true) => Err(probe_error).with_context(|| {
+                    format!(
+                        "app-server socket {} exists but its owner could not be verified",
+                        self.socket_path.display()
+                    )
+                }),
+                Err(stat_error) => Err(stat_error).with_context(|| {
+                    format!(
+                        "failed to verify whether app-server socket {} exists",
+                        self.socket_path.display()
+                    )
+                }),
+            },
+        }
     }
 
     #[cfg(unix)]
@@ -375,6 +553,9 @@ impl Daemon {
         let settings = self.load_settings().await?;
         let outcome = if let Some(backend) = self.running_backend_instance(&settings).await? {
             let info = client::probe(&self.socket_path).await.ok();
+            if let Some(info) = info.as_ref() {
+                self.verify_probe_owner(&backend, info.process_id).await?;
+            }
             let managed_version = if info.is_some() {
                 Some(managed_codex_version(managed_codex_bin).await?)
             } else {
@@ -385,18 +566,17 @@ impl Daemon {
                 RestartDecision::AlreadyCurrent => RestartIfRunningOutcome::AlreadyCurrent,
                 RestartDecision::Restart => {
                     backend.stop().await?;
-                    let _ = self
+                    self.ensure_app_server_absent().await?;
+                    let pid = self
                         .start_managed_backend_with_bin(&settings, managed_codex_bin)
-                        .await?;
-                    self.wait_until_ready().await?;
+                        .await?
+                        .ok_or_else(|| anyhow!("managed app server start omitted its pid"))?;
+                    self.wait_until_ready(pid).await?;
                     RestartIfRunningOutcome::Restarted
                 }
             }
-        } else if client::probe(&self.socket_path).await.is_ok() {
-            return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
-            ));
         } else {
+            self.ensure_app_server_absent().await?;
             RestartIfRunningOutcome::NotRunning
         };
 
@@ -421,11 +601,7 @@ impl Daemon {
                 .await);
         }
 
-        if client::probe(&self.socket_path).await.is_ok() {
-            return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
-            ));
-        }
+        self.ensure_app_server_absent().await?;
 
         Ok(self
             .output(
@@ -440,21 +616,31 @@ impl Daemon {
     async fn version(&self) -> Result<LifecycleOutput> {
         let settings = self.load_settings().await?;
         let info = client::probe(&self.socket_path).await?;
+        let Some(backend) = self.running_backend_instance(&settings).await? else {
+            return Err(anyhow!(
+                "app server is running but is not managed by codex app-server daemon"
+            ));
+        };
+        let pid = self.verify_probe_owner(&backend, info.process_id).await?;
         Ok(self
             .output(
                 LifecycleStatus::Running,
-                self.running_backend(&settings).await?,
-                /*pid*/ None,
+                Some(BackendKind::Pid),
+                Some(pid),
                 Some(info.app_server_version),
             )
             .await)
     }
 
-    async fn wait_until_ready(&self) -> Result<client::ProbeInfo> {
+    async fn wait_until_ready(&self, expected_pid: u32) -> Result<client::ProbeInfo> {
         let deadline = tokio::time::Instant::now() + START_TIMEOUT;
         loop {
             match client::probe(&self.socket_path).await {
-                Ok(info) => return Ok(info),
+                Ok(info) if info.process_id == expected_pid => return Ok(info),
+                Ok(info) => {
+                    verify_process_identity(expected_pid, info.process_id)?;
+                    return Ok(info);
+                }
                 Err(err) if tokio::time::Instant::now() < deadline => {
                     let _ = err;
                     sleep(START_POLL_INTERVAL).await;
@@ -465,6 +651,19 @@ impl Daemon {
                 }
             }
         }
+    }
+
+    async fn verify_probe_owner(
+        &self,
+        backend: &backend::PidBackend,
+        observed_pid: u32,
+    ) -> Result<u32> {
+        let pid = backend
+            .running_pid()
+            .await?
+            .ok_or_else(|| anyhow!("managed app server disappeared during identity probe"))?;
+        verify_process_identity(pid, observed_pid)?;
+        Ok(pid)
     }
 
     async fn app_server_not_ready_context(&self) -> String {
@@ -536,19 +735,22 @@ impl Daemon {
         let remote_control_enabled = mode.is_enabled();
         let backend = self.running_backend_instance(&previous_settings).await?;
 
-        if backend.is_none() && client::probe(&self.socket_path).await.is_ok() {
-            return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
-            ));
+        if backend.is_none() {
+            self.ensure_app_server_absent().await?;
         }
 
-        if settings.remote_control_enabled == remote_control_enabled {
-            let info = if backend.is_some() {
-                Some(self.wait_until_ready().await?)
-            } else {
-                None
-            };
-            if info.is_some() {
+        let changed = settings.remote_control_enabled != remote_control_enabled;
+        if changed {
+            settings.remote_control_enabled = remote_control_enabled;
+            settings.save(&self.settings_file).await?;
+        }
+
+        let info = match backend.as_ref() {
+            Some(backend) => {
+                let pid = backend.running_pid().await?.ok_or_else(|| {
+                    anyhow!("managed app server disappeared before readiness probe")
+                })?;
+                let info = self.wait_until_ready(pid).await?;
                 match mode {
                     RemoteControlMode::Enabled => {
                         remote_control_client::enable_remote_control(&self.socket_path).await?;
@@ -557,32 +759,21 @@ impl Daemon {
                         remote_control_client::disable_remote_control(&self.socket_path).await?;
                     }
                 }
+                Some(info)
             }
-            return Ok(self.remote_control_output(
-                already_remote_control_status(mode),
-                backend.map(|_| BackendKind::Pid),
-                remote_control_enabled,
-                info.map(|info| info.app_server_version),
-            ));
-        }
-
-        settings.remote_control_enabled = remote_control_enabled;
-        settings.save(&self.settings_file).await?;
-
-        let app_server_version = if let Some(backend) = backend {
-            self.ensure_managed_codex_bin()?;
-            backend.stop().await?;
-            let _ = self.start_managed_backend(&settings).await?;
-            Some(self.wait_until_ready().await?.app_server_version)
-        } else {
-            None
+            None => None,
         };
 
         Ok(self.remote_control_output(
-            remote_control_status(mode),
-            app_server_version.as_ref().map(|_| BackendKind::Pid),
+            if changed {
+                remote_control_status(mode)
+            } else {
+                already_remote_control_status(mode)
+            },
+            info.as_ref().map(|_| BackendKind::Pid),
+            info.as_ref().map(|info| info.process_id),
             remote_control_enabled,
-            app_server_version,
+            info.map(|info| info.app_server_version),
         ))
     }
 
@@ -592,12 +783,13 @@ impl Daemon {
         let settings = DaemonSettings {
             remote_control_enabled: options.remote_control_enabled,
         };
-        if client::probe(&self.socket_path).await.is_ok()
-            && self.running_backend(&settings).await?.is_none()
-        {
-            return Err(anyhow!(
-                "app server is running but is not managed by codex app-server daemon"
-            ));
+        if let Ok(info) = client::probe(&self.socket_path).await {
+            let Some(backend) = self.running_backend_instance(&settings).await? else {
+                return Err(anyhow!(
+                    "app server is running but is not managed by codex app-server daemon"
+                ));
+            };
+            self.verify_probe_owner(&backend, info.process_id).await?;
         }
         settings.save(&self.settings_file).await?;
 
@@ -605,15 +797,19 @@ impl Daemon {
             backend.stop().await?;
         }
 
+        self.ensure_app_server_absent().await?;
         let backend = backend::pid_backend(self.backend_paths(&settings));
-        backend.start().await?;
+        let pid = backend
+            .start()
+            .await?
+            .ok_or_else(|| anyhow!("managed app server start omitted its pid"))?;
         let updater = backend::pid_update_loop_backend(self.backend_paths(&settings));
         if updater.is_starting_or_running().await? {
             updater.stop().await?;
         }
         updater.start().await?;
 
-        let info = self.wait_until_ready().await?;
+        let info = self.wait_until_ready(pid).await?;
         let managed_codex_version = self.managed_codex_version_best_effort().await;
         Ok(BootstrapOutput {
             status: BootstrapStatus::Bootstrapped,
@@ -626,13 +822,6 @@ impl Daemon {
             cli_version: env!("CARGO_PKG_VERSION").to_string(),
             app_server_version: info.app_server_version,
         })
-    }
-
-    async fn running_backend(&self, settings: &DaemonSettings) -> Result<Option<BackendKind>> {
-        Ok(self
-            .running_backend_instance(settings)
-            .await?
-            .map(|_| BackendKind::Pid))
     }
 
     async fn running_backend_instance(
@@ -774,18 +963,27 @@ impl Daemon {
         &self,
         status: RemoteControlStatus,
         backend: Option<BackendKind>,
+        pid: Option<u32>,
         remote_control_enabled: bool,
         app_server_version: Option<String>,
     ) -> RemoteControlOutput {
         RemoteControlOutput {
             status,
             backend,
+            pid,
             remote_control_enabled,
             socket_path: self.socket_path.clone(),
             cli_version: env!("CARGO_PKG_VERSION").to_string(),
             app_server_version,
         }
     }
+}
+
+fn verify_process_identity(expected_pid: u32, observed_pid: u32) -> Result<()> {
+    if expected_pid == observed_pid {
+        return Ok(());
+    }
+    bail!("app-server socket owner pid {observed_pid} does not match managed pid {expected_pid}")
 }
 
 fn remote_control_status(mode: RemoteControlMode) -> RemoteControlStatus {
@@ -868,6 +1066,7 @@ mod tests {
     use super::UpdaterRefreshMode;
     use super::restart_decision;
     use super::should_reexec_updater;
+    use super::verify_process_identity;
     use crate::client::ProbeInfo;
 
     #[test]
@@ -911,9 +1110,20 @@ mod tests {
     }
 
     #[test]
+    fn socket_responder_must_match_the_exact_managed_pid() {
+        verify_process_identity(42, 42).expect("matching process");
+        let error = verify_process_identity(42, 43).expect_err("mismatched process");
+        assert_eq!(
+            error.to_string(),
+            "app-server socket owner pid 43 does not match managed pid 42"
+        );
+    }
+
+    #[test]
     fn restart_decision_preserves_forced_refreshes() {
         let current_info = ProbeInfo {
             app_server_version: "0.1.0".to_string(),
+            process_id: 42,
         };
 
         assert_eq!(
@@ -1034,6 +1244,65 @@ mod tests {
                 daemon.managed_codex_bin.display(),
                 stderr_log.display()
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn restart_preparation_requires_positive_socket_absence() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let daemon = Daemon {
+            socket_path: temp_dir.path().join("app-server-control.sock"),
+            pid_file: temp_dir.path().join("app-server.pid"),
+            update_pid_file: temp_dir.path().join("app-server-updater.pid"),
+            operation_lock_file: temp_dir.path().join("daemon.lock"),
+            settings_file: temp_dir.path().join("settings.json"),
+            managed_codex_bin: temp_dir.path().join("missing-codex"),
+        };
+
+        daemon
+            .ensure_app_server_absent()
+            .await
+            .expect("missing socket proves absence");
+        tokio::fs::write(&daemon.socket_path, b"stale or unverified owner")
+            .await
+            .expect("write ambiguous socket path");
+
+        let error = daemon
+            .ensure_app_server_absent()
+            .await
+            .expect_err("an unprobeable existing socket must be ambiguous");
+        assert!(
+            error
+                .to_string()
+                .contains("exists but its owner could not be verified"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[tokio::test]
+    async fn start_rejects_an_unverified_socket_owner() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let daemon = Daemon {
+            socket_path: temp_dir.path().join("app-server-control.sock"),
+            pid_file: temp_dir.path().join("app-server.pid"),
+            update_pid_file: temp_dir.path().join("app-server-updater.pid"),
+            operation_lock_file: temp_dir.path().join("daemon.lock"),
+            settings_file: temp_dir.path().join("settings.json"),
+            managed_codex_bin: temp_dir.path().join("missing-codex"),
+        };
+        tokio::fs::write(&daemon.socket_path, b"unverified owner")
+            .await
+            .expect("write ambiguous socket path");
+
+        let error = daemon
+            .start()
+            .await
+            .expect_err("start must not launch against an ambiguous socket");
+        assert!(
+            error
+                .to_string()
+                .contains("exists but its owner could not be verified"),
+            "unexpected error: {error:#}"
         );
     }
 }

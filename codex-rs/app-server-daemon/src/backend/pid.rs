@@ -182,7 +182,7 @@ impl PidBackend {
             }
         }
 
-        let child = match command.spawn() {
+        let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
                 let _ = fs::remove_file(&self.pid_file).await;
@@ -203,7 +203,7 @@ impl PidBackend {
                 process_start_time,
             },
             Err(err) => {
-                let _ = self.terminate_process(pid);
+                terminate_spawned_child(&mut child).await;
                 let mut context =
                     format!("failed to record pid-managed app-server process {pid} startup");
                 super::append_stderr_log_tail_context(&self.pid_file, &mut context).await;
@@ -211,23 +211,33 @@ impl PidBackend {
                 return Err(err).context(context);
             }
         };
-        let contents = serde_json::to_vec(&record).context("failed to serialize pid record")?;
+        let contents = match serde_json::to_vec(&record) {
+            Ok(contents) => contents,
+            Err(error) => {
+                terminate_spawned_child(&mut child).await;
+                let _ = fs::remove_file(&self.pid_file).await;
+                return Err(error).context("failed to serialize pid record");
+            }
+        };
         let temp_pid_file = self.pid_file.with_extension("pid.tmp");
         if let Err(err) = fs::write(&temp_pid_file, &contents).await {
-            let _ = self.terminate_process(pid);
+            terminate_spawned_child(&mut child).await;
             let _ = fs::remove_file(&self.pid_file).await;
             return Err(err).with_context(|| {
                 format!("failed to write pid temp file {}", temp_pid_file.display())
             });
         }
         if let Err(err) = fs::rename(&temp_pid_file, &self.pid_file).await {
-            let _ = self.terminate_process(pid);
+            terminate_spawned_child(&mut child).await;
             let _ = fs::remove_file(&temp_pid_file).await;
             let _ = fs::remove_file(&self.pid_file).await;
             return Err(err).with_context(|| {
                 format!("failed to publish pid file {}", self.pid_file.display())
             });
         }
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
         drop(reservation_lock);
         Ok(Some(pid))
     }
@@ -282,6 +292,61 @@ impl PidBackend {
                 bail!("timed out waiting for pid-managed app server {pid} to stop");
             }
         }
+    }
+
+    pub(crate) async fn running_pid(&self) -> Result<Option<u32>> {
+        loop {
+            let Some(record) = self.wait_for_pid_start().await? else {
+                return Ok(None);
+            };
+            if !self.record_is_active(&record).await? {
+                match self.refresh_after_stale_record(&record).await? {
+                    PidFileState::Missing => return Ok(None),
+                    PidFileState::Starting | PidFileState::Running(_) => continue,
+                }
+            }
+            return Ok(Some(record.pid));
+        }
+    }
+
+    /// Ask the exact running app-server process to enter or leave its
+    /// restart-preparation fence. Capability probing happens before this call.
+    #[cfg(unix)]
+    pub(crate) async fn signal_restart_prepared(
+        &self,
+        expected_pid: u32,
+        prepared: bool,
+    ) -> Result<()> {
+        let Some(pid) = self.running_pid().await? else {
+            bail!("pid-managed app server disappeared before restart preparation")
+        };
+        if pid != expected_pid {
+            bail!(
+                "pid-managed app server changed from pid {expected_pid} to {pid} during restart preparation"
+            );
+        }
+        send_process_signal(
+            pid,
+            if prepared {
+                libc::SIGHUP
+            } else {
+                libc::SIGUSR1
+            },
+            if prepared {
+                "prepare restart for"
+            } else {
+                "cancel prepared restart for"
+            },
+        )
+    }
+
+    #[cfg(not(unix))]
+    pub(crate) async fn signal_restart_prepared(
+        &self,
+        _expected_pid: u32,
+        _prepared: bool,
+    ) -> Result<()> {
+        bail!("pid-managed app-server restart preparation is unsupported on this platform")
     }
 
     async fn wait_for_pid_start(&self) -> Result<Option<PidRecord>> {
@@ -515,9 +580,14 @@ fn process_exists(pid: u32) -> bool {
 
 #[cfg(unix)]
 fn terminate_process(pid: u32) -> Result<()> {
+    send_process_signal(pid, libc::SIGTERM, "terminate")
+}
+
+#[cfg(unix)]
+fn send_process_signal(pid: u32, signal: libc::c_int, action: &str) -> Result<()> {
     let raw_pid = libc::pid_t::try_from(pid)
         .with_context(|| format!("pid-managed app server pid {pid} is out of range"))?;
-    let result = unsafe { libc::kill(raw_pid, libc::SIGTERM) };
+    let result = unsafe { libc::kill(raw_pid, signal) };
     if result == 0 {
         return Ok(());
     }
@@ -525,22 +595,12 @@ fn terminate_process(pid: u32) -> Result<()> {
     if err.raw_os_error() == Some(libc::ESRCH) {
         return Ok(());
     }
-    Err(err).with_context(|| format!("failed to terminate pid-managed app server {pid}"))
+    Err(err).with_context(|| format!("failed to {action} pid-managed app server {pid}"))
 }
 
 #[cfg(unix)]
 fn force_terminate_process(pid: u32) -> Result<()> {
-    let raw_pid = libc::pid_t::try_from(pid)
-        .with_context(|| format!("pid-managed app server pid {pid} is out of range"))?;
-    let result = unsafe { libc::kill(raw_pid, libc::SIGKILL) };
-    if result == 0 {
-        return Ok(());
-    }
-    let err = std::io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::ESRCH) {
-        return Ok(());
-    }
-    Err(err).with_context(|| format!("failed to force terminate pid-managed app server {pid}"))
+    send_process_signal(pid, libc::SIGKILL, "force terminate")
 }
 
 #[cfg(unix)]
@@ -579,11 +639,63 @@ async fn process_matches_record(record: &PidRecord) -> Result<bool> {
         return Ok(false);
     }
 
+    match read_process_state(record.pid).await {
+        Ok(state) if state.starts_with('Z') => {
+            reap_child_if_owned(record.pid)?;
+            return Ok(false);
+        }
+        Ok(_) => {}
+        Err(_err) if !process_exists(record.pid) => return Ok(false),
+        Err(err) => return Err(err),
+    }
+
     match read_process_start_time(record.pid).await {
         Ok(start_time) => Ok(start_time == record.process_start_time),
         Err(_err) if !process_exists(record.pid) => Ok(false),
         Err(err) => Err(err),
     }
+}
+
+#[cfg(unix)]
+fn reap_child_if_owned(pid: u32) -> Result<()> {
+    let raw_pid = libc::pid_t::try_from(pid)
+        .with_context(|| format!("pid-managed app server pid {pid} is out of range"))?;
+    let mut status = 0;
+    let result = unsafe { libc::waitpid(raw_pid, &mut status, libc::WNOHANG) };
+    if result == raw_pid || result == 0 {
+        return Ok(());
+    }
+    let error = std::io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ECHILD) {
+        return Ok(());
+    }
+    Err(error).with_context(|| format!("failed to reap pid-managed app server {pid}"))
+}
+
+#[cfg(unix)]
+async fn terminate_spawned_child(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+#[cfg(unix)]
+async fn read_process_state(pid: u32) -> Result<String> {
+    let output = Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .await
+        .with_context(|| format!("failed to inspect process state for pid {pid}"))?;
+    if !output.status.success() {
+        bail!("failed to inspect process state for pid {pid}");
+    }
+    let state = String::from_utf8(output.stdout)
+        .context("process state output was not valid UTF-8")?
+        .trim()
+        .to_string();
+    if state.is_empty() {
+        bail!("process state was empty for pid {pid}");
+    }
+    Ok(state)
 }
 
 #[cfg(not(unix))]
@@ -697,24 +809,88 @@ async fn inspect_empty_pid_reservation(
     Ok(EmptyPidReservation::Stale)
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 async fn read_process_start_time(pid: u32) -> Result<String> {
-    let output = Command::new("ps")
-        .args(["-p", &pid.to_string(), "-o", "lstart="])
-        .output()
-        .await
-        .context("failed to invoke ps for pid-managed app server")?;
-    if !output.status.success() {
-        bail!("failed to read start time for pid-managed app server {pid}");
+    const PROC_PIDTBSDINFO: libc::c_int = 3;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct ProcBsdInfo {
+        pbi_flags: u32,
+        pbi_status: u32,
+        pbi_xstatus: u32,
+        pbi_pid: u32,
+        pbi_ppid: u32,
+        pbi_uid: u32,
+        pbi_gid: u32,
+        pbi_ruid: u32,
+        pbi_rgid: u32,
+        pbi_svuid: u32,
+        pbi_svgid: u32,
+        rfu_1: u32,
+        pbi_comm: [u8; 16],
+        pbi_name: [u8; 32],
+        pbi_nfiles: u32,
+        pbi_pgid: u32,
+        pbi_pjobc: u32,
+        e_tdev: u32,
+        e_tpgid: u32,
+        pbi_nice: i32,
+        pbi_start_tvsec: u64,
+        pbi_start_tvusec: u64,
     }
 
-    let start_time = String::from_utf8(output.stdout)
-        .context("pid-managed app server start time was not utf-8")?;
-    let start_time = start_time.trim();
-    if start_time.is_empty() {
-        bail!("pid-managed app server {pid} has no recorded start time");
+    unsafe extern "C" {
+        fn proc_pidinfo(
+            pid: libc::c_int,
+            flavor: libc::c_int,
+            arg: u64,
+            buffer: *mut libc::c_void,
+            buffersize: libc::c_int,
+        ) -> libc::c_int;
     }
-    Ok(start_time.to_string())
+
+    let raw_pid = libc::c_int::try_from(pid)
+        .with_context(|| format!("pid-managed app server pid {pid} is out of range"))?;
+    let mut info = ProcBsdInfo::default();
+    let expected_size = std::mem::size_of::<ProcBsdInfo>();
+    let actual_size = unsafe {
+        proc_pidinfo(
+            raw_pid,
+            PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut ProcBsdInfo).cast(),
+            libc::c_int::try_from(expected_size).context("proc_bsdinfo size is out of range")?,
+        )
+    };
+    if usize::try_from(actual_size).ok() != Some(expected_size) {
+        bail!("failed to read kernel start time for pid-managed app server {pid}");
+    }
+    Ok(format!(
+        "macos:{}:{}",
+        info.pbi_start_tvsec, info.pbi_start_tvusec
+    ))
+}
+
+#[cfg(target_os = "linux")]
+async fn read_process_start_time(pid: u32) -> Result<String> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat"))
+        .await
+        .with_context(|| format!("failed to read kernel start time for pid {pid}"))?;
+    let fields = stat
+        .rsplit_once(") ")
+        .map(|(_, fields)| fields)
+        .ok_or_else(|| anyhow::anyhow!("invalid /proc/{pid}/stat process identity"))?;
+    let start_ticks = fields
+        .split_whitespace()
+        .nth(19)
+        .ok_or_else(|| anyhow::anyhow!("/proc/{pid}/stat omitted process start ticks"))?;
+    Ok(format!("linux:{start_ticks}"))
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+async fn read_process_start_time(pid: u32) -> Result<String> {
+    bail!("kernel process identity is unsupported for pid-managed app server {pid}")
 }
 
 #[cfg(all(test, unix))]

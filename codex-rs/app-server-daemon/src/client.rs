@@ -12,6 +12,8 @@ use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::JSONRPCNotification;
 use codex_app_server_protocol::JSONRPCRequest;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ServerDiagnosticsParams;
+use codex_app_server_protocol::ServerDiagnosticsResponse;
 use codex_uds::UnixStream;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -25,10 +27,22 @@ use tokio_tungstenite::tungstenite::Message;
 pub(crate) const CONTROL_SOCKET_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENT_NAME: &str = "codex_app_server_daemon";
 const INITIALIZE_REQUEST_ID: RequestId = RequestId::Integer(1);
+const DIAGNOSTICS_REQUEST_ID: RequestId = RequestId::Integer(2);
+const NEW_WORK_ADMISSION_FENCED_GAUGE: &str = "app.work.new_admission_fenced";
+const NEW_WORK_ADMISSION_CLOSED_GAUGE: &str = "app.work.new_admission_closed";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProbeInfo {
     pub(crate) app_server_version: String,
+    pub(crate) process_id: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkAdmissionProbe {
+    pub(crate) app_server_version: String,
+    pub(crate) process_id: u32,
+    pub(crate) closed: bool,
+    pub(crate) fenced: bool,
 }
 
 pub(crate) async fn probe(socket_path: &Path) -> Result<ProbeInfo> {
@@ -45,7 +59,7 @@ pub(crate) async fn probe(socket_path: &Path) -> Result<ProbeInfo> {
 async fn probe_inner(socket_path: &Path) -> Result<ProbeInfo> {
     let mut websocket = connect(socket_path).await?;
 
-    let initialize_response = initialize(&mut websocket, /*experimental_api*/ false).await?;
+    let initialize_response = initialize(&mut websocket, /*experimental_api*/ true).await?;
     let initialized = JSONRPCMessage::Notification(JSONRPCNotification {
         method: "initialized".to_string(),
         params: None,
@@ -53,11 +67,108 @@ async fn probe_inner(socket_path: &Path) -> Result<ProbeInfo> {
     send_message(&mut websocket, &initialized)
         .await
         .context("failed to send initialized notification")?;
+    let diagnostics = request_diagnostics(&mut websocket).await?;
     websocket.close(None).await.ok();
 
     Ok(ProbeInfo {
         app_server_version: parse_version_from_user_agent(&initialize_response.user_agent)?,
+        process_id: diagnostics.process.id,
     })
+}
+
+pub(crate) async fn probe_new_work_admission_fenced(
+    socket_path: &Path,
+) -> Result<WorkAdmissionProbe> {
+    timeout(
+        CONTROL_SOCKET_RESPONSE_TIMEOUT,
+        probe_new_work_admission_fenced_inner(socket_path),
+    )
+    .await
+    .with_context(|| {
+        format!(
+            "timed out probing restart admission fence on {}",
+            socket_path.display()
+        )
+    })?
+}
+
+async fn probe_new_work_admission_fenced_inner(socket_path: &Path) -> Result<WorkAdmissionProbe> {
+    let mut websocket = connect(socket_path).await?;
+    let initialize_response = initialize(&mut websocket, /*experimental_api*/ true).await?;
+    send_message(
+        &mut websocket,
+        &JSONRPCMessage::Notification(JSONRPCNotification {
+            method: "initialized".to_string(),
+            params: None,
+        }),
+    )
+    .await
+    .context("failed to send initialized notification")?;
+    let diagnostics = request_diagnostics(&mut websocket).await?;
+    websocket.close(None).await.ok();
+    let gauge_value = |name: &str| -> Result<bool> {
+        let gauge = diagnostics
+            .gauges
+            .iter()
+            .find(|gauge| gauge.name == name)
+            .ok_or_else(|| anyhow!("server/diagnostics omitted {name}"))?;
+        match gauge.value {
+            0 => Ok(false),
+            1 => Ok(true),
+            value => Err(anyhow!(
+                "server/diagnostics returned invalid {name} value {value}"
+            )),
+        }
+    };
+    let closed = gauge_value(NEW_WORK_ADMISSION_CLOSED_GAUGE)?;
+    let fenced = gauge_value(NEW_WORK_ADMISSION_FENCED_GAUGE)?;
+    if fenced && !closed {
+        return Err(anyhow!(
+            "server/diagnostics reported a settled restart fence with admission open"
+        ));
+    }
+
+    Ok(WorkAdmissionProbe {
+        app_server_version: parse_version_from_user_agent(&initialize_response.user_agent)?,
+        process_id: diagnostics.process.id,
+        closed,
+        fenced,
+    })
+}
+
+async fn request_diagnostics<S>(
+    websocket: &mut WebSocketStream<S>,
+) -> Result<ServerDiagnosticsResponse>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    send_message(
+        websocket,
+        &JSONRPCMessage::Request(JSONRPCRequest {
+            id: DIAGNOSTICS_REQUEST_ID.clone(),
+            method: "server/diagnostics".to_string(),
+            params: Some(serde_json::to_value(ServerDiagnosticsParams::default())?),
+            trace: None,
+        }),
+    )
+    .await
+    .context("failed to request app-server diagnostics")?;
+    let response = loop {
+        match read_message(websocket).await? {
+            JSONRPCMessage::Response(response) if response.id == DIAGNOSTICS_REQUEST_ID => {
+                break response;
+            }
+            JSONRPCMessage::Error(error) if error.id == DIAGNOSTICS_REQUEST_ID => {
+                return Err(anyhow!(
+                    "server/diagnostics failed: {}",
+                    error.error.message
+                ));
+            }
+            _ => {}
+        }
+    };
+    serde_json::from_value::<ServerDiagnosticsResponse>(response.result)
+        .context("failed to parse server/diagnostics response")
 }
 
 pub(crate) async fn connect(socket_path: &Path) -> Result<WebSocketStream<UnixStream>> {

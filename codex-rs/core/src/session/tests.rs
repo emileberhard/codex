@@ -7051,6 +7051,7 @@ async fn submit_with_trace_captures_current_span_trace_context() {
             /*trace*/ None,
             /*parent_turn_id*/ None,
             /*root_turn_id*/ None,
+            /*new_work_admission*/ None,
         )
         .await
         .expect("submit should succeed");
@@ -7124,6 +7125,7 @@ fn submission_dispatch_span_prefers_submission_trace_context() {
             parent_turn_id: None,
             root_turn_id: None,
             trace: Some(submission_trace),
+            new_work_admission: None,
         })
     });
 
@@ -7152,6 +7154,7 @@ fn submission_dispatch_span_uses_debug_for_realtime_audio() {
         parent_turn_id: None,
         root_turn_id: None,
         trace: None,
+        new_work_admission: None,
     });
 
     assert_eq!(
@@ -7443,6 +7446,7 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
         parent_turn_id: None,
         root_turn_id: None,
         trace: Some(submission_trace.clone()),
+        new_work_admission: None,
     });
     let dispatch_span_id = dispatch_span.context().span().span_context().span_id();
 

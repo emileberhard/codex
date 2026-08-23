@@ -73,6 +73,11 @@ impl ThreadQueueRequestProcessor {
         &self,
         params: ThreadQueueAddParams,
     ) -> Result<ThreadQueueAddResponse, JSONRPCErrorError> {
+        let _admission = self
+            .thread_manager
+            .acquire_new_work_admission()
+            .await
+            .map_err(|error| invalid_request(error.to_string()))?;
         validate_user_input_image_urls(&params.input)?;
         let (thread_id, loaded_thread, source) = self.require_thread(&params.thread_id).await?;
         ensure_direct_input_allowed(loaded_thread.as_deref(), &source)?;

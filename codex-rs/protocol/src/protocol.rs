@@ -197,6 +197,9 @@ pub struct Submission {
     pub parent_turn_id: Option<String>,
     /// Core-provided ID of the top-level turn that causally initiated this submission.
     pub root_turn_id: Option<String>,
+    /// Keeps process-wide restart admission open until Core has handled this
+    /// submission, rather than merely until it enters the channel.
+    pub new_work_admission: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
@@ -724,6 +727,65 @@ pub enum Op {
         /// The raw command string after '!'
         command: String,
     },
+}
+
+impl Op {
+    /// Whether accepting this operation creates new model, shell, realtime, or
+    /// delegated work. Keep this exhaustive so adding an operation forces an
+    /// explicit restart-admission decision.
+    pub fn requires_new_work_admission(&self) -> bool {
+        match self {
+            Self::RealtimeConversationStart(_)
+            | Self::RealtimeConversationStartClientHandoffs(_)
+            | Self::TurnInput { .. }
+            | Self::RecoverTurn { .. }
+            | Self::InterAgentCommunication { .. }
+            | Self::Compact
+            | Self::Review { .. }
+            | Self::RunUserShellCommand { .. } => true,
+            Self::Interrupt
+            | Self::CleanBackgroundTerminals
+            | Self::RealtimeConversationAudio(_)
+            | Self::RealtimeConversationText(_)
+            | Self::RealtimeConversationSpeech(_)
+            | Self::RealtimeConversationHandoffAppend { .. }
+            | Self::RealtimeConversationHandoffComplete { .. }
+            | Self::RealtimeConversationClose
+            | Self::RealtimeConversationListVoices
+            | Self::SuspendTurnAndShutdown { .. }
+            | Self::ThreadSettings { .. }
+            | Self::ExecApproval { .. }
+            | Self::PatchApproval { .. }
+            | Self::ResolveElicitation { .. }
+            | Self::UserInputAnswer { .. }
+            | Self::RequestPermissionsResponse { .. }
+            | Self::DynamicToolResponse { .. }
+            | Self::RefreshMcpServers
+            | Self::ReloadUserConfig
+            | Self::SetThreadMemoryMode { .. }
+            | Self::ThreadRollback { .. }
+            | Self::ApproveGuardianDeniedAction { .. }
+            | Self::Shutdown => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod op_admission_tests {
+    use super::Op;
+
+    #[test]
+    fn model_and_shell_work_require_admission_but_control_ops_do_not() {
+        assert!(Op::Compact.requires_new_work_admission());
+        assert!(
+            Op::RunUserShellCommand {
+                command: "true".to_string()
+            }
+            .requires_new_work_admission()
+        );
+        assert!(!Op::Interrupt.requires_new_work_admission());
+        assert!(!Op::Shutdown.requires_new_work_admission());
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, JsonSchema)]

@@ -18,7 +18,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicBool;
@@ -74,6 +76,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
+
+const START_FENCED_ENV_VAR: &str = "CODEX_APP_SERVER_START_FENCED";
+const RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR: &str =
+    "CODEX_INTERNAL_RESTART_RECOVERY_CAPABILITY_FILE";
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
@@ -184,6 +190,7 @@ enum OutboundControlEvent {
 struct ShutdownState {
     requested: bool,
     forced: bool,
+    wait_for_force: bool,
     last_logged_running_turn_count: Option<usize>,
 }
 
@@ -195,8 +202,14 @@ enum ShutdownAction {
 #[derive(Clone, Copy)]
 enum ShutdownSignal {
     Forceable,
-    #[cfg(unix)]
-    GracefulOnly,
+    PrepareRestart,
+    CancelRestart,
+}
+
+enum ShutdownTransition {
+    Noop,
+    Fence,
+    Unfence,
 }
 
 async fn shutdown_signal() -> IoResult<ShutdownSignal> {
@@ -207,10 +220,12 @@ async fn shutdown_signal() -> IoResult<ShutdownSignal> {
 
         let mut term = signal(SignalKind::terminate())?;
         let mut hangup = signal(SignalKind::hangup())?;
+        let mut user_defined1 = signal(SignalKind::user_defined1())?;
         tokio::select! {
             ctrl_c_result = tokio::signal::ctrl_c() => ctrl_c_result.map(|_| ShutdownSignal::Forceable),
             _ = term.recv() => Ok(ShutdownSignal::Forceable),
-            _ = hangup.recv() => Ok(ShutdownSignal::GracefulOnly),
+            _ = hangup.recv() => Ok(ShutdownSignal::PrepareRestart),
+            _ = user_defined1.recv() => Ok(ShutdownSignal::CancelRestart),
         }
     }
 
@@ -236,28 +251,44 @@ impl ShutdownState {
         signal: ShutdownSignal,
         connection_count: usize,
         running_turn_count: usize,
-    ) {
+    ) -> ShutdownTransition {
+        if matches!(signal, ShutdownSignal::CancelRestart) {
+            if self.requested && !self.forced {
+                *self = Self::default();
+                info!("cancelled prepared restart and reopened new-work admission");
+                return ShutdownTransition::Unfence;
+            }
+            return ShutdownTransition::Noop;
+        }
         if self.requested {
             if matches!(signal, ShutdownSignal::Forceable) {
                 self.forced = true;
             }
-            return;
+            return ShutdownTransition::Noop;
         }
 
         self.requested = true;
+        self.wait_for_force = matches!(signal, ShutdownSignal::PrepareRestart);
         self.last_logged_running_turn_count = None;
         info!(
-            "received shutdown signal; entering graceful restart drain (connections={}, runningAssistantTurns={}, requests still accepted until no assistant turns are running)",
+            "received shutdown signal; fenced new work and entered graceful restart drain (connections={}, runningAssistantTurns={})",
             connection_count, running_turn_count,
         );
+        ShutdownTransition::Fence
     }
 
-    fn update(&mut self, running_turn_count: usize, connection_count: usize) -> ShutdownAction {
+    fn update(
+        &mut self,
+        running_turn_count: usize,
+        connection_count: usize,
+        admission_fence_ready: bool,
+    ) -> ShutdownAction {
         if !self.requested {
             return ShutdownAction::Noop;
         }
 
-        if self.forced || running_turn_count == 0 {
+        if self.forced || (running_turn_count == 0 && !self.wait_for_force && admission_fence_ready)
+        {
             if self.forced {
                 info!(
                     "received second shutdown signal; forcing restart with {running_turn_count} running assistant turn(s) and {connection_count} connection(s)"
@@ -270,6 +301,10 @@ impl ShutdownState {
             return ShutdownAction::Finish;
         }
 
+        if self.wait_for_force && running_turn_count == 0 {
+            return ShutdownAction::Noop;
+        }
+
         if self.last_logged_running_turn_count != Some(running_turn_count) {
             info!(
                 "shutdown signal restart: waiting for {running_turn_count} running assistant turn(s) to finish"
@@ -278,6 +313,93 @@ impl ShutdownState {
         }
 
         ShutdownAction::Noop
+    }
+}
+
+#[cfg(all(test, unix))]
+mod shutdown_state_tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    fn hangup_fences_without_exiting_until_forceable_signal() {
+        let mut state = ShutdownState::default();
+
+        assert!(matches!(
+            state.on_signal(ShutdownSignal::PrepareRestart, 2, 0),
+            ShutdownTransition::Fence
+        ));
+        assert!(matches!(state.update(0, 2, true), ShutdownAction::Noop));
+        assert!(matches!(
+            state.on_signal(ShutdownSignal::Forceable, 2, 0),
+            ShutdownTransition::Noop
+        ));
+        assert!(matches!(state.update(0, 2, true), ShutdownAction::Finish));
+    }
+
+    #[test]
+    fn terminate_without_prepare_still_drains_running_turns() {
+        let mut state = ShutdownState::default();
+
+        assert!(matches!(
+            state.on_signal(ShutdownSignal::Forceable, 2, 1),
+            ShutdownTransition::Fence
+        ));
+        assert!(matches!(state.update(1, 2, true), ShutdownAction::Noop));
+        assert!(matches!(state.update(0, 2, false), ShutdownAction::Noop));
+        assert!(matches!(state.update(0, 2, true), ShutdownAction::Finish));
+    }
+
+    #[test]
+    #[serial]
+    fn restart_startup_material_is_consumed_before_child_processes() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let capability_path = temp.path().join("capability");
+        std::fs::write(&capability_path, "0123456789abcdef0123456789abcdef\n")
+            .expect("write capability");
+        let mut permissions = std::fs::metadata(&capability_path)
+            .expect("capability metadata")
+            .permissions();
+        permissions.set_mode(0o600);
+        std::fs::set_permissions(&capability_path, permissions).expect("chmod capability");
+        // SAFETY: this serial test sets process-global startup variables before any helper call.
+        unsafe {
+            std::env::set_var(START_FENCED_ENV_VAR, "1");
+            std::env::set_var(RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR, &capability_path);
+        }
+
+        let (fenced, capability) =
+            take_restart_recovery_startup_options().expect("consume startup material");
+        assert!(fenced);
+        assert_eq!(
+            capability.as_deref(),
+            Some("0123456789abcdef0123456789abcdef")
+        );
+        assert!(!capability_path.exists());
+        let status = std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "test -z \"${{{START_FENCED_ENV_VAR}:-}}\" && test -z \"${{{RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR}:-}}\""
+            ))
+            .status()
+            .expect("run child environment probe");
+        assert!(status.success());
+    }
+
+    #[test]
+    fn prepared_restart_can_be_cancelled_before_termination() {
+        let mut state = ShutdownState::default();
+
+        assert!(matches!(
+            state.on_signal(ShutdownSignal::PrepareRestart, 1, 1),
+            ShutdownTransition::Fence
+        ));
+        assert!(matches!(
+            state.on_signal(ShutdownSignal::CancelRestart, 1, 1),
+            ShutdownTransition::Unfence
+        ));
+        assert!(!state.requested());
+        assert!(matches!(state.update(0, 1, false), ShutdownAction::Noop));
     }
 }
 
@@ -440,6 +562,8 @@ pub struct AppServerRuntimeOptions {
     pub plugin_startup_tasks: PluginStartupTasks,
     pub remote_control_startup_mode: RemoteControlStartupMode,
     pub install_shutdown_signal_handler: bool,
+    pub start_fenced: bool,
+    pub restart_recovery_capability: Option<String>,
 }
 
 impl Default for AppServerRuntimeOptions {
@@ -449,8 +573,48 @@ impl Default for AppServerRuntimeOptions {
             plugin_startup_tasks: PluginStartupTasks::Start,
             remote_control_startup_mode: RemoteControlStartupMode::ResolvePersisted,
             install_shutdown_signal_handler: true,
+            start_fenced: false,
+            restart_recovery_capability: None,
         }
     }
+}
+
+pub fn take_restart_recovery_startup_options() -> IoResult<(bool, Option<String>)> {
+    let start_fenced = std::env::var_os(START_FENCED_ENV_VAR).is_some_and(|value| value == "1");
+    let capability_path =
+        std::env::var_os(RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR).map(PathBuf::from);
+    // SAFETY: both startup-only variables are consumed synchronously by the app-server entrypoint
+    // before worker threads or tool subprocesses are created.
+    unsafe {
+        std::env::remove_var(START_FENCED_ENV_VAR);
+        std::env::remove_var(RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR);
+    }
+    let Some(capability_path) = capability_path else {
+        return Ok((start_fenced, None));
+    };
+    if !capability_path.is_absolute() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "restart recovery capability path must be absolute",
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(&capability_path)?;
+    if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o077 != 0 {
+        return Err(std::io::Error::new(
+            ErrorKind::PermissionDenied,
+            "restart recovery capability must be a private regular file",
+        ));
+    }
+    let capability = std::fs::read_to_string(&capability_path)?;
+    std::fs::remove_file(&capability_path)?;
+    let capability = capability.trim().to_string();
+    if capability.len() < 32 {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            "restart recovery capability is invalid",
+        ));
+    }
+    Ok((start_fenced, Some(capability)))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -728,6 +892,7 @@ pub async fn run_main_with_transport_options(
     let single_client_mode = matches!(&transport, AppServerTransport::Stdio);
     let graceful_signal_restart_enabled =
         runtime_options.install_shutdown_signal_handler && !single_client_mode;
+    let start_fenced = runtime_options.start_fenced;
     let mut app_server_client_name_rx = None;
 
     match &transport {
@@ -926,6 +1091,7 @@ pub async fn run_main_with_transport_options(
             rpc_transport: analytics_rpc_transport(&transport),
             remote_control_handle: Some(remote_control_handle.clone()),
             plugin_startup_tasks: runtime_options.plugin_startup_tasks,
+            restart_recovery_capability: runtime_options.restart_recovery_capability.clone(),
         }));
         let mut thread_created_rx = processor.thread_created_receiver();
         let mut running_turn_count_rx = processor.subscribe_running_assistant_turn_count();
@@ -937,13 +1103,33 @@ pub async fn run_main_with_transport_options(
         async move {
             let mut listen_for_threads = true;
             let mut shutdown_state = ShutdownState::default();
+            if start_fenced {
+                debug_assert!(matches!(
+                    shutdown_state.on_signal(
+                        ShutdownSignal::PrepareRestart,
+                        /*connection_count*/ 0,
+                        /*running_turn_count*/ 0,
+                    ),
+                    ShutdownTransition::Fence
+                ));
+                processor.begin_new_work_fence();
+                processor.poll_new_work_fence();
+                info!("app server started with new-work admission fenced for recovery");
+            }
+            let mut new_work_fence_poll =
+                tokio::time::interval(std::time::Duration::from_millis(25));
+            new_work_fence_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let exit_reason = loop {
                 let running_turn_count = {
                     let running_turn_count = running_turn_count_rx.borrow();
                     *running_turn_count
                 };
                 if matches!(
-                    shutdown_state.update(running_turn_count, connections.len()),
+                    shutdown_state.update(
+                        running_turn_count,
+                        connections.len(),
+                        processor.new_work_admission_fenced(),
+                    ),
                     ShutdownAction::Finish
                 ) {
                     transport_shutdown_token.cancel();
@@ -963,7 +1149,17 @@ pub async fn run_main_with_transport_options(
                             }
                         };
                         let running_turn_count = *running_turn_count_rx.borrow();
-                        shutdown_state.on_signal(signal, connections.len(), running_turn_count);
+                        match shutdown_state.on_signal(signal, connections.len(), running_turn_count) {
+                            ShutdownTransition::Noop => {}
+                            ShutdownTransition::Fence => processor.begin_new_work_fence(),
+                            ShutdownTransition::Unfence => processor.unfence_new_work(),
+                        }
+                    }
+                    _ = new_work_fence_poll.tick(), if graceful_signal_restart_enabled
+                        && shutdown_state.requested()
+                        && !processor.new_work_admission_fenced() =>
+                    {
+                        processor.poll_new_work_fence();
                     }
                     changed = running_turn_count_rx.changed(), if graceful_signal_restart_enabled && shutdown_state.requested() => {
                         if changed.is_err() {

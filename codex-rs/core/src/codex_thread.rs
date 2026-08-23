@@ -245,7 +245,7 @@ impl CodexThread {
     }
 
     pub async fn submit(&self, op: Op) -> CodexResult<String> {
-        self.io.submit(op).await
+        self.submit_with_trace(op, /*trace*/ None).await
     }
 
     /// Returns the session telemetry handle for thread-scoped production instrumentation.
@@ -323,9 +323,20 @@ impl CodexThread {
         op: Op,
         trace: Option<W3cTraceContext>,
     ) -> CodexResult<String> {
+        let admission = if op.requires_new_work_admission() {
+            Some(
+                self.session
+                    .services
+                    .agent_control
+                    .acquire_new_work_admission()
+                    .await?,
+            )
+        } else {
+            None
+        };
         self.io
             .submit_with_trace(
-                op, trace, /*parent_turn_id*/ None, /*root_turn_id*/ None,
+                op, trace, /*parent_turn_id*/ None, /*root_turn_id*/ None, admission,
             )
             .await
     }
@@ -340,6 +351,27 @@ impl CodexThread {
         request: TurnInputRequest,
     ) -> CodexResult<TurnInputSubmission> {
         self.submit_turn_input_with_mode(request, TurnInputMode::StartOrSteer)
+            .await
+    }
+
+    /// Recovery-only start path for a replacement process that intentionally
+    /// starts fenced. Callers must still validate the recovery capability.
+    pub async fn start_or_steer_recovery_turn(
+        &self,
+        request: TurnInputRequest,
+        capability: &str,
+    ) -> CodexResult<TurnInputSubmission> {
+        self.session
+            .services
+            .agent_control
+            .verify_restart_recovery_capability(capability)?;
+        self.session
+            .services
+            .agent_control
+            .ensure_execution_capacity_for_turn_start(self)
+            .await?;
+        self.io
+            .submit_turn_input(request, TurnInputMode::StartOrSteer, None)
             .await
     }
 
@@ -375,6 +407,12 @@ impl CodexThread {
         &self,
         request: RecoverTurnRequest,
     ) -> CodexResult<StartIfIdleSubmission> {
+        let admission = self
+            .session
+            .services
+            .agent_control
+            .acquire_new_work_admission()
+            .await?;
         self.session
             .services
             .agent_control
@@ -387,7 +425,7 @@ impl CodexThread {
         } = request;
         match self
             .io
-            .submit_recover_turn(thread_settings, trace, turn_id)
+            .submit_recover_turn(thread_settings, trace, turn_id, admission)
             .await?
         {
             TurnInputSubmission::Started { turn_id } => {
@@ -431,6 +469,7 @@ impl CodexThread {
                 trace: current_span_w3c_trace_context(),
                 parent_turn_id: None,
                 root_turn_id: None,
+                new_work_admission: None,
             })
             .await
             .map_err(|_| CodexErr::Fatal("thread session has stopped".to_string()))?;
@@ -468,6 +507,12 @@ impl CodexThread {
         request: TurnInputRequest,
         mode: TurnInputMode,
     ) -> CodexResult<TurnInputSubmission> {
+        let _admission = self
+            .session
+            .services
+            .agent_control
+            .acquire_new_work_admission()
+            .await?;
         if !matches!(mode, TurnInputMode::Steer { .. }) {
             self.session
                 .services
@@ -475,7 +520,9 @@ impl CodexThread {
                 .ensure_execution_capacity_for_turn_start(self)
                 .await?;
         }
-        self.io.submit_turn_input(request, mode).await
+        self.io
+            .submit_turn_input(request, mode, Some(_admission))
+            .await
     }
 
     /// Persist whether this thread is eligible for future memory generation.

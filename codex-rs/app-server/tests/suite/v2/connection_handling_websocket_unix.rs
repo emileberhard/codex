@@ -2,6 +2,7 @@ use super::connection_handling_websocket::DEFAULT_READ_TIMEOUT;
 use super::connection_handling_websocket::WsClient;
 use super::connection_handling_websocket::connect_websocket;
 use super::connection_handling_websocket::create_config_toml;
+use super::connection_handling_websocket::read_error_for_id;
 use super::connection_handling_websocket::read_response_for_id;
 use super::connection_handling_websocket::send_initialize_request;
 use super::connection_handling_websocket::send_request;
@@ -11,7 +12,13 @@ use anyhow::Result;
 use anyhow::bail;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::to_response;
+use codex_app_server_protocol::ClientInfo;
+use codex_app_server_protocol::InitializeCapabilities;
+use codex_app_server_protocol::InitializeParams;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::ServerDiagnosticsParams;
+use codex_app_server_protocol::ServerDiagnosticsResponse;
+use codex_app_server_protocol::ThreadQueueAddParams;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::TurnStartParams;
@@ -30,6 +37,88 @@ use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
 use wiremock::Mock;
 use wiremock::matchers::method;
 use wiremock::matchers::path_regex;
+
+#[tokio::test]
+async fn prepared_restart_rejects_turns_and_durable_queue_adds_until_cancelled() -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri(), "never")?;
+
+    let (mut process, bind_addr) = spawn_websocket_server(codex_home.path()).await?;
+    let mut ws = connect_websocket(bind_addr).await?;
+    send_request(
+        &mut ws,
+        "initialize",
+        /*id*/ 1,
+        Some(serde_json::to_value(InitializeParams {
+            client_info: ClientInfo {
+                name: "restart-admission-test".to_string(),
+                title: None,
+                version: "0.1.0".to_string(),
+            },
+            capabilities: Some(InitializeCapabilities {
+                experimental_api: true,
+                ..Default::default()
+            }),
+        })?),
+    )
+    .await?;
+    read_response_for_id(&mut ws, /*id*/ 1).await?;
+
+    send_thread_start_request(&mut ws, /*id*/ 2).await?;
+    let ThreadStartResponse { thread, .. } =
+        to_response(read_response_for_id(&mut ws, /*id*/ 2).await?)?;
+
+    send_sighup(&process)?;
+    wait_for_admission_state(&mut ws, /*first_id*/ 10, /*fenced*/ true).await?;
+
+    send_turn_start_request(&mut ws, /*id*/ 20, &thread.id).await?;
+    let turn_error = read_error_for_id(&mut ws, /*id*/ 20).await?;
+    assert!(turn_error.error.message.contains("draining for restart"));
+
+    send_turn_start_request_with_client_id(
+        &mut ws,
+        /*id*/ 22,
+        &thread.id,
+        "remotecoder-recovery:forged",
+    )
+    .await?;
+    let forged_recovery_error = read_error_for_id(&mut ws, /*id*/ 22).await?;
+    assert!(
+        forged_recovery_error
+            .error
+            .message
+            .contains("draining for restart")
+    );
+
+    send_request(
+        &mut ws,
+        "thread/queue/add",
+        /*id*/ 21,
+        Some(serde_json::to_value(ThreadQueueAddParams {
+            thread_id: thread.id,
+            input: vec![V2UserInput::Text {
+                text: "queued after the snapshot boundary".to_string(),
+                text_elements: Vec::new(),
+            }],
+            client_user_message_id: "restart-fence-queue-probe".to_string(),
+        })?),
+    )
+    .await?;
+    let queue_error = read_error_for_id(&mut ws, /*id*/ 21).await?;
+    assert!(queue_error.error.message.contains("draining for restart"));
+
+    send_sigusr1(&process)?;
+    wait_for_admission_state(&mut ws, /*first_id*/ 30, /*fenced*/ false).await?;
+    send_thread_start_request(&mut ws, /*id*/ 40).await?;
+    let _: ThreadStartResponse = to_response(read_response_for_id(&mut ws, /*id*/ 40).await?)?;
+
+    process
+        .kill()
+        .await
+        .context("failed to stop restart-admission test server")?;
+    Ok(())
+}
 
 #[tokio::test]
 async fn websocket_transport_ctrl_c_waits_for_running_turn_before_exit() -> Result<()> {
@@ -220,13 +309,37 @@ async fn send_thread_start_request(stream: &mut WsClient, id: i64) -> Result<()>
 }
 
 async fn send_turn_start_request(stream: &mut WsClient, id: i64, thread_id: &str) -> Result<()> {
+    send_turn_start_request_with_optional_client_id(stream, id, thread_id, None).await
+}
+
+async fn send_turn_start_request_with_client_id(
+    stream: &mut WsClient,
+    id: i64,
+    thread_id: &str,
+    client_user_message_id: &str,
+) -> Result<()> {
+    send_turn_start_request_with_optional_client_id(
+        stream,
+        id,
+        thread_id,
+        Some(client_user_message_id.to_string()),
+    )
+    .await
+}
+
+async fn send_turn_start_request_with_optional_client_id(
+    stream: &mut WsClient,
+    id: i64,
+    thread_id: &str,
+    client_user_message_id: Option<String>,
+) -> Result<()> {
     send_request(
         stream,
         "turn/start",
         id,
         Some(serde_json::to_value(TurnStartParams {
             thread_id: thread_id.to_string(),
-            client_user_message_id: None,
+            client_user_message_id,
             input: vec![V2UserInput::Text {
                 text: "Hello".to_string(),
                 text_elements: Vec::new(),
@@ -257,6 +370,44 @@ async fn wait_for_responses_post(server: &wiremock::MockServer, wait_for: Durati
     }
 }
 
+async fn wait_for_admission_state(
+    stream: &mut WsClient,
+    first_id: i64,
+    fenced: bool,
+) -> Result<()> {
+    let deadline = Instant::now() + DEFAULT_READ_TIMEOUT;
+    let mut request_id = first_id;
+    loop {
+        send_request(
+            stream,
+            "server/diagnostics",
+            request_id,
+            Some(serde_json::to_value(ServerDiagnosticsParams::default())?),
+        )
+        .await?;
+        let diagnostics: ServerDiagnosticsResponse =
+            to_response(read_response_for_id(stream, request_id).await?)?;
+        let gauge = |name: &str| {
+            diagnostics
+                .gauges
+                .iter()
+                .find(|gauge| gauge.name == name)
+                .map(|gauge| gauge.value)
+        };
+        let expected = u64::from(fenced);
+        if gauge("app.work.new_admission_closed") == Some(expected)
+            && gauge("app.work.new_admission_fenced") == Some(expected)
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for restart admission fenced={fenced}");
+        }
+        request_id += 1;
+        sleep(Duration::from_millis(25)).await;
+    }
+}
+
 fn send_sigint(process: &Child) -> Result<()> {
     send_signal(process, "-INT")
 }
@@ -267,6 +418,10 @@ fn send_sigterm(process: &Child) -> Result<()> {
 
 fn send_sighup(process: &Child) -> Result<()> {
     send_signal(process, "-HUP")
+}
+
+fn send_sigusr1(process: &Child) -> Result<()> {
+    send_signal(process, "-USR1")
 }
 
 fn send_signal(process: &Child, signal: &str) -> Result<()> {

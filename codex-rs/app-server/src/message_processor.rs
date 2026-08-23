@@ -134,6 +134,7 @@ fn reject_removed_permission_profile(request: &JSONRPCRequest) -> Result<(), JSO
 
 pub(crate) struct MessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
+    thread_manager: Arc<ThreadManager>,
     models_refresh_worker: ModelsRefreshWorker,
     turn_cost_worker: Option<TurnCostWorker>,
     skills_watcher: Arc<SkillsWatcher>,
@@ -259,6 +260,7 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) rpc_transport: AppServerRpcTransport,
     pub(crate) remote_control_handle: Option<RemoteControlHandle>,
     pub(crate) plugin_startup_tasks: crate::PluginStartupTasks,
+    pub(crate) restart_recovery_capability: Option<String>,
 }
 
 impl MessageProcessor {
@@ -283,6 +285,7 @@ impl MessageProcessor {
             rpc_transport,
             remote_control_handle,
             plugin_startup_tasks,
+            restart_recovery_capability,
         } = args;
         let thread_state_manager = ThreadStateManager::new();
         // The thread store is intentionally process-scoped. Config reloads can
@@ -356,7 +359,8 @@ impl MessageProcessor {
                     outgoing.clone(),
                     thread_state_manager.clone(),
                 )),
-            );
+            )
+            .with_restart_recovery_capability(restart_recovery_capability.clone());
             match code_mode_session_provider {
                 Some(provider) => manager.with_code_mode_session_provider(provider),
                 None => manager,
@@ -556,6 +560,7 @@ impl MessageProcessor {
 
         Self {
             outgoing,
+            thread_manager,
             models_refresh_worker,
             turn_cost_worker,
             skills_watcher,
@@ -591,6 +596,22 @@ impl MessageProcessor {
         self.apps_processor.shutdown();
         self.models_refresh_worker.shutdown();
         self.skills_watcher.shutdown();
+    }
+
+    pub(crate) fn begin_new_work_fence(&self) {
+        self.thread_manager.begin_new_work_fence();
+    }
+
+    pub(crate) fn poll_new_work_fence(&self) -> bool {
+        self.thread_manager.poll_new_work_fence()
+    }
+
+    pub(crate) fn unfence_new_work(&self) {
+        self.thread_manager.unfence_new_work();
+    }
+
+    pub(crate) fn new_work_admission_fenced(&self) -> bool {
+        self.thread_manager.new_work_admission_fenced()
     }
 
     pub(crate) async fn process_request(
@@ -967,7 +988,13 @@ impl MessageProcessor {
             ClientRequest::Initialize { .. } => {
                 panic!("Initialize should be handled before initialized request dispatch");
             }
-            ClientRequest::ServerDiagnostics { .. } => Ok(Some(read_server_diagnostics().into())),
+            ClientRequest::ServerDiagnostics { .. } => Ok(Some(
+                read_server_diagnostics(
+                    self.thread_manager.new_work_admission_closed(),
+                    self.thread_manager.new_work_admission_fenced(),
+                )
+                .into(),
+            )),
             ClientRequest::ConfigRead { params, .. } => self
                 .config_processor
                 .read(params)

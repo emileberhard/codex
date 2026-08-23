@@ -132,6 +132,17 @@ impl Default for AgentControl {
 }
 
 impl AgentControl {
+    pub(crate) async fn acquire_new_work_admission(
+        &self,
+    ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
+        self.upgrade()?.acquire_new_work_admission().await
+    }
+
+    pub(crate) fn verify_restart_recovery_capability(&self, capability: &str) -> CodexResult<()> {
+        self.upgrade()?
+            .verify_restart_recovery_capability(capability)
+    }
+
     /// Construct a new `AgentControl` that can spawn/message agents via the given manager state.
     pub(crate) fn new(
         manager: Weak<ThreadManagerState>,
@@ -216,6 +227,7 @@ impl AgentControl {
         parent_turn_id: Option<String>,
         root_turn_id: Option<String>,
     ) -> CodexResult<String> {
+        let _admission = self.acquire_new_work_admission().await?;
         let state = self.upgrade()?;
         if communication.trigger_turn {
             let thread = state.get_thread(agent_id).await?;

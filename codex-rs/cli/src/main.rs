@@ -708,6 +708,12 @@ enum AppServerDaemonSubcommand {
     /// Restart the local app server daemon.
     Restart,
 
+    /// Fence new work and drain active turns before a managed restart snapshot.
+    PrepareRestart,
+
+    /// Reopen new-work admission after a prepared restart is abandoned.
+    CancelRestart,
+
     /// Enable remote control for future starts and a currently running managed daemon.
     EnableRemoteControl,
 
@@ -1270,6 +1276,8 @@ async fn cli_main(
                         listen
                     };
                     let auth = auth.try_into_settings()?;
+                    let (start_fenced, restart_recovery_capability) =
+                        codex_app_server::take_restart_recovery_startup_options()?;
                     let runtime_options = codex_app_server::AppServerRuntimeOptions {
                         code_mode_host_transport: code_mode_host.into(),
                         remote_control_startup_mode: match (remote_control, remote_control_disabled)
@@ -1284,6 +1292,8 @@ async fn cli_main(
                                 codex_app_server::RemoteControlStartupMode::ResolvePersisted
                             }
                         },
+                        start_fenced,
+                        restart_recovery_capability,
                         ..Default::default()
                     };
                     codex_app_server::run_main_with_transport_options(
@@ -1313,6 +1323,14 @@ async fn cli_main(
                     }
                     AppServerDaemonSubcommand::Restart => {
                         print_app_server_daemon_output(AppServerLifecycleCommand::Restart).await?;
+                    }
+                    AppServerDaemonSubcommand::PrepareRestart => {
+                        print_app_server_daemon_output(AppServerLifecycleCommand::PrepareRestart)
+                            .await?;
+                    }
+                    AppServerDaemonSubcommand::CancelRestart => {
+                        print_app_server_daemon_output(AppServerLifecycleCommand::CancelRestart)
+                            .await?;
                     }
                     AppServerDaemonSubcommand::EnableRemoteControl => {
                         print_app_server_remote_control_output(AppServerRemoteControlMode::Enabled)
@@ -2489,6 +2507,8 @@ fn app_server_subcommand_name(subcommand: Option<&AppServerSubcommand>) -> &'sta
             AppServerDaemonSubcommand::Bootstrap(_) => "app-server daemon bootstrap",
             AppServerDaemonSubcommand::Start => "app-server daemon start",
             AppServerDaemonSubcommand::Restart => "app-server daemon restart",
+            AppServerDaemonSubcommand::PrepareRestart => "app-server daemon prepare-restart",
+            AppServerDaemonSubcommand::CancelRestart => "app-server daemon cancel-restart",
             AppServerDaemonSubcommand::EnableRemoteControl => {
                 "app-server daemon enable-remote-control"
             }
@@ -4554,6 +4574,20 @@ mod tests {
             app_server_from_args(["codex", "app-server", "daemon", "restart"].as_ref()).subcommand,
             Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
                 subcommand: AppServerDaemonSubcommand::Restart
+            }))
+        ));
+        assert!(matches!(
+            app_server_from_args(["codex", "app-server", "daemon", "prepare-restart"].as_ref())
+                .subcommand,
+            Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
+                subcommand: AppServerDaemonSubcommand::PrepareRestart
+            }))
+        ));
+        assert!(matches!(
+            app_server_from_args(["codex", "app-server", "daemon", "cancel-restart"].as_ref())
+                .subcommand,
+            Some(AppServerSubcommand::Daemon(AppServerDaemonCommand {
+                subcommand: AppServerDaemonSubcommand::CancelRestart
             }))
         ));
         assert!(matches!(

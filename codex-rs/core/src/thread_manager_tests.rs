@@ -37,6 +37,8 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::protocol::UserMessageEvent;
+use codex_protocol::turn_input::TurnInputRequest;
+use codex_protocol::turn_input::TurnInputSubmission;
 use codex_protocol::user_input::UserInput;
 use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
@@ -59,6 +61,217 @@ fn thread_id_generator_defaults_to_standard_ids() {
         agent_control.generate_thread_id(),
         agent_control.generate_thread_id()
     );
+}
+
+#[tokio::test]
+async fn restart_fence_rejects_new_root_threads() {
+    let temp_dir = tempdir().expect("tempdir");
+    let mut config = test_config().await;
+    config.codex_home = temp_dir.path().join("codex-home").abs();
+    config.cwd = config.codex_home.abs();
+    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+
+    let admission = manager
+        .state
+        .acquire_new_work_admission()
+        .await
+        .expect("acquire admission");
+    manager.begin_new_work_fence();
+    assert!(!manager.poll_new_work_fence());
+    assert!(!manager.new_work_admission_fenced());
+    drop(admission);
+    assert!(manager.poll_new_work_fence());
+    let error = match manager.start_thread(StartThreadOptions::new(config)).await {
+        Ok(_) => panic!("restart fence should reject a new root thread"),
+        Err(error) => error,
+    };
+
+    assert!(manager.new_work_admission_fenced());
+    assert!(matches!(
+        error.details(),
+        codex_protocol::error::CodexErrorDetails::InvalidRequest(message)
+            if message == "app server is draining for restart; new work is not accepted"
+    ));
+}
+
+#[tokio::test]
+async fn rejected_request_flood_cannot_starve_restart_fence_settlement() {
+    let temp_dir = tempdir().expect("tempdir");
+    let mut config = test_config().await;
+    config.codex_home = temp_dir.path().join("codex-home").abs();
+    config.cwd = config.codex_home.abs();
+    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+    let admitted = manager
+        .state
+        .acquire_new_work_admission()
+        .await
+        .expect("pre-fence admission");
+    manager.begin_new_work_fence();
+
+    let mut flood = tokio::task::JoinSet::new();
+    for _ in 0..32 {
+        let state = Arc::clone(&manager.state);
+        flood.spawn(async move {
+            for _ in 0..100 {
+                state
+                    .acquire_new_work_admission()
+                    .await
+                    .expect_err("post-close admission must fail");
+            }
+        });
+    }
+    drop(admitted);
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !manager.poll_new_work_fence() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("request flood must not starve fence settlement");
+    while let Some(result) = flood.join_next().await {
+        result.expect("flood task");
+    }
+}
+
+#[tokio::test]
+async fn restart_fence_can_be_cancelled_while_admitted_work_is_finishing() {
+    let temp_dir = tempdir().expect("tempdir");
+    let mut config = test_config().await;
+    config.codex_home = temp_dir.path().join("codex-home").abs();
+    config.cwd = config.codex_home.abs();
+    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+
+    let admitted = manager
+        .state
+        .acquire_new_work_admission()
+        .await
+        .expect("acquire admission");
+    manager.begin_new_work_fence();
+    assert!(!manager.poll_new_work_fence());
+    manager.unfence_new_work();
+
+    let reopened = manager
+        .state
+        .acquire_new_work_admission()
+        .await
+        .expect("cancelled fence should reopen admission");
+    drop(reopened);
+    drop(admitted);
+    assert!(!manager.new_work_admission_fenced());
+}
+
+#[tokio::test]
+async fn restart_fence_rejects_new_work_on_an_existing_thread() {
+    let temp_dir = tempdir().expect("tempdir");
+    let mut config = test_config().await;
+    config.codex_home = temp_dir.path().join("codex-home").abs();
+    config.cwd = config.codex_home.abs();
+    std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+    let manager = ThreadManager::with_models_provider_and_home_for_tests(
+        CodexAuth::from_api_key("dummy"),
+        config.model_provider.clone(),
+        config.codex_home.to_path_buf(),
+        Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+    );
+    let thread = manager
+        .start_thread(StartThreadOptions::new(config))
+        .await
+        .expect("start thread")
+        .thread;
+
+    manager.begin_new_work_fence();
+    assert!(manager.poll_new_work_fence());
+    let error = thread
+        .submit(Op::Compact)
+        .await
+        .expect_err("compact must not enter a fenced process");
+
+    assert!(matches!(
+        error.details(),
+        codex_protocol::error::CodexErrorDetails::InvalidRequest(message)
+            if message == "app server is draining for restart; new work is not accepted"
+    ));
+}
+
+#[test]
+fn only_the_explicit_recovery_path_bypasses_a_settled_fence() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_stack_size(8 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    runtime.block_on(async {
+        let temp_dir = tempdir().expect("tempdir");
+        let mut config = test_config().await;
+        config.codex_home = temp_dir.path().join("codex-home").abs();
+        config.cwd = config.codex_home.abs();
+        std::fs::create_dir_all(&config.codex_home).expect("create codex home");
+        let manager = ThreadManager::with_models_provider_and_home_for_tests(
+            CodexAuth::from_api_key("dummy"),
+            config.model_provider.clone(),
+            config.codex_home.to_path_buf(),
+            Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        );
+        manager.set_restart_recovery_capability_for_tests("current-generation");
+        let thread = manager
+            .start_thread(StartThreadOptions::new(config))
+            .await
+            .expect("start thread")
+            .thread;
+        let request = || {
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "recover".to_string(),
+                text_elements: Vec::new(),
+            }])
+        };
+
+        thread
+            .start_or_steer_recovery_turn(request(), "current-generation")
+            .await
+            .expect_err("recovery bypass must be unavailable before a restart fence");
+        manager.begin_new_work_fence();
+        assert!(manager.poll_new_work_fence());
+        thread
+            .start_or_steer_recovery_turn(request(), "wrong-generation")
+            .await
+            .expect_err("wrong recovery capability must remain fenced");
+        let submission = thread
+            .start_or_steer_recovery_turn(request(), "current-generation")
+            .await
+            .expect("fenced recovery input");
+        assert!(matches!(submission, TurnInputSubmission::Started { .. }));
+        thread
+            .submit(Op::Interrupt)
+            .await
+            .expect("interrupt recovery turn");
+        manager.unfence_new_work();
+        manager.begin_new_work_fence();
+        assert!(manager.poll_new_work_fence());
+        thread
+            .start_or_steer_recovery_turn(request(), "current-generation")
+            .await
+            .expect_err("replayed recovery capability must be invalid after unfencing");
+        thread.shutdown_and_wait().await.expect("shutdown thread");
+    });
 }
 
 #[tokio::test]

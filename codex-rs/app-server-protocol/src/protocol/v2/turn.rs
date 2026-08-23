@@ -72,6 +72,10 @@ pub struct TurnStartParams {
     pub thread_id: String,
     #[ts(optional = nullable)]
     pub client_user_message_id: Option<String>,
+    /// Single-generation capability for daemon restart recovery. Ordinary clients must omit it.
+    #[experimental("turn/start.restartRecoveryCapability")]
+    #[ts(optional = nullable)]
+    pub restart_recovery_capability: Option<String>,
     pub input: Vec<UserInput>,
     /// Optional metadata to enrich Codex's ResponsesAPI turn metadata.
     ///

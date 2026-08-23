@@ -11,7 +11,9 @@ use super::PidCommandKind;
 use super::PidFileState;
 use super::PidLogTail;
 use super::PidRecord;
+use super::process_matches_record;
 use super::read_process_start_time;
+use super::read_process_state;
 use super::read_stderr_log_tail;
 use super::stderr_log_file_for_pid_file;
 use super::try_lock_file;
@@ -186,6 +188,138 @@ async fn stop_reaps_untracked_app_server_child() {
     // `sleep` is not tracked by Tokio, so stop must reap it instead of leaving a zombie.
     result.expect("stop timed out").expect("stop");
     assert!(!pid_file.exists());
+}
+
+#[tokio::test]
+async fn zombie_process_is_not_an_active_pid_record() {
+    let child = std::process::Command::new("sh")
+        .arg("-c")
+        .arg("sleep 0.1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn child");
+    let pid = child.id();
+    let record = PidRecord {
+        pid,
+        process_start_time: read_process_start_time(pid).await.expect("start time"),
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        if read_process_state(pid)
+            .await
+            .is_ok_and(|state| state.starts_with('Z'))
+        {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "child never became a zombie"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    assert!(
+        !process_matches_record(&record)
+            .await
+            .expect("inspect record")
+    );
+    assert!(
+        read_process_state(pid).await.is_err(),
+        "zombie child remained after ownership inspection"
+    );
+    drop(child);
+}
+
+#[tokio::test]
+async fn same_pid_with_a_different_kernel_start_identity_is_rejected() {
+    let mut child = std::process::Command::new("sleep")
+        .arg("5")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn child");
+    let pid = child.id();
+    let actual = read_process_start_time(pid).await.expect("start identity");
+    let record = PidRecord {
+        pid,
+        process_start_time: format!("{actual}:different-subsecond"),
+    };
+
+    assert!(
+        !process_matches_record(&record)
+            .await
+            .expect("inspect mismatched identity")
+    );
+
+    child.kill().expect("stop child");
+    child.wait().expect("reap child");
+}
+
+#[tokio::test]
+async fn restart_preparation_signals_do_not_stop_process() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let pid_file = temp_dir.path().join("app-server.pid");
+    let marker = temp_dir.path().join("hangup-received");
+    let cancel_marker = temp_dir.path().join("cancel-received");
+    let mut child = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(format!(
+            "trap 'touch {}' HUP; trap 'touch {}' USR1; while :; do sleep 0.1; done",
+            marker.display(),
+            cancel_marker.display()
+        ))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn app-server shim");
+    let pid = child.id();
+    let record = PidRecord {
+        pid,
+        process_start_time: read_process_start_time(pid).await.expect("start time"),
+    };
+    tokio::fs::write(
+        &pid_file,
+        serde_json::to_vec(&record).expect("serialize pid"),
+    )
+    .await
+    .expect("write pid file");
+    let backend = PidBackend::new(
+        temp_dir.path().join("codex"),
+        pid_file,
+        /*remote_control_enabled*/ false,
+    );
+
+    assert_eq!(backend.running_pid().await.expect("running pid"), Some(pid));
+    backend
+        .signal_restart_prepared(pid, true)
+        .await
+        .expect("prepare");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !marker.exists() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("hangup marker");
+    backend
+        .signal_restart_prepared(pid, false)
+        .await
+        .expect("cancel");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !cancel_marker.exists() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("cancel marker");
+    assert!(matches!(child.try_wait(), Ok(None)));
+
+    child.kill().expect("kill shim");
+    child.wait().expect("reap shim");
 }
 
 #[test]

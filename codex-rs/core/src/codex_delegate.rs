@@ -60,6 +60,11 @@ pub(crate) async fn run_codex_thread_interactive(
     git_enrichment_policy: GitEnrichmentPolicy,
     windows_sandbox_proxy_settings_mode: codex_sandboxing::WindowsSandboxProxySettingsMode,
 ) -> Result<(Arc<Session>, SessionIo), CodexErr> {
+    let _admission = parent_session
+        .services
+        .agent_control
+        .acquire_new_work_admission()
+        .await?;
     if config.permissions.approval_policy.value() != AskForApproval::Never {
         return Err(CodexErr::InvalidRequest(
             "Codex delegates require approval policy `never`".to_string(),
@@ -188,6 +193,11 @@ pub(crate) async fn run_codex_thread_one_shot(
     final_output_json_schema: Option<Value>,
     initial_history: Option<InitialHistory>,
 ) -> Result<(Arc<Session>, SessionIo), CodexErr> {
+    let _admission = parent_session
+        .services
+        .agent_control
+        .acquire_new_work_admission()
+        .await?;
     // Use a child token so we can stop the delegate after completion without
     // requiring the caller to cancel the parent token.
     let child_cancel = cancel_token.child_token();
@@ -218,6 +228,7 @@ pub(crate) async fn run_codex_thread_one_shot(
                 root_turn_id,
             }),
             TurnInputMode::StartIfIdle,
+            Some(_admission),
         )
         .await?;
     match submission {
@@ -250,6 +261,7 @@ pub(crate) async fn run_codex_thread_one_shot(
                         trace: None,
                         parent_turn_id: None,
                         root_turn_id: None,
+                        new_work_admission: None,
                     })
                     .await;
                 child_cancel.cancel();

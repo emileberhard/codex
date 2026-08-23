@@ -335,6 +335,10 @@ pub(crate) struct ResumeThreadWithHistoryOptions {
 /// function to require an `Arc<&Self>`.
 pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
+    new_work_admission: Arc<RwLock<()>>,
+    new_work_admission_fenced: AtomicBool,
+    new_work_admission_fence_ready: AtomicBool,
+    restart_recovery_capability: std::sync::Mutex<Option<String>>,
     thread_created_tx: broadcast::Sender<ThreadId>,
     thread_id_generator: ThreadIdGenerator,
     auth_manager: Arc<AuthManager>,
@@ -463,6 +467,10 @@ impl ThreadManager {
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
+                new_work_admission: Arc::new(RwLock::new(())),
+                new_work_admission_fenced: AtomicBool::new(false),
+                new_work_admission_fence_ready: AtomicBool::new(false),
+                restart_recovery_capability: std::sync::Mutex::new(None),
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 models_manager,
@@ -498,6 +506,14 @@ impl ThreadManager {
             unreachable!("thread ID generator must be set before thread manager is shared");
         };
         state.thread_id_generator = Arc::new(generator);
+        self
+    }
+
+    pub fn with_restart_recovery_capability(mut self, capability: Option<String>) -> Self {
+        let Some(state) = Arc::get_mut(&mut self.state) else {
+            unreachable!("restart recovery capability must be set before sharing the manager");
+        };
+        state.restart_recovery_capability = std::sync::Mutex::new(capability);
         self
     }
 
@@ -609,6 +625,10 @@ impl ThreadManager {
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
+                new_work_admission: Arc::new(RwLock::new(())),
+                new_work_admission_fenced: AtomicBool::new(false),
+                new_work_admission_fence_ready: AtomicBool::new(false),
+                restart_recovery_capability: std::sync::Mutex::new(None),
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 models_manager: create_model_provider(provider, Some(auth_manager.clone()))
@@ -640,6 +660,62 @@ impl ThreadManager {
 
     pub fn session_source(&self) -> SessionSource {
         self.state.session_source.clone()
+    }
+
+    /// Prevent new thread and turn work while a managed restart snapshots the
+    /// currently running task trees. Existing turns continue to completion.
+    pub fn begin_new_work_fence(&self) {
+        self.state
+            .new_work_admission_fenced
+            .store(true, Ordering::Release);
+        self.state
+            .new_work_admission_fence_ready
+            .store(false, Ordering::Release);
+    }
+
+    pub fn poll_new_work_fence(&self) -> bool {
+        if !self.state.new_work_admission_fenced.load(Ordering::Acquire) {
+            return false;
+        }
+        if self
+            .state
+            .new_work_admission
+            .clone()
+            .try_write_owned()
+            .is_err()
+        {
+            return false;
+        }
+        self.state
+            .new_work_admission_fence_ready
+            .store(true, Ordering::Release);
+        true
+    }
+
+    pub fn unfence_new_work(&self) {
+        self.state
+            .new_work_admission_fenced
+            .store(false, Ordering::Release);
+        self.state
+            .new_work_admission_fence_ready
+            .store(false, Ordering::Release);
+        self.state.clear_restart_recovery_capability();
+    }
+
+    pub fn new_work_admission_fenced(&self) -> bool {
+        self.state.new_work_admission_fenced()
+    }
+
+    pub fn new_work_admission_closed(&self) -> bool {
+        self.state.new_work_admission_fenced.load(Ordering::Acquire)
+    }
+
+    /// Admit one externally submitted unit of work and keep it ordered before
+    /// any restart fence that settles after this call.
+    pub async fn acquire_new_work_admission(
+        &self,
+    ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
+        self.state.acquire_new_work_admission().await
     }
 
     pub fn auth_manager(&self) -> Arc<AuthManager> {
@@ -1365,9 +1441,66 @@ impl ThreadManager {
             })
             .unwrap_or_default()
     }
+
+    #[cfg(test)]
+    pub(crate) fn set_restart_recovery_capability_for_tests(&self, capability: &str) {
+        *self
+            .state
+            .restart_recovery_capability
+            .lock()
+            .expect("recovery capability lock") = Some(capability.to_string());
+    }
 }
 
 impl ThreadManagerState {
+    pub(crate) fn new_work_admission_fenced(&self) -> bool {
+        self.new_work_admission_fence_ready.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn verify_restart_recovery_capability(&self, provided: &str) -> CodexResult<()> {
+        if !self.new_work_admission_fenced() {
+            return Err(CodexErr::InvalidRequest(
+                "recovery input requires a settled app-server restart fence".to_string(),
+            ));
+        }
+        let capability = self.restart_recovery_capability.lock().map_err(|_| {
+            CodexErr::InternalError("recovery capability lock poisoned".to_string())
+        })?;
+        let matches = capability.as_deref().is_some_and(|expected| {
+            expected.len() == provided.len()
+                && constant_time_eq::constant_time_eq(expected.as_bytes(), provided.as_bytes())
+        });
+        if !matches {
+            return Err(CodexErr::InvalidRequest(
+                "invalid restart recovery capability".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn clear_restart_recovery_capability(&self) {
+        if let Ok(mut capability) = self.restart_recovery_capability.lock() {
+            *capability = None;
+        }
+    }
+
+    pub(crate) async fn acquire_new_work_admission(
+        &self,
+    ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
+        if self.new_work_admission_fenced.load(Ordering::Acquire) {
+            return Err(CodexErr::InvalidRequest(
+                "app server is draining for restart; new work is not accepted".to_string(),
+            ));
+        }
+        let admission = self.new_work_admission.clone().read_owned().await;
+        if self.new_work_admission_fenced.load(Ordering::Acquire) {
+            return Err(CodexErr::InvalidRequest(
+                "app server is draining for restart; new work is not accepted".to_string(),
+            ));
+        }
+        Ok(admission)
+    }
+
     pub(crate) fn agent_graph_store(&self) -> Option<Arc<dyn AgentGraphStore>> {
         self.agent_graph_store.clone()
     }
@@ -1465,6 +1598,11 @@ impl ThreadManagerState {
         root_turn_id: Option<String>,
     ) -> CodexResult<String> {
         let thread = self.get_thread(thread_id).await?;
+        let admission = if op.requires_new_work_admission() {
+            Some(self.acquire_new_work_admission().await?)
+        } else {
+            None
+        };
         if let Some(ops_log) = &self.ops_log
             && let Ok(mut log) = ops_log.lock()
             && let Some(captured_op) = capture_test_op(&op)
@@ -1473,7 +1611,13 @@ impl ThreadManagerState {
         }
         thread
             .io
-            .submit_with_trace(op, /*trace*/ None, parent_turn_id, root_turn_id)
+            .submit_with_trace(
+                op,
+                /*trace*/ None,
+                parent_turn_id,
+                root_turn_id,
+                admission,
+            )
             .await
     }
 
@@ -1783,6 +1927,7 @@ impl ThreadManagerState {
 
     /// Spawn a new thread with optional history and register it with the manager.
     async fn spawn_thread(&self, request: ThreadSpawnRequest) -> CodexResult<NewThread> {
+        let _admission = self.acquire_new_work_admission().await?;
         let ThreadSpawnRequest {
             options,
             auth_manager,

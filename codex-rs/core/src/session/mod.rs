@@ -805,6 +805,7 @@ impl SessionIo {
     pub(crate) async fn submit(&self, op: Op) -> CodexResult<String> {
         self.submit_with_trace(
             op, /*trace*/ None, /*parent_turn_id*/ None, /*root_turn_id*/ None,
+            /*new_work_admission*/ None,
         )
         .await
     }
@@ -815,6 +816,7 @@ impl SessionIo {
         trace: Option<W3cTraceContext>,
         parent_turn_id: Option<String>,
         root_turn_id: Option<String>,
+        new_work_admission: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> CodexResult<String> {
         let id = new_submission_id();
         let sub = Submission {
@@ -823,6 +825,7 @@ impl SessionIo {
             trace,
             parent_turn_id,
             root_turn_id,
+            new_work_admission,
         };
         self.submit_with_id(sub).await?;
         Ok(id)
@@ -848,6 +851,7 @@ impl SessionIo {
         &self,
         mut request: TurnInputRequest,
         mode: TurnInputMode,
+        new_work_admission: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> CodexResult<TurnInputSubmission> {
         let id = new_submission_id();
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -862,6 +866,7 @@ impl SessionIo {
             trace,
             parent_turn_id: None,
             root_turn_id: None,
+            new_work_admission,
         })
         .await?;
         reply_rx.await.unwrap_or(Err(CodexErr::InternalAgentDied))
@@ -872,6 +877,7 @@ impl SessionIo {
         thread_settings: ThreadSettingsOverrides,
         trace: Option<W3cTraceContext>,
         turn_id: String,
+        new_work_admission: tokio::sync::OwnedRwLockReadGuard<()>,
     ) -> CodexResult<TurnInputSubmission> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.submit_with_id(Submission {
@@ -883,6 +889,7 @@ impl SessionIo {
             trace,
             parent_turn_id: None,
             root_turn_id: None,
+            new_work_admission: Some(new_work_admission),
         })
         .await?;
         reply_rx.await.unwrap_or(Err(CodexErr::InternalAgentDied))

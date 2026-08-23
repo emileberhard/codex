@@ -1155,6 +1155,25 @@ async fn run_review_on_session(
         .unwrap_or_else(|| params.parent_context.turn().config.cwd.clone());
 
     let parent_turn = params.parent_context.turn();
+    let _admission = match params
+        .parent_session
+        .services
+        .agent_control
+        .acquire_new_work_admission()
+        .await
+    {
+        Ok(admission) => admission,
+        Err(error) => {
+            return (
+                GuardianReviewSessionOutcome::SessionFailed {
+                    error: error.into(),
+                    error_info: None,
+                },
+                false,
+                analytics_result,
+            );
+        }
+    };
     let submission = review_session.io.submit_turn_input(
         TurnInputRequest::user_input(prompt_items.items)
             .with_thread_settings(codex_protocol::protocol::ThreadSettingsOverrides {
@@ -1183,6 +1202,7 @@ async fn run_review_on_session(
                 root_turn_id: parent_turn.turn_metadata_state.root_turn_id(),
             }),
         TurnInputMode::StartIfIdle,
+        Some(_admission),
     );
     let submit_result = run_before_review_deadline(
         deadline,

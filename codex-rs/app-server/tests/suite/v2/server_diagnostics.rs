@@ -56,6 +56,14 @@ async fn server_diagnostics_exposes_process_and_registered_thread_gauge() -> Res
             name: "core.threads.live".to_string(),
             value: 1,
         },
+        ServerDiagnosticsGauge {
+            name: "app.work.new_admission_fenced".to_string(),
+            value: 0,
+        },
+        ServerDiagnosticsGauge {
+            name: "app.work.new_admission_closed".to_string(),
+            value: 0,
+        },
     ] {
         assert_eq!(
             diagnostics

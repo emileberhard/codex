@@ -409,6 +409,7 @@ impl AgentControl {
         session_source: Option<SessionSource>,
         options: SpawnAgentOptions,
     ) -> CodexResult<LiveAgent> {
+        let _admission = self.acquire_new_work_admission().await?;
         let state = self.upgrade()?;
         let multi_agent_version = state
             .effective_multi_agent_version_for_spawn(
