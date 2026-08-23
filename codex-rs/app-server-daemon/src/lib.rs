@@ -3,6 +3,7 @@ mod client;
 mod managed_install;
 mod remote_control_client;
 mod settings;
+mod stdio_proxy;
 mod update_loop;
 
 use std::path::Path;
@@ -23,6 +24,7 @@ use managed_install::managed_codex_bin;
 use managed_install::managed_codex_version;
 use serde::Serialize;
 use settings::DaemonSettings;
+pub use stdio_proxy::proxy_stdio;
 use tokio::time::sleep;
 
 const START_POLL_INTERVAL: Duration = Duration::from_millis(50);
