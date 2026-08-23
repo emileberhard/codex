@@ -1285,17 +1285,25 @@ impl TurnRequestProcessor {
         else {
             return Ok(None);
         };
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.submit_core_op(
             request_id,
             thread.as_ref(),
-            Op::RealtimeConversationHandoffAppend(ConversationHandoffOutputParams {
-                handoff_id: params.handoff_id,
-                text: params.text,
-                phase: params.phase,
-            }),
+            Op::RealtimeConversationHandoffAppend {
+                params: ConversationHandoffOutputParams {
+                    handoff_id: params.handoff_id,
+                    text: params.text,
+                    phase: params.phase,
+                },
+                reply: reply_tx,
+            },
         )
         .await
         .map_err(|err| internal_error(format!("failed to append realtime handoff: {err}")))?;
+        reply_rx
+            .await
+            .map_err(|_| internal_error("realtime handoff append response was dropped"))?
+            .map_err(|err| invalid_request(err.to_string()))?;
         Ok(Some(ThreadRealtimeHandoffAppendResponse::default()))
     }
 
@@ -1310,17 +1318,25 @@ impl TurnRequestProcessor {
         else {
             return Ok(None);
         };
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.submit_core_op(
             request_id,
             thread.as_ref(),
-            Op::RealtimeConversationHandoffComplete(ConversationHandoffOutputParams {
-                handoff_id: params.handoff_id,
-                text: params.text,
-                phase: params.phase,
-            }),
+            Op::RealtimeConversationHandoffComplete {
+                params: ConversationHandoffOutputParams {
+                    handoff_id: params.handoff_id,
+                    text: params.text,
+                    phase: params.phase,
+                },
+                reply: reply_tx,
+            },
         )
         .await
         .map_err(|err| internal_error(format!("failed to complete realtime handoff: {err}")))?;
+        reply_rx
+            .await
+            .map_err(|_| internal_error("realtime handoff completion response was dropped"))?
+            .map_err(|err| invalid_request(err.to_string()))?;
         Ok(Some(ThreadRealtimeHandoffCompleteResponse::default()))
     }
 

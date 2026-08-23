@@ -8,6 +8,7 @@ use super::RealtimeSessionKind;
 use super::RealtimeStreamedItem;
 use super::classify_realtime_input_error;
 use super::classify_realtime_input_error_with_pending;
+use super::clear_active_handoff_if_matches;
 use super::realtime_delegation_from_handoff;
 use super::realtime_request_headers;
 use super::realtime_text_from_handoff_request;
@@ -205,7 +206,7 @@ fn classifies_outbound_api_failures_as_transport_loss() {
 }
 
 #[tokio::test]
-async fn clears_active_handoff_explicitly() {
+async fn completion_clears_only_the_handoff_it_completed() {
     let (tx, _rx) = bounded(1);
     let state = RealtimeHandoffState {
         output_tx: tx,
@@ -226,7 +227,12 @@ async fn clears_active_handoff_explicitly() {
         Some("handoff_1".to_string())
     );
 
-    state.stream.lock().await.active_handoff = None;
+    assert!(!clear_active_handoff_if_matches(&state, "older_handoff").await);
+    assert_eq!(
+        state.stream.lock().await.active_handoff.clone(),
+        Some("handoff_1".to_string())
+    );
+    assert!(clear_active_handoff_if_matches(&state, "handoff_1").await);
     assert_eq!(state.stream.lock().await.active_handoff.clone(), None);
 }
 

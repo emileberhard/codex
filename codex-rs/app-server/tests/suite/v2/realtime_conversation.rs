@@ -2728,6 +2728,7 @@ async fn websocket_v3_client_owned_handoff_skips_codex_and_accepts_correlated_ou
             ],
             vec![],
             vec![],
+            vec![],
         ])]),
     )
     .await?;
@@ -2815,6 +2816,25 @@ async fn websocket_v3_client_owned_handoff_skips_codex_and_accepts_correlated_ou
             "channel": "speakable"
         })
     );
+
+    let stale_complete_request_id = harness
+        .mcp
+        .send_thread_realtime_handoff_complete_request(ThreadRealtimeHandoffCompleteParams {
+            thread_id: harness.thread_id.clone(),
+            handoff_id: "delegation_external".to_string(),
+            text: "stale duplicate".to_string(),
+            phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+        })
+        .await?;
+    let error: JSONRPCError = timeout(
+        DEFAULT_TIMEOUT,
+        harness
+            .mcp
+            .read_stream_until_error_message(RequestId::Integer(stale_complete_request_id)),
+    )
+    .await??;
+    assert_eq!(error.error.code, -32600);
+    assert!(error.error.message.contains("is not active"));
 
     harness.shutdown().await;
     Ok(())

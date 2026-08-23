@@ -574,10 +574,16 @@ pub enum Op {
     RealtimeConversationSpeech(ConversationSpeechParams),
 
     /// Append progress to a client-executed realtime handoff.
-    RealtimeConversationHandoffAppend(ConversationHandoffOutputParams),
+    RealtimeConversationHandoffAppend {
+        params: ConversationHandoffOutputParams,
+        reply: oneshot::Sender<CodexResult<()>>,
+    },
 
     /// Complete a client-executed realtime handoff.
-    RealtimeConversationHandoffComplete(ConversationHandoffOutputParams),
+    RealtimeConversationHandoffComplete {
+        params: ConversationHandoffOutputParams,
+        reply: oneshot::Sender<CodexResult<()>>,
+    },
 
     /// Close the running realtime conversation stream.
     RealtimeConversationClose,
@@ -896,8 +902,10 @@ impl Op {
             Self::RealtimeConversationAudio(_) => "realtime_conversation_audio",
             Self::RealtimeConversationText(_) => "realtime_conversation_text",
             Self::RealtimeConversationSpeech(_) => "realtime_conversation_speech",
-            Self::RealtimeConversationHandoffAppend(_) => "realtime_conversation_handoff_append",
-            Self::RealtimeConversationHandoffComplete(_) => {
+            Self::RealtimeConversationHandoffAppend { .. } => {
+                "realtime_conversation_handoff_append"
+            }
+            Self::RealtimeConversationHandoffComplete { .. } => {
                 "realtime_conversation_handoff_complete"
             }
             Self::RealtimeConversationClose => "realtime_conversation_close",

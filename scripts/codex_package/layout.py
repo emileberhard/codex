@@ -1,15 +1,14 @@
 """Canonical Codex package directory layout."""
 
+import hashlib
 import json
+import os
 import shutil
 import stat
 from pathlib import Path
 
-from .targets import PackageInputs
-from .targets import PackageVariant
-from .targets import TargetSpec
+from .targets import PackageInputs, PackageVariant, TargetSpec
 from .zsh import ZSH_RESOURCE_PATH
-
 
 LAYOUT_VERSION = 1
 
@@ -90,8 +89,26 @@ def build_package_dir(
         "entrypoint": f"bin/{entrypoint_name}",
         "resourcesDir": "codex-resources",
         "pathDir": "codex-path",
+        "binaries": {
+            f"bin/{entrypoint_name}": {
+                "sha256": sha256(bin_dir / entrypoint_name),
+            },
+            f"bin/codex-code-mode-host{spec.exe_suffix}": {
+                "sha256": sha256(bin_dir / f"codex-code-mode-host{spec.exe_suffix}"),
+            },
+        },
     }
+    if source_commit := os.environ.get("CODEX_SOURCE_COMMIT"):
+        metadata["sourceCommit"] = source_commit
     write_json(package_dir / "codex-package.json", metadata)
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def validate_package_dir(

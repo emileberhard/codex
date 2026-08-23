@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 
+import hashlib
+import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -95,6 +99,50 @@ class PackageLayoutTest(unittest.TestCase):
             )
 
             self.assertTrue((package_dir / "bin" / "codex-code-mode-host").is_file())
+
+    def test_package_records_source_commit_and_binary_digests(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            package_dir = root / "package"
+            package_dir.mkdir()
+            entrypoint = touch_executable(root / "codex-app-server")
+            host = touch_executable(root / "codex-code-mode-host")
+            entrypoint.write_bytes(b"app server")
+            host.write_bytes(b"code mode host")
+            inputs = PackageInputs(
+                entrypoint_bin=entrypoint,
+                code_mode_host_bin=host,
+                rg_bin=touch_executable(root / "rg"),
+                zsh_bin=None,
+                bwrap_bin=touch_executable(root / "bwrap"),
+                codex_command_runner_bin=None,
+                codex_windows_sandbox_setup_bin=None,
+            )
+
+            with patch.dict(os.environ, {"CODEX_SOURCE_COMMIT": "abc123"}):
+                build_package_dir(
+                    package_dir,
+                    "1.2.3",
+                    PACKAGE_VARIANTS["codex-app-server"],
+                    TARGET_SPECS["x86_64-unknown-linux-musl"],
+                    inputs,
+                )
+
+            metadata = json.loads(
+                (package_dir / "codex-package.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(metadata["sourceCommit"], "abc123")
+            self.assertEqual(
+                metadata["binaries"],
+                {
+                    "bin/codex-app-server": {
+                        "sha256": hashlib.sha256(b"app server").hexdigest()
+                    },
+                    "bin/codex-code-mode-host": {
+                        "sha256": hashlib.sha256(b"code mode host").hexdigest()
+                    },
+                },
+            )
 
 
 def touch_executable(path: Path) -> Path:

@@ -587,14 +587,14 @@ pub(super) async fn submission_loop(
                     handle_realtime_conversation_speech(&sess, sub.id.clone(), params).await;
                     false
                 }
-                Op::RealtimeConversationHandoffAppend(params) => {
-                    handle_realtime_conversation_handoff_append(&sess, sub.id.clone(), params)
-                        .await;
+                Op::RealtimeConversationHandoffAppend { params, reply } => {
+                    let _ = reply
+                        .send(handle_realtime_conversation_handoff_append(&sess, params).await);
                     false
                 }
-                Op::RealtimeConversationHandoffComplete(params) => {
-                    handle_realtime_conversation_handoff_complete(&sess, sub.id.clone(), params)
-                        .await;
+                Op::RealtimeConversationHandoffComplete { params, reply } => {
+                    let _ = reply
+                        .send(handle_realtime_conversation_handoff_complete(&sess, params).await);
                     false
                 }
                 Op::RealtimeConversationClose => {

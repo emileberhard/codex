@@ -1073,6 +1073,7 @@ impl RealtimeConversationManager {
             )));
         }
 
+        let handoff_id = params.handoff_id.clone();
         let output = if complete {
             RealtimeOutbound::CompletedHandoff {
                 handoff_id: params.handoff_id,
@@ -1092,7 +1093,7 @@ impl RealtimeConversationManager {
             .await
             .map_err(|_| CodexErr::InvalidRequest("conversation is not running".to_string()))?;
         if complete {
-            self.clear_active_handoff().await;
+            self.clear_active_handoff_if(&handoff_id).await;
         }
         Ok(())
     }
@@ -1152,6 +1153,17 @@ impl RealtimeConversationManager {
         }
     }
 
+    async fn clear_active_handoff_if(&self, handoff_id: &str) {
+        let handoff = {
+            let guard = self.state.lock().await;
+            guard.as_ref().map(|state| state.handoff.clone())
+        };
+        let Some(handoff) = handoff else {
+            return;
+        };
+        clear_active_handoff_if_matches(&handoff, handoff_id).await;
+    }
+
     pub(crate) async fn shutdown(&self) -> CodexResult<()> {
         let state = {
             let mut guard = self.state.lock().await;
@@ -1163,6 +1175,23 @@ impl RealtimeConversationManager {
         }
         Ok(())
     }
+}
+
+async fn clear_active_handoff_if_matches(handoff: &RealtimeHandoffState, handoff_id: &str) -> bool {
+    let cleared = {
+        let mut stream = handoff.stream.lock().await;
+        if stream.active_handoff.as_deref() != Some(handoff_id) {
+            false
+        } else {
+            stream.active_handoff = None;
+            stream.items.clear();
+            true
+        }
+    };
+    if cleared {
+        *handoff.last_output.lock().await = None;
+    }
+    cleared
 }
 
 async fn stop_conversation_state(
@@ -1876,22 +1905,16 @@ pub(crate) async fn handle_speech(
 
 pub(crate) async fn handle_client_handoff_append(
     sess: &Arc<Session>,
-    sub_id: String,
     params: ConversationHandoffOutputParams,
-) {
-    if let Err(err) = sess.conversation.append_client_handoff(params).await {
-        send_conversation_error(sess, sub_id, err.to_string(), CodexErrorInfo::BadRequest).await;
-    }
+) -> CodexResult<()> {
+    sess.conversation.append_client_handoff(params).await
 }
 
 pub(crate) async fn handle_client_handoff_complete(
     sess: &Arc<Session>,
-    sub_id: String,
     params: ConversationHandoffOutputParams,
-) {
-    if let Err(err) = sess.conversation.complete_client_handoff(params).await {
-        send_conversation_error(sess, sub_id, err.to_string(), CodexErrorInfo::BadRequest).await;
-    }
+) -> CodexResult<()> {
+    sess.conversation.complete_client_handoff(params).await
 }
 
 pub(crate) async fn handle_close(sess: &Arc<Session>, sub_id: String) {
