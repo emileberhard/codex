@@ -261,24 +261,34 @@ impl PidBackend {
                     // A previous daemon invocation may have started this child; reap it if exited.
                     unsafe { libc::waitpid(raw_pid, std::ptr::null_mut(), libc::WNOHANG) };
                 }
-                if !self.record_is_active(&record).await? {
+                let active = match self.record_is_active(&record).await {
+                    Ok(active) => active,
+                    Err(_error) if tokio::time::Instant::now() < deadline => {
+                        sleep(STOP_POLL_INTERVAL).await;
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(error).with_context(|| {
+                            format!(
+                                "failed to verify pid-managed app server {pid} exit after requesting shutdown"
+                            )
+                        });
+                    }
+                };
+                if !active {
                     match self.refresh_after_stale_record(&record).await? {
                         PidFileState::Missing => return Ok(()),
                         PidFileState::Starting | PidFileState::Running(_) => break,
                     }
                 }
                 if tokio::time::Instant::now() >= deadline {
-                    break;
+                    bail!("timed out waiting for pid-managed app server {pid} to stop");
                 }
                 if !forced && started_at.elapsed() >= STOP_GRACE_PERIOD {
                     self.force_terminate_process(pid)?;
                     forced = true;
                 }
                 sleep(STOP_POLL_INTERVAL).await;
-            }
-
-            if self.record_is_active(&record).await? {
-                bail!("timed out waiting for pid-managed app server {pid} to stop");
             }
         }
     }
@@ -787,88 +797,26 @@ async fn inspect_empty_pid_reservation(
     Ok(EmptyPidReservation::Stale)
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(unix)]
 async fn read_process_start_time(pid: u32) -> Result<String> {
-    const PROC_PIDTBSDINFO: libc::c_int = 3;
-
-    #[repr(C)]
-    #[derive(Default)]
-    struct ProcBsdInfo {
-        pbi_flags: u32,
-        pbi_status: u32,
-        pbi_xstatus: u32,
-        pbi_pid: u32,
-        pbi_ppid: u32,
-        pbi_uid: u32,
-        pbi_gid: u32,
-        pbi_ruid: u32,
-        pbi_rgid: u32,
-        pbi_svuid: u32,
-        pbi_svgid: u32,
-        rfu_1: u32,
-        pbi_comm: [u8; 16],
-        pbi_name: [u8; 32],
-        pbi_nfiles: u32,
-        pbi_pgid: u32,
-        pbi_pjobc: u32,
-        e_tdev: u32,
-        e_tpgid: u32,
-        pbi_nice: i32,
-        pbi_start_tvsec: u64,
-        pbi_start_tvusec: u64,
-    }
-
-    unsafe extern "C" {
-        fn proc_pidinfo(
-            pid: libc::c_int,
-            flavor: libc::c_int,
-            arg: u64,
-            buffer: *mut libc::c_void,
-            buffersize: libc::c_int,
-        ) -> libc::c_int;
-    }
-
-    let raw_pid = libc::c_int::try_from(pid)
-        .with_context(|| format!("pid-managed app server pid {pid} is out of range"))?;
-    let mut info = ProcBsdInfo::default();
-    let expected_size = std::mem::size_of::<ProcBsdInfo>();
-    let actual_size = unsafe {
-        proc_pidinfo(
-            raw_pid,
-            PROC_PIDTBSDINFO,
-            0,
-            (&mut info as *mut ProcBsdInfo).cast(),
-            libc::c_int::try_from(expected_size).context("proc_bsdinfo size is out of range")?,
-        )
-    };
-    if usize::try_from(actual_size).ok() != Some(expected_size) {
-        bail!("failed to read kernel start time for pid-managed app server {pid}");
-    }
-    Ok(format!(
-        "macos:{}:{}",
-        info.pbi_start_tvsec, info.pbi_start_tvusec
-    ))
-}
-
-#[cfg(target_os = "linux")]
-async fn read_process_start_time(pid: u32) -> Result<String> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat"))
+    // ChatGPT invokes its bundled Codex daemon against this same record before
+    // connecting. Keep the persisted identity byte-compatible with upstream.
+    let output = Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
         .await
-        .with_context(|| format!("failed to read kernel start time for pid {pid}"))?;
-    let fields = stat
-        .rsplit_once(") ")
-        .map(|(_, fields)| fields)
-        .ok_or_else(|| anyhow::anyhow!("invalid /proc/{pid}/stat process identity"))?;
-    let start_ticks = fields
-        .split_whitespace()
-        .nth(19)
-        .ok_or_else(|| anyhow::anyhow!("/proc/{pid}/stat omitted process start ticks"))?;
-    Ok(format!("linux:{start_ticks}"))
-}
+        .context("failed to invoke ps for pid-managed app server")?;
+    if !output.status.success() {
+        bail!("failed to read start time for pid-managed app server {pid}");
+    }
 
-#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
-async fn read_process_start_time(pid: u32) -> Result<String> {
-    bail!("kernel process identity is unsupported for pid-managed app server {pid}")
+    let start_time = String::from_utf8(output.stdout)
+        .context("pid-managed app server start time was not utf-8")?;
+    let start_time = start_time.trim();
+    if start_time.is_empty() {
+        bail!("pid-managed app server {pid} has no recorded start time");
+    }
+    Ok(start_time.to_string())
 }
 
 #[cfg(all(test, unix))]

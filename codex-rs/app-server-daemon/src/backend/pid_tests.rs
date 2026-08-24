@@ -190,6 +190,44 @@ async fn stop_reaps_untracked_app_server_child() {
 }
 
 #[tokio::test]
+async fn stop_handles_an_orphaned_app_server_exit() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let pid_file = temp_dir.path().join("app-server.pid");
+    let output = std::process::Command::new("sh")
+        .args(["-c", "sleep 5 >/dev/null 2>&1 & echo $!"])
+        .output()
+        .expect("spawn orphaned app-server shim");
+    assert!(output.status.success());
+    let pid = String::from_utf8(output.stdout)
+        .expect("pid output is UTF-8")
+        .trim()
+        .parse()
+        .expect("pid output is numeric");
+    let record = PidRecord {
+        pid,
+        process_start_time: read_process_start_time(pid).await.expect("start time"),
+    };
+    tokio::fs::write(
+        &pid_file,
+        serde_json::to_vec(&record).expect("serialize pid"),
+    )
+    .await
+    .expect("write pid file");
+    let backend = PidBackend::new(
+        temp_dir.path().join("codex"),
+        pid_file.clone(),
+        /*remote_control_enabled*/ false,
+    );
+
+    tokio::time::timeout(Duration::from_secs(2), backend.stop())
+        .await
+        .expect("stop timed out")
+        .expect("stop");
+
+    assert!(!pid_file.exists());
+}
+
+#[tokio::test]
 async fn zombie_process_is_not_an_active_pid_record() {
     let child = std::process::Command::new("sh")
         .arg("-c")
@@ -232,7 +270,27 @@ async fn zombie_process_is_not_an_active_pid_record() {
 }
 
 #[tokio::test]
-async fn same_pid_with_a_different_kernel_start_identity_is_rejected() {
+async fn recorded_start_time_matches_the_upstream_ps_format() {
+    let pid = std::process::id();
+    let output = tokio::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "lstart="])
+        .output()
+        .await
+        .expect("invoke ps");
+    assert!(output.status.success());
+
+    let expected = String::from_utf8(output.stdout)
+        .expect("ps output is UTF-8")
+        .trim()
+        .to_string();
+    assert_eq!(
+        read_process_start_time(pid).await.expect("start time"),
+        expected
+    );
+}
+
+#[tokio::test]
+async fn same_pid_with_a_different_start_time_is_rejected() {
     let mut child = std::process::Command::new("sleep")
         .arg("5")
         .stdin(Stdio::null())
