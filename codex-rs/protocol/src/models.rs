@@ -1316,6 +1316,24 @@ impl ResponseItem {
         }
     }
 
+    /// Removes content classifications from the provider request while keeping
+    /// older passthrough fields that the ChatGPT backend already accepts.
+    pub fn clear_content_item_kinds(&mut self) {
+        let Some(slot) = self.internal_chat_message_metadata_passthrough_mut() else {
+            return;
+        };
+        let Some(metadata) = slot.as_mut() else {
+            return;
+        };
+        metadata.content_item_kinds = None;
+        if metadata.turn_id.is_none()
+            && metadata.create_time.is_none()
+            && metadata.executed_tool_calls.is_none()
+        {
+            *slot = None;
+        }
+    }
+
     fn internal_chat_message_metadata_passthrough(
         &self,
     ) -> Option<&InternalChatMessageMetadataPassthrough> {

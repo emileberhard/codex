@@ -585,7 +585,7 @@ impl ModelClient {
             RequestRouteTelemetry::for_endpoint(RESPONSES_COMPACT_ENDPOINT),
             self.state.auth_env_telemetry.clone(),
         );
-        let request = self.build_responses_request(
+        let mut request = self.build_responses_request(
             prompt,
             model_info,
             settings.effort,
@@ -593,6 +593,7 @@ impl ModelClient {
             settings.service_tier,
             responses_metadata,
         )?;
+        Self::strip_chatgpt_content_item_kinds(client_setup.auth.as_ref(), &mut request.input);
         let ResponsesApiRequest {
             model,
             instructions,
@@ -991,6 +992,17 @@ impl ModelClient {
             client_metadata: Some(responses_metadata.client_metadata()),
         };
         Ok(request)
+    }
+
+    fn strip_chatgpt_content_item_kinds(auth: Option<&CodexAuth>, input: &mut [ResponseItem]) {
+        // Remove this compatibility strip once the ChatGPT Responses backend
+        // accepts `content_item_kinds`; on 2026-08-24 it rejected that exact
+        // nested parameter with HTTP 400 before a turn could start.
+        if auth.is_some_and(CodexAuth::is_chatgpt_auth) {
+            for item in input {
+                item.clear_content_item_kinds();
+            }
+        }
     }
 
     fn prepare_response_items_for_request(&self, input: &mut [ResponseItem]) {
@@ -1540,6 +1552,10 @@ impl ModelClientSession {
                 service_tier.clone(),
                 responses_metadata,
             )?;
+            ModelClient::strip_chatgpt_content_item_kinds(
+                client_setup.auth.as_ref(),
+                &mut request.input,
+            );
             if let Some(header_value) = self.client.build_routing_hint_header(
                 client_setup.auth.as_ref(),
                 &request.model,
@@ -1667,6 +1683,10 @@ impl ModelClientSession {
                 service_tier.clone(),
                 responses_metadata,
             )?;
+            ModelClient::strip_chatgpt_content_item_kinds(
+                client_setup.auth.as_ref(),
+                &mut request.input,
+            );
             let mut websocket_metadata = responses_metadata.clone();
             websocket_metadata.routing_hint = self.client.build_routing_hint_header(
                 client_setup.auth.as_ref(),
