@@ -18,6 +18,7 @@ use tokio::io::AsyncSeekExt;
 #[cfg(unix)]
 use tokio::process::Command;
 use tokio::time::sleep;
+use tracing::warn;
 
 const STOP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const STOP_GRACE_PERIOD: Duration = Duration::from_secs(60);
@@ -127,7 +128,7 @@ impl PidBackend {
                             if self.record_is_active(&record).await? {
                                 return Ok(None);
                             }
-                            let _ = fs::remove_file(&self.pid_file).await;
+                            self.remove_inactive_record(&record).await?;
                             continue;
                         }
                         PidFileState::Starting => {
@@ -424,13 +425,36 @@ impl PidBackend {
         let reservation_lock = self.acquire_reservation_lock().await?;
         let state = match self.read_pid_file_state_with_lock_held().await? {
             PidFileState::Running(record) if record == *expected => {
-                let _ = fs::remove_file(&self.pid_file).await;
-                PidFileState::Missing
+                if self.record_is_active(&record).await? {
+                    PidFileState::Running(record)
+                } else {
+                    self.remove_inactive_record(&record).await?;
+                    PidFileState::Missing
+                }
             }
             state => state,
         };
         drop(reservation_lock);
         Ok(state)
+    }
+
+    async fn remove_inactive_record(&self, record: &PidRecord) -> Result<()> {
+        warn!(
+            pid = record.pid,
+            recorded_start_time = %record.process_start_time,
+            codex_binary = %self.codex_bin.display(),
+            codex_version = env!("CARGO_PKG_VERSION"),
+            reason = "process is absent or zombie",
+            pid_file = %self.pid_file.display(),
+            "removing inactive pid-managed app-server record"
+        );
+        match fs::remove_file(&self.pid_file).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => {
+                Err(error).with_context(|| format!("failed to remove {}", self.pid_file.display()))
+            }
+        }
     }
 
     async fn acquire_reservation_lock(&self) -> Result<fs::File> {
@@ -638,7 +662,13 @@ async fn process_matches_record(record: &PidRecord) -> Result<bool> {
     }
 
     match read_process_start_time(record.pid).await {
-        Ok(start_time) => Ok(start_time == record.process_start_time),
+        Ok(start_time) if start_time == record.process_start_time => Ok(true),
+        Ok(start_time) => bail!(
+            "pid-managed app server {} is alive, but its process identity cannot be verified: recorded start time {:?}, observed {:?}",
+            record.pid,
+            record.process_start_time,
+            start_time
+        ),
         Err(_err) if !process_exists(record.pid) => Ok(false),
         Err(err) => Err(err),
     }

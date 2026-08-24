@@ -290,7 +290,7 @@ async fn recorded_start_time_matches_the_upstream_ps_format() {
 }
 
 #[tokio::test]
-async fn same_pid_with_a_different_start_time_is_rejected() {
+async fn live_pid_with_a_different_start_time_fails_closed() {
     let mut child = std::process::Command::new("sleep")
         .arg("5")
         .stdin(Stdio::null())
@@ -305,10 +305,50 @@ async fn same_pid_with_a_different_start_time_is_rejected() {
         process_start_time: format!("{actual}:different-subsecond"),
     };
 
-    assert!(
-        !process_matches_record(&record)
-            .await
-            .expect("inspect mismatched identity")
+    let error = process_matches_record(&record)
+        .await
+        .expect_err("mismatched live identity must be unverifiable");
+    assert!(error.to_string().contains("identity cannot be verified"));
+
+    child.kill().expect("stop child");
+    child.wait().expect("reap child");
+}
+
+#[tokio::test]
+async fn live_unverifiable_pid_record_is_preserved() {
+    let temp_dir = TempDir::new().expect("temp dir");
+    let pid_file = temp_dir.path().join("app-server.pid");
+    let mut child = std::process::Command::new("sleep")
+        .arg("5")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn child");
+    let record = PidRecord {
+        pid: child.id(),
+        process_start_time: "macos:foreign-format".to_string(),
+    };
+    tokio::fs::write(
+        &pid_file,
+        serde_json::to_vec(&record).expect("serialize pid record"),
+    )
+    .await
+    .expect("write pid record");
+    let backend = PidBackend::new(
+        temp_dir.path().join("codex"),
+        pid_file.clone(),
+        /*remote_control_enabled*/ false,
+    );
+
+    let error = backend
+        .running_pid()
+        .await
+        .expect_err("foreign live identity must fail closed");
+    assert!(error.to_string().contains("identity cannot be verified"));
+    assert_eq!(
+        tokio::fs::read(&pid_file).await.expect("preserved record"),
+        serde_json::to_vec(&record).expect("serialize expected record")
     );
 
     child.kill().expect("stop child");

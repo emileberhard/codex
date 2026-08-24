@@ -108,3 +108,9 @@ The daemon stores its local state under `CODEX_HOME/app-server-daemon/`:
 - `settings.json` for persisted launch settings
 - `app-server.pid` for the app-server process record
 - `daemon.lock` for daemon-wide lifecycle serialization
+
+The pid record uses the same `ps lstart` process identity as the bundled
+desktop lifecycle client. A record is removed automatically only after its pid
+is absent or zombie. If the pid is alive but its recorded identity is
+unreadable or differs, lifecycle commands fail closed and preserve the record
+for explicit recovery instead of risking an unowned live daemon.
