@@ -99,10 +99,10 @@ fn main() -> anyhow::Result<()> {
                 (false, true) => codex_app_server::RemoteControlStartupMode::DisabledEphemeral,
                 (false, false) => codex_app_server::RemoteControlStartupMode::ResolvePersisted,
             };
-        let (start_fenced, restart_recovery_capability) =
+        let (start_fenced, restart_recovery_grant) =
             codex_app_server::take_restart_recovery_startup_options()?;
         runtime_options.start_fenced = start_fenced;
-        runtime_options.restart_recovery_capability = restart_recovery_capability;
+        runtime_options.restart_recovery_grant = restart_recovery_grant;
 
         run_main_with_transport_options(
             arg0_paths,

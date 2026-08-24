@@ -135,6 +135,7 @@ fn reject_removed_permission_profile(request: &JSONRPCRequest) -> Result<(), JSO
 pub(crate) struct MessageProcessor {
     outgoing: Arc<OutgoingMessageSender>,
     thread_manager: Arc<ThreadManager>,
+    restart_recovery_authorizer: Arc<crate::restart_recovery::RestartRecoveryAuthorizer>,
     models_refresh_worker: ModelsRefreshWorker,
     turn_cost_worker: Option<TurnCostWorker>,
     skills_watcher: Arc<SkillsWatcher>,
@@ -260,7 +261,7 @@ pub(crate) struct MessageProcessorArgs {
     pub(crate) rpc_transport: AppServerRpcTransport,
     pub(crate) remote_control_handle: Option<RemoteControlHandle>,
     pub(crate) plugin_startup_tasks: crate::PluginStartupTasks,
-    pub(crate) restart_recovery_capability: Option<String>,
+    pub(crate) restart_recovery_grant: Option<crate::RestartRecoveryGrant>,
 }
 
 impl MessageProcessor {
@@ -285,8 +286,11 @@ impl MessageProcessor {
             rpc_transport,
             remote_control_handle,
             plugin_startup_tasks,
-            restart_recovery_capability,
+            restart_recovery_grant,
         } = args;
+        let restart_recovery_authorizer = Arc::new(
+            crate::restart_recovery::RestartRecoveryAuthorizer::new(restart_recovery_grant),
+        );
         let thread_state_manager = ThreadStateManager::new();
         // The thread store is intentionally process-scoped. Config reloads can
         // affect per-thread behavior, but they must not move newly started,
@@ -359,8 +363,7 @@ impl MessageProcessor {
                     outgoing.clone(),
                     thread_state_manager.clone(),
                 )),
-            )
-            .with_restart_recovery_capability(restart_recovery_capability.clone());
+            );
             match code_mode_session_provider {
                 Some(provider) => manager.with_code_mode_session_provider(provider),
                 None => manager,
@@ -561,6 +564,7 @@ impl MessageProcessor {
         Self {
             outgoing,
             thread_manager,
+            restart_recovery_authorizer,
             models_refresh_worker,
             turn_cost_worker,
             skills_watcher,
@@ -608,10 +612,20 @@ impl MessageProcessor {
 
     pub(crate) fn unfence_new_work(&self) {
         self.thread_manager.unfence_new_work();
+        self.restart_recovery_authorizer.clear();
     }
 
     pub(crate) fn new_work_admission_fenced(&self) -> bool {
         self.thread_manager.new_work_admission_fenced()
+    }
+
+    fn require_settled_restart_fence(&self) -> Result<(), JSONRPCErrorError> {
+        if self.thread_manager.new_work_admission_fenced() {
+            return Ok(());
+        }
+        Err(invalid_request(
+            "restart handoff requires a settled new-work admission fence",
+        ))
     }
 
     pub(crate) async fn process_request(
@@ -1173,6 +1187,28 @@ impl MessageProcessor {
                         client_mcp_extensions.clone(),
                     )
                     .await
+            }
+            ClientRequest::ThreadRestartSuspend { params, .. } => {
+                self.require_settled_restart_fence()?;
+                self.thread_processor
+                    .thread_restart_suspend(params)
+                    .await
+                    .map(|response| Some(response.into()))
+            }
+            ClientRequest::ThreadRestartRecover { params, .. } => {
+                self.require_settled_restart_fence()?;
+                let generation_id = self.restart_recovery_authorizer.authorize(&params)?;
+                self.thread_processor
+                    .thread_restart_recover(
+                        request_id.clone(),
+                        params,
+                        generation_id,
+                        app_server_client_name.clone(),
+                        client_version.clone(),
+                        client_mcp_extensions.clone(),
+                    )
+                    .await
+                    .map(|response| Some(response.into()))
             }
             ClientRequest::ThreadFork { params, .. } => {
                 self.thread_processor

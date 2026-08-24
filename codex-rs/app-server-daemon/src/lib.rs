@@ -4,7 +4,6 @@ mod managed_install;
 mod remote_control_client;
 mod settings;
 mod stdio_proxy;
-mod update_loop;
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -32,7 +31,6 @@ const START_POLL_INTERVAL: Duration = Duration::from_millis(50);
 const START_TIMEOUT: Duration = Duration::from_secs(10);
 const OPERATION_LOCK_TIMEOUT: Duration = Duration::from_secs(75);
 const PID_FILE_NAME: &str = "app-server.pid";
-const UPDATE_PID_FILE_NAME: &str = "app-server-updater.pid";
 const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const STATE_DIR_NAME: &str = "app-server-daemon";
@@ -163,38 +161,6 @@ pub struct RemoteControlOutput {
     pub app_server_version: Option<String>,
 }
 
-#[cfg(unix)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RestartIfRunningOutcome {
-    Busy,
-    NotRunning,
-    NotReady,
-    AlreadyCurrent,
-    Restarted,
-}
-
-#[cfg(unix)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RestartMode {
-    IfVersionChanged,
-    Always,
-}
-
-#[cfg(unix)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum UpdaterRefreshMode {
-    None,
-    ReexecIfManagedBinaryChanged,
-}
-
-#[cfg(unix)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RestartDecision {
-    NotReady,
-    AlreadyCurrent,
-    Restart,
-}
-
 pub async fn run(command: LifecycleCommand) -> Result<LifecycleOutput> {
     ensure_supported_platform()?;
     Daemon::from_environment()?.run(command).await
@@ -238,13 +204,6 @@ pub async fn set_remote_control(mode: RemoteControlMode) -> Result<RemoteControl
     Daemon::from_environment()?.set_remote_control(mode).await
 }
 
-pub async fn run_pid_update_loop(
-    http_client_factory: codex_http_client::HttpClientFactory,
-) -> Result<()> {
-    ensure_supported_platform()?;
-    update_loop::run(http_client_factory).await
-}
-
 #[cfg(unix)]
 fn ensure_supported_platform() -> Result<()> {
     Ok(())
@@ -260,7 +219,6 @@ fn ensure_supported_platform() -> Result<()> {
 struct Daemon {
     socket_path: PathBuf,
     pid_file: PathBuf,
-    update_pid_file: PathBuf,
     operation_lock_file: PathBuf,
     settings_file: PathBuf,
     managed_codex_bin: PathBuf,
@@ -276,7 +234,6 @@ impl Daemon {
         Ok(Self {
             socket_path,
             pid_file: state_dir.join(PID_FILE_NAME),
-            update_pid_file: state_dir.join(UPDATE_PID_FILE_NAME),
             operation_lock_file: state_dir.join(OPERATION_LOCK_FILE_NAME),
             settings_file: state_dir.join(SETTINGS_FILE_NAME),
             managed_codex_bin: managed_codex_bin(codex_home.as_path()),
@@ -539,58 +496,11 @@ impl Daemon {
         }
     }
 
-    #[cfg(unix)]
-    pub(crate) async fn try_restart_if_running(
-        &self,
-        mode: RestartMode,
-        updater_refresh_mode: UpdaterRefreshMode,
-        managed_codex_bin: &Path,
-    ) -> Result<RestartIfRunningOutcome> {
-        let operation_lock = self.open_operation_lock_file().await?;
-        if !try_lock_file(&operation_lock)? {
-            return Ok(RestartIfRunningOutcome::Busy);
-        }
-        let settings = self.load_settings().await?;
-        let outcome = if let Some(backend) = self.running_backend_instance(&settings).await? {
-            let info = client::probe(&self.socket_path).await.ok();
-            if let Some(info) = info.as_ref() {
-                self.verify_probe_owner(&backend, info.process_id).await?;
-            }
-            let managed_version = if info.is_some() {
-                Some(managed_codex_version(managed_codex_bin).await?)
-            } else {
-                None
-            };
-            match restart_decision(mode, info.as_ref(), managed_version.as_deref()) {
-                RestartDecision::NotReady => return Ok(RestartIfRunningOutcome::NotReady),
-                RestartDecision::AlreadyCurrent => RestartIfRunningOutcome::AlreadyCurrent,
-                RestartDecision::Restart => {
-                    backend.stop().await?;
-                    self.ensure_app_server_absent().await?;
-                    let pid = self
-                        .start_managed_backend_with_bin(&settings, managed_codex_bin)
-                        .await?
-                        .ok_or_else(|| anyhow!("managed app server start omitted its pid"))?;
-                    self.wait_until_ready(pid).await?;
-                    RestartIfRunningOutcome::Restarted
-                }
-            }
-        } else {
-            self.ensure_app_server_absent().await?;
-            RestartIfRunningOutcome::NotRunning
-        };
-
-        if should_reexec_updater(updater_refresh_mode, outcome) {
-            crate::update_loop::reexec_managed_updater(managed_codex_bin)?;
-        }
-
-        Ok(outcome)
-    }
-
     async fn stop(&self) -> Result<LifecycleOutput> {
         let settings = self.load_settings().await?;
         if let Some(backend) = self.running_backend_instance(&settings).await? {
             backend.stop().await?;
+            self.ensure_app_server_absent().await?;
             return Ok(self
                 .output(
                     LifecycleStatus::Stopped,
@@ -803,18 +713,12 @@ impl Daemon {
             .start()
             .await?
             .ok_or_else(|| anyhow!("managed app server start omitted its pid"))?;
-        let updater = backend::pid_update_loop_backend(self.backend_paths(&settings));
-        if updater.is_starting_or_running().await? {
-            updater.stop().await?;
-        }
-        updater.start().await?;
-
         let info = self.wait_until_ready(pid).await?;
         let managed_codex_version = self.managed_codex_version_best_effort().await;
         Ok(BootstrapOutput {
             status: BootstrapStatus::Bootstrapped,
             backend: BackendKind::Pid,
-            auto_update_enabled: true,
+            auto_update_enabled: false,
             remote_control_enabled: settings.remote_control_enabled,
             managed_codex_path: self.managed_codex_bin.clone(),
             managed_codex_version,
@@ -851,8 +755,8 @@ impl Daemon {
     }
 
     async fn is_bootstrapped(&self, settings: &DaemonSettings) -> Result<bool> {
-        let updater = backend::pid_update_loop_backend(self.backend_paths(settings));
-        updater.is_starting_or_running().await
+        let _ = settings;
+        Ok(self.settings_file.try_exists()?)
     }
 
     fn ensure_managed_codex_bin(&self) -> Result<()> {
@@ -892,7 +796,6 @@ impl Daemon {
         BackendPaths {
             codex_bin: managed_codex_bin.to_path_buf(),
             pid_file: self.pid_file.clone(),
-            update_pid_file: self.update_pid_file.clone(),
             remote_control_enabled: settings.remote_control_enabled,
         }
     }
@@ -1001,32 +904,6 @@ fn already_remote_control_status(mode: RemoteControlMode) -> RemoteControlStatus
 }
 
 #[cfg(unix)]
-fn restart_decision(
-    mode: RestartMode,
-    info: Option<&client::ProbeInfo>,
-    managed_version: Option<&str>,
-) -> RestartDecision {
-    match (mode, info, managed_version) {
-        (RestartMode::IfVersionChanged, None, _) => RestartDecision::NotReady,
-        (RestartMode::IfVersionChanged, Some(info), Some(managed_version))
-            if info.app_server_version == managed_version =>
-        {
-            RestartDecision::AlreadyCurrent
-        }
-        _ => RestartDecision::Restart,
-    }
-}
-
-#[cfg(unix)]
-fn should_reexec_updater(
-    updater_refresh_mode: UpdaterRefreshMode,
-    outcome: RestartIfRunningOutcome,
-) -> bool {
-    updater_refresh_mode == UpdaterRefreshMode::ReexecIfManagedBinaryChanged
-        && outcome == RestartIfRunningOutcome::Restarted
-}
-
-#[cfg(unix)]
 fn try_lock_file(file: &tokio::fs::File) -> Result<bool> {
     use std::os::fd::AsRawFd;
 
@@ -1060,14 +937,7 @@ mod tests {
     use super::LifecycleStatus;
     use super::RemoteControlStartOutput;
     use super::RemoteControlStatus;
-    use super::RestartDecision;
-    use super::RestartIfRunningOutcome;
-    use super::RestartMode;
-    use super::UpdaterRefreshMode;
-    use super::restart_decision;
-    use super::should_reexec_updater;
     use super::verify_process_identity;
-    use crate::client::ProbeInfo;
 
     #[test]
     fn remote_control_status_uses_camel_case_json() {
@@ -1078,79 +948,12 @@ mod tests {
     }
 
     #[test]
-    fn updater_reexec_waits_for_validated_restart() {
-        assert_eq!(
-            [
-                RestartIfRunningOutcome::Busy,
-                RestartIfRunningOutcome::NotReady,
-                RestartIfRunningOutcome::AlreadyCurrent,
-                RestartIfRunningOutcome::NotRunning,
-                RestartIfRunningOutcome::Restarted,
-            ]
-            .map(|outcome| {
-                should_reexec_updater(UpdaterRefreshMode::ReexecIfManagedBinaryChanged, outcome)
-            }),
-            [false, false, false, false, true]
-        );
-    }
-
-    #[test]
-    fn unchanged_updater_never_reexecs() {
-        assert_eq!(
-            [
-                RestartIfRunningOutcome::Busy,
-                RestartIfRunningOutcome::NotReady,
-                RestartIfRunningOutcome::AlreadyCurrent,
-                RestartIfRunningOutcome::NotRunning,
-                RestartIfRunningOutcome::Restarted,
-            ]
-            .map(|outcome| should_reexec_updater(UpdaterRefreshMode::None, outcome)),
-            [false, false, false, false, false]
-        );
-    }
-
-    #[test]
     fn socket_responder_must_match_the_exact_managed_pid() {
         verify_process_identity(42, 42).expect("matching process");
         let error = verify_process_identity(42, 43).expect_err("mismatched process");
         assert_eq!(
             error.to_string(),
             "app-server socket owner pid 43 does not match managed pid 42"
-        );
-    }
-
-    #[test]
-    fn restart_decision_preserves_forced_refreshes() {
-        let current_info = ProbeInfo {
-            app_server_version: "0.1.0".to_string(),
-            process_id: 42,
-        };
-
-        assert_eq!(
-            [
-                restart_decision(
-                    RestartMode::IfVersionChanged,
-                    Some(&current_info),
-                    Some("0.1.0"),
-                ),
-                restart_decision(
-                    RestartMode::IfVersionChanged,
-                    /*info*/ None,
-                    /*managed_version*/ None,
-                ),
-                restart_decision(RestartMode::Always, Some(&current_info), Some("0.1.0")),
-                restart_decision(
-                    RestartMode::Always,
-                    /*info*/ None,
-                    /*managed_version*/ None,
-                ),
-            ],
-            [
-                RestartDecision::AlreadyCurrent,
-                RestartDecision::NotReady,
-                RestartDecision::Restart,
-                RestartDecision::Restart,
-            ]
         );
     }
 
@@ -1188,7 +991,7 @@ mod tests {
         let bootstrap_output = BootstrapOutput {
             status: BootstrapStatus::Bootstrapped,
             backend: BackendKind::Pid,
-            auto_update_enabled: true,
+            auto_update_enabled: false,
             remote_control_enabled: true,
             managed_codex_path: "codex".into(),
             managed_codex_version: Some("1.2.3".to_string()),
@@ -1203,7 +1006,7 @@ mod tests {
             serde_json::json!({
                 "status": "bootstrapped",
                 "backend": "pid",
-                "autoUpdateEnabled": true,
+                "autoUpdateEnabled": false,
                 "remoteControlEnabled": true,
                 "managedCodexPath": "codex",
                 "managedCodexVersion": "1.2.3",
@@ -1224,7 +1027,6 @@ mod tests {
         let daemon = Daemon {
             socket_path: temp_dir.path().join("app-server-control.sock"),
             pid_file: temp_dir.path().join("app-server.pid"),
-            update_pid_file: temp_dir.path().join("app-server-updater.pid"),
             operation_lock_file: temp_dir.path().join("daemon.lock"),
             settings_file: temp_dir.path().join("settings.json"),
             managed_codex_bin: temp_dir.path().join("missing-codex"),
@@ -1253,7 +1055,6 @@ mod tests {
         let daemon = Daemon {
             socket_path: temp_dir.path().join("app-server-control.sock"),
             pid_file: temp_dir.path().join("app-server.pid"),
-            update_pid_file: temp_dir.path().join("app-server-updater.pid"),
             operation_lock_file: temp_dir.path().join("daemon.lock"),
             settings_file: temp_dir.path().join("settings.json"),
             managed_codex_bin: temp_dir.path().join("missing-codex"),
@@ -1285,7 +1086,6 @@ mod tests {
         let daemon = Daemon {
             socket_path: temp_dir.path().join("app-server-control.sock"),
             pid_file: temp_dir.path().join("app-server.pid"),
-            update_pid_file: temp_dir.path().join("app-server-updater.pid"),
             operation_lock_file: temp_dir.path().join("daemon.lock"),
             settings_file: temp_dir.path().join("settings.json"),
             managed_codex_bin: temp_dir.path().join("missing-codex"),

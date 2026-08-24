@@ -607,8 +607,9 @@ pub enum Op {
         reply: oneshot::Sender<CodexResult<TurnInputSubmission>>,
     },
 
-    /// Stop the active root turn without recording a terminal turn event.
+    /// Stop one exact active turn without recording a terminal turn event.
     SuspendTurnAndShutdown {
+        expected_turn_id: String,
         reply: oneshot::Sender<CodexResult<SuspendTurnOutcome>>,
     },
 

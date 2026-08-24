@@ -623,10 +623,16 @@ pub(super) async fn submission_loop(
                     let _ = reply.send(result);
                     false
                 }
-                Op::SuspendTurnAndShutdown { reply } => {
-                    let result =
-                        super::turn_suspension::suspend_turn_and_shutdown(&sess, sub.id.clone())
-                            .await;
+                Op::SuspendTurnAndShutdown {
+                    expected_turn_id,
+                    reply,
+                } => {
+                    let result = super::turn_suspension::suspend_turn_and_shutdown(
+                        &sess,
+                        sub.id.clone(),
+                        &expected_turn_id,
+                    )
+                    .await;
                     // Exit only after history is durable and its writer has closed; an error
                     // must leave responsibility for the thread with the current worker.
                     let should_exit = matches!(

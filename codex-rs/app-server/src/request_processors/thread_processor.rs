@@ -925,7 +925,7 @@ impl ThreadRequestProcessor {
             })
     }
 
-    async fn set_app_server_client_info(
+    pub(super) async fn set_app_server_client_info(
         thread: &CodexThread,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
@@ -944,7 +944,7 @@ impl ThreadRequestProcessor {
             .map_err(|err| internal_error(format!("failed to set app server client info: {err}")))
     }
 
-    async fn finalize_thread_teardown(&self, thread_id: ThreadId) {
+    pub(super) async fn finalize_thread_teardown(&self, thread_id: ThreadId) {
         self.pending_thread_unloads.lock().await.remove(&thread_id);
         self.outgoing
             .cancel_requests_for_thread(thread_id, /*error*/ None)
@@ -1023,7 +1023,7 @@ impl ThreadRequestProcessor {
         }
     }
 
-    async fn ensure_conversation_listener(
+    pub(super) async fn ensure_conversation_listener(
         &self,
         conversation_id: ThreadId,
         connection_id: ConnectionId,
@@ -1038,7 +1038,7 @@ impl ThreadRequestProcessor {
         .await
     }
 
-    async fn ensure_listener_task_running(
+    pub(super) async fn ensure_listener_task_running(
         &self,
         conversation_id: ThreadId,
         conversation: Arc<CodexThread>,
@@ -1219,7 +1219,7 @@ impl ThreadRequestProcessor {
         }
     }
 
-    async fn request_trace_context(
+    pub(super) async fn request_trace_context(
         &self,
         request_id: &ConnectionRequestId,
     ) -> Option<codex_protocol::protocol::W3cTraceContext> {
@@ -1546,7 +1546,7 @@ impl ThreadRequestProcessor {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn build_thread_config_overrides(
+    pub(super) fn build_thread_config_overrides(
         &self,
         model: Option<String>,
         model_provider: Option<String>,
@@ -2932,7 +2932,7 @@ impl ThreadRequestProcessor {
         Ok(())
     }
 
-    async fn thread_turns_list_response_inner(
+    pub(super) async fn thread_turns_list_response_inner(
         &self,
         params: ThreadTurnsListParams,
     ) -> Result<ThreadTurnsListResponse, JSONRPCErrorError> {
@@ -3901,7 +3901,7 @@ impl ThreadRequestProcessor {
         Ok(())
     }
 
-    async fn load_and_apply_persisted_resume_metadata(
+    pub(super) async fn load_and_apply_persisted_resume_metadata(
         &self,
         thread_history: &InitialHistory,
         request_overrides: &mut Option<HashMap<String, serde_json::Value>>,
@@ -4213,7 +4213,7 @@ impl ThreadRequestProcessor {
         ))
     }
 
-    async fn load_resume_initial_history_from_stored_thread(
+    pub(super) async fn load_resume_initial_history_from_stored_thread(
         &self,
         stored_thread: StoredThread,
     ) -> Result<(InitialHistory, StoredThread), JSONRPCErrorError> {
@@ -4249,7 +4249,7 @@ impl ThreadRequestProcessor {
         Ok((history, stored_thread))
     }
 
-    async fn read_stored_thread_for_resume(
+    pub(super) async fn read_stored_thread_for_resume(
         &self,
         thread_id: &str,
         path: Option<&PathBuf>,

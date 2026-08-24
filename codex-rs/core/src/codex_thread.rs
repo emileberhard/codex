@@ -354,27 +354,6 @@ impl CodexThread {
             .await
     }
 
-    /// Recovery-only start path for a replacement process that intentionally
-    /// starts fenced. Callers must still validate the recovery capability.
-    pub async fn start_or_steer_recovery_turn(
-        &self,
-        request: TurnInputRequest,
-        capability: &str,
-    ) -> CodexResult<TurnInputSubmission> {
-        self.session
-            .services
-            .agent_control
-            .verify_restart_recovery_capability(capability)?;
-        self.session
-            .services
-            .agent_control
-            .ensure_execution_capacity_for_turn_start(self)
-            .await?;
-        self.io
-            .submit_turn_input(request, TurnInputMode::StartOrSteer, None)
-            .await
-    }
-
     /// Starts a regular turn only when the thread is idle.
     ///
     /// Core declines the input without recording or enqueueing it when idle
@@ -440,23 +419,60 @@ impl CodexThread {
         }
     }
 
-    /// Stops the active unfinished root turn without recording TurnAborted or
+    /// Resumes one suspended turn while ordinary work remains fenced in a replacement process.
+    pub async fn recover_turn_after_restart_if_idle(
+        &self,
+        request: RecoverTurnRequest,
+    ) -> CodexResult<StartIfIdleSubmission> {
+        self.session
+            .services
+            .agent_control
+            .require_settled_restart_fence()?;
+        self.session
+            .services
+            .agent_control
+            .ensure_execution_capacity_for_turn_start(self)
+            .await?;
+        let RecoverTurnRequest {
+            turn_id,
+            thread_settings,
+            trace,
+        } = request;
+        match self
+            .io
+            .submit_recover_turn_without_admission(thread_settings, trace, turn_id)
+            .await?
+        {
+            TurnInputSubmission::Started { turn_id } => {
+                Ok(StartIfIdleSubmission::Started { turn_id })
+            }
+            TurnInputSubmission::NotSubmitted { reason } => {
+                Ok(StartIfIdleSubmission::NotSubmitted { reason })
+            }
+            TurnInputSubmission::Steered { .. } => {
+                unreachable!("recovered turn submission cannot steer")
+            }
+        }
+    }
+
+    /// Stops the active unfinished turn without recording TurnAborted or
     /// TurnComplete, so another worker can recover its original turn ID.
     ///
-    /// Suspension is refused while a currently loaded descendant exists. Past
-    /// descendants do not prevent recovery, and concurrent descendant admission
-    /// is not sealed. Queued user input and outstanding approval, elicitation,
-    /// or server-request waiters remain best effort and may be discarded.
+    /// Suspension is refused while a currently loaded descendant exists. A
+    /// settled process-wide restart fence prevents concurrent descendant admission;
+    /// callers suspend task trees from leaves to root.
     ///
     /// The session processes an accepted request even if its caller disconnects.
     /// Callers must not transfer ownership until suspension succeeds, which
     /// requires stopping execution, flushing history, and closing its writer.
-    pub async fn suspend_turn_and_shutdown(&self) -> CodexResult<SuspendTurnOutcome> {
-        if self.session_source.is_non_root_agent() {
-            return Err(CodexErr::UnsupportedOperation(
-                "turn suspension requires the owning root thread".to_string(),
-            ));
-        }
+    pub async fn suspend_turn_and_shutdown(
+        &self,
+        expected_turn_id: String,
+    ) -> CodexResult<SuspendTurnOutcome> {
+        self.session
+            .services
+            .agent_control
+            .require_settled_restart_fence()?;
 
         // The session owns accepted suspension, so dropping this caller cannot interrupt
         // cancellation, persistence, or writer shutdown halfway through a handoff.
@@ -465,7 +481,10 @@ impl CodexThread {
             .tx_sub
             .send(Submission {
                 id: new_submission_id(),
-                op: Op::SuspendTurnAndShutdown { reply },
+                op: Op::SuspendTurnAndShutdown {
+                    expected_turn_id,
+                    reply,
+                },
                 trace: current_span_w3c_trace_context(),
                 parent_turn_id: None,
                 root_turn_id: None,
@@ -540,6 +559,10 @@ impl CodexThread {
         items: Vec<ResponseItem>,
     ) -> Result<(), Vec<ResponseItem>> {
         self.session.inject_if_running(items).await
+    }
+
+    pub(crate) async fn has_active_turn(&self) -> bool {
+        self.session.active_turn.lock().await.is_some()
     }
 
     pub async fn set_app_server_client_info(

@@ -18,6 +18,9 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::io::Result as IoResult;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -34,6 +37,7 @@ use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::QueuedOutgoingMessage;
+use crate::restart_recovery::RestartRecoveryGrantFile;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::ConnectionOrigin;
 use crate::transport::ConnectionState;
@@ -78,8 +82,7 @@ use tracing::info;
 use tracing::warn;
 
 const START_FENCED_ENV_VAR: &str = "CODEX_APP_SERVER_START_FENCED";
-const RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR: &str =
-    "CODEX_INTERNAL_RESTART_RECOVERY_CAPABILITY_FILE";
+const RESTART_RECOVERY_GRANT_FILE_ENV_VAR: &str = "CODEX_INTERNAL_RESTART_RECOVERY_GRANT_FILE";
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
@@ -129,6 +132,7 @@ mod otel_reloader;
 mod outgoing_message;
 mod request_processors;
 mod request_serialization;
+mod restart_recovery;
 mod server_request_error;
 mod skills_watcher;
 mod thread_state;
@@ -140,6 +144,7 @@ pub use crate::code_mode_host::AppServerCodeModeHostArgs;
 pub use crate::code_mode_host::CodeModeHostTransport;
 pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;
+pub use crate::restart_recovery::RestartRecoveryGrant;
 pub use crate::transport::AppServerTransport;
 pub use crate::transport::RemoteControlStartupMode;
 pub use crate::transport::app_server_control_socket_path;
@@ -354,32 +359,53 @@ mod shutdown_state_tests {
     #[serial]
     fn restart_startup_material_is_consumed_before_child_processes() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let capability_path = temp.path().join("capability");
-        std::fs::write(&capability_path, "0123456789abcdef0123456789abcdef\n")
-            .expect("write capability");
-        let mut permissions = std::fs::metadata(&capability_path)
-            .expect("capability metadata")
+        let grant_path = temp.path().join("grant.json");
+        std::fs::write(
+            &grant_path,
+            serde_json::json!({
+                "schemaVersion": 1,
+                "generationId": "generation-1",
+                "capability": "0123456789abcdef0123456789abcdef",
+                "targets": [{
+                    "threadId": "018f0000-0000-7000-8000-000000000001",
+                    "turnId": "turn-1"
+                }]
+            })
+            .to_string(),
+        )
+        .expect("write grant");
+        let mut permissions = std::fs::metadata(&grant_path)
+            .expect("grant metadata")
             .permissions();
         permissions.set_mode(0o600);
-        std::fs::set_permissions(&capability_path, permissions).expect("chmod capability");
+        std::fs::set_permissions(&grant_path, permissions).expect("chmod grant");
         // SAFETY: this serial test sets process-global startup variables before any helper call.
         unsafe {
             std::env::set_var(START_FENCED_ENV_VAR, "1");
-            std::env::set_var(RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR, &capability_path);
+            std::env::set_var(RESTART_RECOVERY_GRANT_FILE_ENV_VAR, &grant_path);
         }
 
-        let (fenced, capability) =
+        let (fenced, grant) =
             take_restart_recovery_startup_options().expect("consume startup material");
         assert!(fenced);
+        let authorizer = crate::restart_recovery::RestartRecoveryAuthorizer::new(grant);
         assert_eq!(
-            capability.as_deref(),
-            Some("0123456789abcdef0123456789abcdef")
+            authorizer
+                .authorize(&codex_app_server_protocol::ThreadRestartRecoverParams {
+                    thread_id: "018f0000-0000-7000-8000-000000000001".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    capability: codex_utils_redacted_string::RedactedString::from(
+                        "0123456789abcdef0123456789abcdef",
+                    ),
+                })
+                .expect("authorize grant"),
+            "generation-1"
         );
-        assert!(!capability_path.exists());
+        assert!(!grant_path.exists());
         let status = std::process::Command::new("/bin/sh")
             .arg("-c")
             .arg(format!(
-                "test -z \"${{{START_FENCED_ENV_VAR}:-}}\" && test -z \"${{{RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR}:-}}\""
+                "test -z \"${{{START_FENCED_ENV_VAR}:-}}\" && test -z \"${{{RESTART_RECOVERY_GRANT_FILE_ENV_VAR}:-}}\""
             ))
             .status()
             .expect("run child environment probe");
@@ -563,7 +589,7 @@ pub struct AppServerRuntimeOptions {
     pub remote_control_startup_mode: RemoteControlStartupMode,
     pub install_shutdown_signal_handler: bool,
     pub start_fenced: bool,
-    pub restart_recovery_capability: Option<String>,
+    pub restart_recovery_grant: Option<RestartRecoveryGrant>,
 }
 
 impl Default for AppServerRuntimeOptions {
@@ -574,47 +600,66 @@ impl Default for AppServerRuntimeOptions {
             remote_control_startup_mode: RemoteControlStartupMode::ResolvePersisted,
             install_shutdown_signal_handler: true,
             start_fenced: false,
-            restart_recovery_capability: None,
+            restart_recovery_grant: None,
         }
     }
 }
 
-pub fn take_restart_recovery_startup_options() -> IoResult<(bool, Option<String>)> {
+pub fn take_restart_recovery_startup_options() -> IoResult<(bool, Option<RestartRecoveryGrant>)> {
     let start_fenced = std::env::var_os(START_FENCED_ENV_VAR).is_some_and(|value| value == "1");
-    let capability_path =
-        std::env::var_os(RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR).map(PathBuf::from);
+    let grant_path = std::env::var_os(RESTART_RECOVERY_GRANT_FILE_ENV_VAR).map(PathBuf::from);
     // SAFETY: both startup-only variables are consumed synchronously by the app-server entrypoint
     // before worker threads or tool subprocesses are created.
     unsafe {
         std::env::remove_var(START_FENCED_ENV_VAR);
-        std::env::remove_var(RESTART_RECOVERY_CAPABILITY_FILE_ENV_VAR);
+        std::env::remove_var(RESTART_RECOVERY_GRANT_FILE_ENV_VAR);
     }
-    let Some(capability_path) = capability_path else {
+    let Some(grant_path) = grant_path else {
         return Ok((start_fenced, None));
     };
-    if !capability_path.is_absolute() {
+    if !start_fenced {
         return Err(std::io::Error::new(
             ErrorKind::InvalidInput,
-            "restart recovery capability path must be absolute",
+            "restart recovery grant requires fenced startup",
         ));
     }
-    let metadata = std::fs::symlink_metadata(&capability_path)?;
-    if !metadata.file_type().is_file() || metadata.permissions().mode() & 0o077 != 0 {
+    if !grant_path.is_absolute() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidInput,
+            "restart recovery grant path must be absolute",
+        ));
+    }
+    let metadata = std::fs::symlink_metadata(&grant_path)?;
+    if !restart_grant_is_private(&metadata) {
         return Err(std::io::Error::new(
             ErrorKind::PermissionDenied,
-            "restart recovery capability must be a private regular file",
+            "restart recovery grant must be a private regular file owned by this user",
         ));
     }
-    let capability = std::fs::read_to_string(&capability_path)?;
-    std::fs::remove_file(&capability_path)?;
-    let capability = capability.trim().to_string();
-    if capability.len() < 32 {
+    if metadata.len() > 1024 * 1024 {
         return Err(std::io::Error::new(
             ErrorKind::InvalidData,
-            "restart recovery capability is invalid",
+            "restart recovery grant exceeds 1 MiB",
         ));
     }
-    Ok((start_fenced, Some(capability)))
+    let grant = std::fs::read_to_string(&grant_path)?;
+    std::fs::remove_file(&grant_path)?;
+    let grant = serde_json::from_str::<RestartRecoveryGrantFile>(&grant)
+        .map_err(|error| std::io::Error::new(ErrorKind::InvalidData, error))?
+        .try_into()?;
+    Ok((start_fenced, Some(grant)))
+}
+
+#[cfg(unix)]
+fn restart_grant_is_private(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_file()
+        && metadata.permissions().mode() & 0o077 == 0
+        && metadata.uid() == unsafe { libc::geteuid() }
+}
+
+#[cfg(not(unix))]
+fn restart_grant_is_private(metadata: &std::fs::Metadata) -> bool {
+    metadata.file_type().is_file()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1091,7 +1136,7 @@ pub async fn run_main_with_transport_options(
             rpc_transport: analytics_rpc_transport(&transport),
             remote_control_handle: Some(remote_control_handle.clone()),
             plugin_startup_tasks: runtime_options.plugin_startup_tasks,
-            restart_recovery_capability: runtime_options.restart_recovery_capability.clone(),
+            restart_recovery_grant: runtime_options.restart_recovery_grant.clone(),
         }));
         let mut thread_created_rx = processor.thread_created_receiver();
         let mut running_turn_count_rx = processor.subscribe_running_assistant_turn_count();

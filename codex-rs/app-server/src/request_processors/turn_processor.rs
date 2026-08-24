@@ -540,19 +540,6 @@ impl TurnRequestProcessor {
             .map(V2UserInput::into_core)
             .collect();
         let client_user_message_id = params.client_user_message_id;
-        let restart_recovery_capability = params.restart_recovery_capability;
-        let recovery_client_id = match (
-            restart_recovery_capability.as_ref(),
-            client_user_message_id.as_ref(),
-        ) {
-            (Some(_), Some(client_id)) => Some(client_id.clone()),
-            (Some(_), None) => {
-                return Err(invalid_request(
-                    "restart recovery requires clientUserMessageId",
-                ));
-            }
-            (None, _) => None,
-        };
         let additional_context = map_additional_context(params.additional_context);
         let turn_has_input = !mapped_items.is_empty();
         let cwd = resolve_request_cwd(params.cwd)?;
@@ -595,14 +582,7 @@ impl TurnRequestProcessor {
         .with_additional_context(additional_context)
         .with_responses_metadata(params.responsesapi_client_metadata)
         .with_trace(self.request_trace_context(&request_id).await);
-        let submission = if let Some(capability) = restart_recovery_capability.as_deref() {
-            thread
-                .start_or_steer_recovery_turn(request, capability)
-                .await
-        } else {
-            thread.start_or_steer_turn(request).await
-        }
-        .map_err(|err| {
+        let submission = thread.start_or_steer_turn(request).await.map_err(|err| {
             let error = internal_error(format!("failed to submit turn input: {err}"));
             self.track_error_response(&request_id, &error, /*error_type*/ None);
             error
@@ -616,11 +596,6 @@ impl TurnRequestProcessor {
                 return Err(error);
             }
         };
-
-        if let Some(client_id) = recovery_client_id.as_deref() {
-            self.flush_recovery_acceptance(thread_id, thread.as_ref(), client_id)
-                .await?;
-        }
 
         if turn_has_input && started {
             let config_snapshot = thread.config_snapshot().await;
@@ -652,46 +627,6 @@ impl TurnRequestProcessor {
         };
 
         Ok(TurnStartResponse { turn })
-    }
-
-    async fn flush_recovery_acceptance(
-        &self,
-        thread_id: ThreadId,
-        thread: &CodexThread,
-        client_id: &str,
-    ) -> Result<(), JSONRPCErrorError> {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        loop {
-            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
-            let observed = thread_state
-                .lock()
-                .await
-                .active_turn_snapshot()
-                .is_some_and(|turn| {
-                    turn.items.iter().any(|item| {
-                        matches!(
-                            item,
-                            ThreadItem::UserMessage {
-                                client_id: Some(observed),
-                                ..
-                            } if observed == client_id
-                        )
-                    })
-                });
-            if observed {
-                return thread.flush_rollout().await.map_err(|error| {
-                    internal_error(format!(
-                        "failed to durably acknowledge restart recovery input: {error}"
-                    ))
-                });
-            }
-            if tokio::time::Instant::now() >= deadline {
-                return Err(internal_error(
-                    "restart recovery input was accepted but not observed before timeout",
-                ));
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
     }
 
     async fn build_environment_override(

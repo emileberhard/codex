@@ -267,6 +267,13 @@ struct ThreadSpawnRequest {
     inherited_environments: Option<TurnEnvironmentSnapshot>,
     inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
     user_shell_override: Option<crate::shell::Shell>,
+    admission: ThreadSpawnAdmission,
+}
+
+#[derive(Clone, Copy)]
+enum ThreadSpawnAdmission {
+    Normal,
+    RestartRecovery,
 }
 
 impl ThreadSpawnRequest {
@@ -285,6 +292,7 @@ impl ThreadSpawnRequest {
             inherited_environments: None,
             inherited_exec_policy: None,
             user_shell_override: None,
+            admission: ThreadSpawnAdmission::Normal,
         }
     }
 }
@@ -338,7 +346,6 @@ pub(crate) struct ThreadManagerState {
     new_work_admission: Arc<RwLock<()>>,
     new_work_admission_fenced: AtomicBool,
     new_work_admission_fence_ready: AtomicBool,
-    restart_recovery_capability: std::sync::Mutex<Option<String>>,
     thread_created_tx: broadcast::Sender<ThreadId>,
     thread_id_generator: ThreadIdGenerator,
     auth_manager: Arc<AuthManager>,
@@ -470,7 +477,6 @@ impl ThreadManager {
                 new_work_admission: Arc::new(RwLock::new(())),
                 new_work_admission_fenced: AtomicBool::new(false),
                 new_work_admission_fence_ready: AtomicBool::new(false),
-                restart_recovery_capability: std::sync::Mutex::new(None),
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 models_manager,
@@ -506,14 +512,6 @@ impl ThreadManager {
             unreachable!("thread ID generator must be set before thread manager is shared");
         };
         state.thread_id_generator = Arc::new(generator);
-        self
-    }
-
-    pub fn with_restart_recovery_capability(mut self, capability: Option<String>) -> Self {
-        let Some(state) = Arc::get_mut(&mut self.state) else {
-            unreachable!("restart recovery capability must be set before sharing the manager");
-        };
-        state.restart_recovery_capability = std::sync::Mutex::new(capability);
         self
     }
 
@@ -628,7 +626,6 @@ impl ThreadManager {
                 new_work_admission: Arc::new(RwLock::new(())),
                 new_work_admission_fenced: AtomicBool::new(false),
                 new_work_admission_fence_ready: AtomicBool::new(false),
-                restart_recovery_capability: std::sync::Mutex::new(None),
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 models_manager: create_model_provider(provider, Some(auth_manager.clone()))
@@ -699,7 +696,6 @@ impl ThreadManager {
         self.state
             .new_work_admission_fence_ready
             .store(false, Ordering::Release);
-        self.state.clear_restart_recovery_capability();
     }
 
     pub fn new_work_admission_fenced(&self) -> bool {
@@ -1097,6 +1093,46 @@ impl ThreadManager {
         parent_trace: Option<W3cTraceContext>,
         client_mcp_extensions: ClientMcpExtensions,
     ) -> CodexResult<NewThread> {
+        self.resume_thread_with_history_admission(
+            config,
+            initial_history,
+            auth_manager,
+            parent_trace,
+            client_mcp_extensions,
+            ThreadSpawnAdmission::Normal,
+        )
+        .await
+    }
+
+    /// Rehydrates one allowlisted suspended thread while ordinary thread creation is fenced.
+    pub async fn resume_thread_with_history_after_restart(
+        &self,
+        config: Config,
+        initial_history: InitialHistory,
+        auth_manager: Arc<AuthManager>,
+        parent_trace: Option<W3cTraceContext>,
+        client_mcp_extensions: ClientMcpExtensions,
+    ) -> CodexResult<NewThread> {
+        self.resume_thread_with_history_admission(
+            config,
+            initial_history,
+            auth_manager,
+            parent_trace,
+            client_mcp_extensions,
+            ThreadSpawnAdmission::RestartRecovery,
+        )
+        .await
+    }
+
+    async fn resume_thread_with_history_admission(
+        &self,
+        config: Config,
+        initial_history: InitialHistory,
+        auth_manager: Arc<AuthManager>,
+        parent_trace: Option<W3cTraceContext>,
+        client_mcp_extensions: ClientMcpExtensions,
+        admission: ThreadSpawnAdmission,
+    ) -> CodexResult<NewThread> {
         let agent_control = self.agent_control_for_config(&config);
         let (session_source, thread_source) = initial_history
             .get_resumed_session_sources()
@@ -1117,12 +1153,9 @@ impl ThreadManager {
             client_mcp_extensions,
             ..StartThreadOptions::new(config)
         };
-        Box::pin(self.state.spawn_thread(ThreadSpawnRequest::new(
-            options,
-            auth_manager,
-            agent_control,
-        )))
-        .await
+        let mut request = ThreadSpawnRequest::new(options, auth_manager, agent_control);
+        request.admission = admission;
+        Box::pin(self.state.spawn_thread(request)).await
     }
 
     pub(crate) async fn start_thread_with_user_shell_override_for_tests(
@@ -1441,47 +1474,11 @@ impl ThreadManager {
             })
             .unwrap_or_default()
     }
-
-    #[cfg(test)]
-    pub(crate) fn set_restart_recovery_capability_for_tests(&self, capability: &str) {
-        *self
-            .state
-            .restart_recovery_capability
-            .lock()
-            .expect("recovery capability lock") = Some(capability.to_string());
-    }
 }
 
 impl ThreadManagerState {
     pub(crate) fn new_work_admission_fenced(&self) -> bool {
         self.new_work_admission_fence_ready.load(Ordering::Acquire)
-    }
-
-    pub(crate) fn verify_restart_recovery_capability(&self, provided: &str) -> CodexResult<()> {
-        if !self.new_work_admission_fenced() {
-            return Err(CodexErr::InvalidRequest(
-                "recovery input requires a settled app-server restart fence".to_string(),
-            ));
-        }
-        let capability = self.restart_recovery_capability.lock().map_err(|_| {
-            CodexErr::InternalError("recovery capability lock poisoned".to_string())
-        })?;
-        let matches = capability.as_deref().is_some_and(|expected| {
-            expected.len() == provided.len()
-                && constant_time_eq::constant_time_eq(expected.as_bytes(), provided.as_bytes())
-        });
-        if !matches {
-            return Err(CodexErr::InvalidRequest(
-                "invalid restart recovery capability".to_string(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn clear_restart_recovery_capability(&self) {
-        if let Ok(mut capability) = self.restart_recovery_capability.lock() {
-            *capability = None;
-        }
     }
 
     pub(crate) async fn acquire_new_work_admission(
@@ -1927,7 +1924,17 @@ impl ThreadManagerState {
 
     /// Spawn a new thread with optional history and register it with the manager.
     async fn spawn_thread(&self, request: ThreadSpawnRequest) -> CodexResult<NewThread> {
-        let _admission = self.acquire_new_work_admission().await?;
+        let _admission = match request.admission {
+            ThreadSpawnAdmission::Normal => Some(self.acquire_new_work_admission().await?),
+            ThreadSpawnAdmission::RestartRecovery => {
+                if !self.new_work_admission_fenced() {
+                    return Err(CodexErr::InvalidRequest(
+                        "restart recovery requires a settled new-work admission fence".to_string(),
+                    ));
+                }
+                None
+            }
+        };
         let ThreadSpawnRequest {
             options,
             auth_manager,
@@ -1938,6 +1945,7 @@ impl ThreadManagerState {
             inherited_environments,
             inherited_exec_policy,
             user_shell_override,
+            admission: _,
         } = request;
         let StartThreadOptions {
             config,

@@ -514,6 +514,18 @@ client_request_definitions! {
         serialization: thread_or_path(params.thread_id, params.path),
         response: v2::ThreadResumeResponse,
     },
+    #[experimental("thread/restart/suspend")]
+    ThreadRestartSuspend => "thread/restart/suspend" {
+        params: v2::ThreadRestartSuspendParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRestartSuspendResponse,
+    },
+    #[experimental("thread/restart/recover")]
+    ThreadRestartRecover => "thread/restart/recover" {
+        params: v2::ThreadRestartRecoverParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadRestartRecoverResponse,
+    },
     ThreadFork => "thread/fork" {
         params: v2::ThreadForkParams,
         inspect_params: true,

@@ -138,9 +138,13 @@ impl AgentControl {
         self.upgrade()?.acquire_new_work_admission().await
     }
 
-    pub(crate) fn verify_restart_recovery_capability(&self, capability: &str) -> CodexResult<()> {
-        self.upgrade()?
-            .verify_restart_recovery_capability(capability)
+    pub(crate) fn require_settled_restart_fence(&self) -> CodexResult<()> {
+        if self.upgrade()?.new_work_admission_fenced() {
+            return Ok(());
+        }
+        Err(CodexErr::InvalidRequest(
+            "restart handoff requires a settled new-work admission fence".to_string(),
+        ))
     }
 
     /// Construct a new `AgentControl` that can spawn/message agents via the given manager state.
@@ -379,6 +383,20 @@ impl AgentControl {
         let mut thread_ids = vec![agent_id];
         thread_ids.extend(self.live_thread_spawn_descendants(agent_id).await?);
         Ok(thread_ids)
+    }
+
+    pub(crate) async fn list_active_agent_subtree_thread_ids(
+        &self,
+        agent_id: ThreadId,
+    ) -> CodexResult<Vec<ThreadId>> {
+        let state = self.upgrade()?;
+        let mut active = Vec::new();
+        for thread_id in self.list_live_agent_subtree_thread_ids(agent_id).await? {
+            if state.get_thread(thread_id).await?.has_active_turn().await {
+                active.push(thread_id);
+            }
+        }
+        Ok(active)
     }
 
     pub(crate) async fn get_agent_config_snapshot(

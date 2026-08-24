@@ -35,6 +35,7 @@ use codex_protocol::protocol::TokenUsageInfo as CoreTokenUsageInfo;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
+use codex_utils_redacted_string::RedactedString;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -457,6 +458,51 @@ pub struct ThreadResumeResponse {
     #[experimental("thread/resume.itemsBackwardsCursor")]
     #[serde(default)]
     pub items_backwards_cursor: Option<String>,
+}
+
+/// Result of handing one exact active turn to a replacement app-server generation.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+#[ts(tag = "status", rename_all = "camelCase", export_to = "v2/")]
+pub enum ThreadRestartSuspendOutcome {
+    Suspended { turn_id: String },
+    NotActive,
+    TurnChanged { actual_turn_id: String },
+    HasLiveDescendants,
+    UnsupportedTask,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRestartSuspendParams {
+    pub thread_id: String,
+    pub turn_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRestartSuspendResponse {
+    pub outcome: ThreadRestartSuspendOutcome,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRestartRecoverParams {
+    pub thread_id: String,
+    pub turn_id: String,
+    #[ts(type = "string")]
+    pub capability: RedactedString,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRestartRecoverResponse {
+    pub generation_id: String,
+    pub turn: Turn,
 }
 
 impl ThreadResumeResponse {

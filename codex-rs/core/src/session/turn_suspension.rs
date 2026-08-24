@@ -1,11 +1,13 @@
 use super::handlers;
 use super::session::Session;
+use super::turn::run_hooks_and_record_inputs;
 use crate::state::TaskKind;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::Event;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::turn_input::SuspendTurnOutcome;
+use codex_thread_store::PersistContext;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::warn;
@@ -13,6 +15,7 @@ use tracing::warn;
 pub(super) async fn suspend_turn_and_shutdown(
     session: &Arc<Session>,
     submission_id: String,
+    expected_turn_id: &str,
 ) -> CodexResult<SuspendTurnOutcome> {
     {
         let active = session.active_turn.lock().await;
@@ -22,6 +25,11 @@ pub(super) async fn suspend_turn_and_shutdown(
         if task.kind != TaskKind::Regular {
             return Ok(SuspendTurnOutcome::UnsupportedTask);
         }
+        if task.turn_context.sub_id != expected_turn_id {
+            return Ok(SuspendTurnOutcome::TurnChanged {
+                actual_turn_id: task.turn_context.sub_id.clone(),
+            });
+        }
     }
 
     // This is a snapshot of currently loaded descendants, not a spawn-admission seal.
@@ -29,7 +37,7 @@ pub(super) async fn suspend_turn_and_shutdown(
     if session
         .services
         .agent_control
-        .list_live_agent_subtree_thread_ids(session.thread_id)
+        .list_active_agent_subtree_thread_ids(session.thread_id)
         .await?
         .len()
         > 1
@@ -57,6 +65,11 @@ pub(super) async fn suspend_turn_and_shutdown(
         };
         if task.kind != TaskKind::Regular {
             return Ok(SuspendTurnOutcome::UnsupportedTask);
+        }
+        if task.turn_context.sub_id != expected_turn_id {
+            return Ok(SuspendTurnOutcome::TurnChanged {
+                actual_turn_id: task.turn_context.sub_id.clone(),
+            });
         }
         active.take().ok_or_else(|| {
             CodexErr::Fatal("accepted root turn suspension had no running turn".to_string())
@@ -93,8 +106,14 @@ pub(super) async fn suspend_turn_and_shutdown(
             let _ = task_handle.await;
         }
     }
-    // Pending accepted input and interactive waiters live only in this process. Handoff
-    // intentionally drops that state; persisting or replaying it needs a separate protocol.
+    let pending_input = session.input_queue.take_restart_input(&turn).await;
+    run_hooks_and_record_inputs(
+        session,
+        &task.turn_context,
+        &pending_input,
+        PersistContext::Standard,
+    )
+    .await;
     session.input_queue.clear_pending(&turn).await;
 
     // Stop all producers before flushing their final history and closing its writer.

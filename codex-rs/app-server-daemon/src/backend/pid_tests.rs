@@ -7,7 +7,6 @@ use tempfile::TempDir;
 use codex_app_server_transport::REMOTE_CONTROL_DISABLED_ENV_VAR;
 
 use super::PidBackend;
-use super::PidCommandKind;
 use super::PidFileState;
 use super::PidLogTail;
 use super::PidRecord;
@@ -320,21 +319,6 @@ async fn restart_preparation_signals_do_not_stop_process() {
 
     child.kill().expect("kill shim");
     child.wait().expect("reap shim");
-}
-
-#[test]
-fn update_loop_uses_hidden_app_server_subcommand() {
-    let backend = PidBackend {
-        codex_bin: "codex".into(),
-        pid_file: "updater.pid".into(),
-        lock_file: "updater.pid.lock".into(),
-        command_kind: PidCommandKind::UpdateLoop,
-    };
-
-    assert_eq!(
-        backend.command_args(),
-        vec!["app-server", "daemon", "pid-update-loop"]
-    );
 }
 
 #[test]

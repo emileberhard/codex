@@ -361,6 +361,19 @@ impl InputQueue {
         }
         self.has_pending_mailbox_items().await
     }
+
+    /// Drain input that must be written to history before restart handoff.
+    pub(crate) async fn take_restart_input(&self, active_turn: &ActiveTurn) -> Vec<TurnInput> {
+        let mut input = active_turn
+            .turn_state
+            .lock()
+            .await
+            .pending_input
+            .items
+            .split_off(0);
+        input.extend(self.drain_mailbox_input_items().await.0);
+        input
+    }
 }
 
 impl TurnInputQueue {

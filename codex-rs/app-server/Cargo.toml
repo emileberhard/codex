@@ -90,9 +90,12 @@ codex-tools = { workspace = true }
 codex-utils-absolute-path = { workspace = true }
 codex-utils-json-to-toml = { workspace = true }
 codex-utils-path-uri = { workspace = true }
+codex-utils-redacted-string = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
+constant_time_eq = { workspace = true }
 futures = { workspace = true }
+libc = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

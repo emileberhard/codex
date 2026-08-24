@@ -116,14 +116,11 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
         panic!("expected a started root turn");
     };
     wait_for_event(&codex, |event| matches!(event, EventMsg::TurnStarted(_))).await;
+    test.thread_manager.begin_new_work_fence();
+    assert!(test.thread_manager.poll_new_work_fence());
 
-    assert_eq!(
-        codex
-            .suspend_turn_and_shutdown()
-            .await
-            .expect("reject handoff while a descendant remains loaded"),
-        SuspendTurnOutcome::HasLiveDescendants,
-    );
+    // An idle loaded descendant has no volatile work and does not block the
+    // active root from being handed to the replacement generation.
     descendant
         .thread
         .shutdown_and_wait()
@@ -138,7 +135,7 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
     // and removed; suspension only consults the current live subtree.
     assert_eq!(
         codex
-            .suspend_turn_and_shutdown()
+            .suspend_turn_and_shutdown(turn_id.clone())
             .await
             .expect("stop and close the old writer"),
         SuspendTurnOutcome::Suspended {
@@ -202,6 +199,62 @@ async fn root_turn_suspension_preserves_unfinished_turn_history() {
         unreachable!("wait_for_event returned unexpected event");
     };
     assert_eq!(completed.turn_id, turn_id);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn root_turn_suspension_persists_pending_steering() {
+    let server = start_mock_server().await;
+    mount_response_once(
+        &server,
+        sse_response(sse(vec![
+            ev_response_created("pending_input_response"),
+            ev_completed("pending_input_response"),
+        ]))
+        .set_delay(Duration::from_secs(60)),
+    )
+    .await;
+    let test = test_codex()
+        .with_model("gpt-5.4")
+        .build_with_auto_env(&server)
+        .await
+        .expect("start persistent thread");
+    let codex = Arc::clone(&test.codex);
+    let started = codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "start the unfinished turn".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .expect("start turn");
+    let codex_core::TurnInputSubmission::Started { turn_id } = started else {
+        panic!("expected a started turn");
+    };
+    wait_for_event(&codex, |event| matches!(event, EventMsg::TurnStarted(_))).await;
+    let steered = codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "accepted but not yet durable".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await
+        .expect("steer active turn");
+    assert_matches!(steered, codex_core::TurnInputSubmission::Steered { .. });
+    test.thread_manager.begin_new_work_fence();
+    assert!(test.thread_manager.poll_new_work_fence());
+
+    assert_eq!(
+        codex
+            .suspend_turn_and_shutdown(turn_id.clone())
+            .await
+            .expect("suspend turn with pending input"),
+        SuspendTurnOutcome::Suspended { turn_id },
+    );
+    let rollout = tokio::fs::read_to_string(codex.rollout_path().expect("rollout path"))
+        .await
+        .expect("read durable rollout");
+    assert!(
+        rollout.contains("accepted but not yet durable"),
+        "pending steering must be durable before handoff"
+    );
 }
 
 /// After an interrupt we expect the next request to the model to include both
