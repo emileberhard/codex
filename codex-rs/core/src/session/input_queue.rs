@@ -565,6 +565,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restart_input_combines_pending_steer_and_mail_in_order() {
+        let input_queue = InputQueue::new();
+        let active_turn = ActiveTurn::default();
+        let steer = TurnInput::UserInput {
+            content: vec![UserInput::Text {
+                text: "steer".to_string(),
+                text_elements: Vec::new(),
+            }],
+            client_id: Some("client-1".to_string()),
+        };
+        input_queue
+            .extend_pending_input_for_turn_state(
+                active_turn.turn_state.as_ref(),
+                vec![steer.clone()],
+            )
+            .await;
+        let mail = make_mail(
+            AgentPath::try_from("/root/worker").expect("agent path"),
+            AgentPath::root(),
+            "finished",
+            /*trigger_turn*/ true,
+        );
+        input_queue
+            .enqueue_mailbox_communication(
+                mail.clone(),
+                Some("parent-turn".to_string()),
+                Some("root-turn".to_string()),
+            )
+            .await;
+
+        assert_eq!(
+            input_queue.take_restart_input(&active_turn).await,
+            vec![steer, TurnInput::InterAgentCommunication(mail)]
+        );
+        assert!(
+            input_queue
+                .take_restart_input(&active_turn)
+                .await
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn input_queue_requires_one_unambiguous_trigger_parent() {
         let (parent, peer, root, root2) = (Some("a"), Some("b"), Some("r"), Some("s"));
         for (pending_mails, expected_parent_turn_id, expected_root_turn_id) in [

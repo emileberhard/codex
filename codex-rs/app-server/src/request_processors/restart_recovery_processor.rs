@@ -15,7 +15,7 @@ impl ThreadRequestProcessor {
                     .thread_turns_list_response_inner(ThreadTurnsListParams {
                         thread_id: params.thread_id,
                         cursor: None,
-                        limit: Some(100),
+                        limit: Some(1),
                         sort_direction: Some(SortDirection::Desc),
                         items_view: Some(TurnItemsView::Summary),
                     })
@@ -74,7 +74,7 @@ impl ThreadRequestProcessor {
             .thread_turns_list_response_inner(ThreadTurnsListParams {
                 thread_id: params.thread_id.clone(),
                 cursor: None,
-                limit: Some(100),
+                limit: Some(1),
                 sort_direction: Some(SortDirection::Desc),
                 items_view: Some(TurnItemsView::Summary),
             })

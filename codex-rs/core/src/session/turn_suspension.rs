@@ -32,8 +32,8 @@ pub(super) async fn suspend_turn_and_shutdown(
         }
     }
 
-    // This is a snapshot of currently loaded descendants, not a spawn-admission seal.
-    // Previously closed descendants and concurrent future spawns remain best effort.
+    // The process-wide restart fence prevents new descendants. Refuse a parent
+    // until every currently active child has been suspended leaf-first.
     if session
         .services
         .agent_control
@@ -46,11 +46,11 @@ pub(super) async fn suspend_turn_and_shutdown(
     }
 
     let live_thread = session
-        .live_thread_for_persistence("suspend an unfinished root turn")
+        .live_thread_for_persistence("suspend an unfinished turn")
         .map_err(|error| CodexErr::Fatal(error.to_string()))?;
     // Flush before canceling execution so a persistence failure leaves the original turn running.
     live_thread.flush().await.map_err(|error| {
-        CodexErr::Fatal(format!("flush before root turn suspension failed: {error}"))
+        CodexErr::Fatal(format!("flush before turn suspension failed: {error}"))
     })?;
 
     // The flush can yield while the active turn completes or changes. Recheck its
@@ -72,12 +72,12 @@ pub(super) async fn suspend_turn_and_shutdown(
             });
         }
         active.take().ok_or_else(|| {
-            CodexErr::Fatal("accepted root turn suspension had no running turn".to_string())
+            CodexErr::Fatal("accepted turn suspension had no running turn".to_string())
         })?
     };
 
     let task = turn.task.take().ok_or_else(|| {
-        CodexErr::Fatal("accepted root turn suspension had no running task".to_string())
+        CodexErr::Fatal("accepted turn suspension had no running task".to_string())
     })?;
     let turn_id = task.turn_context.sub_id.clone();
     // Normal shutdown records a terminal turn event, preventing another worker from
@@ -120,12 +120,14 @@ pub(super) async fn suspend_turn_and_shutdown(
     // If either persistence step fails, do not report success: the current worker
     // retains ownership until worker-failure recovery can take responsibility.
     handlers::shutdown_session_runtime(session).await;
-    live_thread.flush().await.map_err(|error| {
-        CodexErr::Fatal(format!("flush after root turn suspension failed: {error}"))
-    })?;
-    live_thread.shutdown().await.map_err(|error| {
-        CodexErr::Fatal(format!("close suspended root turn writer failed: {error}"))
-    })?;
+    live_thread
+        .flush()
+        .await
+        .map_err(|error| CodexErr::Fatal(format!("flush after turn suspension failed: {error}")))?;
+    live_thread
+        .shutdown()
+        .await
+        .map_err(|error| CodexErr::Fatal(format!("close suspended turn writer failed: {error}")))?;
     // Announce thread shutdown only after its writer closes so a replacement worker
     // cannot write the same thread concurrently.
     handlers::emit_thread_stop_lifecycle(session.as_ref()).await;

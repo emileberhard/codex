@@ -48,8 +48,14 @@ impl TryFrom<RestartRecoveryGrantFile> for RestartRecoveryGrant {
         if file.capability.len() < 32 {
             return Err(invalid_grant("capability is invalid"));
         }
+        if file.targets.len() > 10_000 {
+            return Err(invalid_grant("too many recovery targets"));
+        }
         let mut targets = HashMap::new();
         for target in file.targets {
+            if target.thread_id.len() > 128 || target.turn_id.len() > 128 {
+                return Err(invalid_grant("recovery target id is too long"));
+            }
             let thread_id = ThreadId::from_string(&target.thread_id)
                 .map_err(|error| invalid_grant(format!("invalid threadId: {error}")))?;
             if target.turn_id.is_empty() {
