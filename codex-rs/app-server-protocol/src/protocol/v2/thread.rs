@@ -465,9 +465,17 @@ pub struct ThreadResumeResponse {
 #[serde(tag = "status", rename_all = "camelCase")]
 #[ts(tag = "status", rename_all = "camelCase", export_to = "v2/")]
 pub enum ThreadRestartSuspendOutcome {
-    Suspended { turn_id: String },
+    Suspended {
+        #[serde(rename = "turnId")]
+        #[ts(rename = "turnId")]
+        turn_id: String,
+    },
     NotActive,
-    TurnChanged { actual_turn_id: String },
+    TurnChanged {
+        #[serde(rename = "actualTurnId")]
+        #[ts(rename = "actualTurnId")]
+        actual_turn_id: String,
+    },
     HasLiveDescendants,
     UnsupportedTask,
 }

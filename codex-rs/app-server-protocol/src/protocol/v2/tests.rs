@@ -4910,6 +4910,25 @@ fn realtime_start_omitted_initial_items_remain_none() {
 
     assert_eq!(params.initial_items, None);
 }
+
+#[test]
+fn restart_suspend_outcomes_use_camel_case_field_names() {
+    assert_eq!(
+        serde_json::to_value(ThreadRestartSuspendOutcome::Suspended {
+            turn_id: "turn-1".to_string(),
+        })
+        .expect("suspended outcome should serialize"),
+        json!({"status": "suspended", "turnId": "turn-1"}),
+    );
+    assert_eq!(
+        serde_json::to_value(ThreadRestartSuspendOutcome::TurnChanged {
+            actual_turn_id: "turn-2".to_string(),
+        })
+        .expect("turn-changed outcome should serialize"),
+        json!({"status": "turnChanged", "actualTurnId": "turn-2"}),
+    );
+}
+
 #[test]
 fn realtime_start_deserializes_client_handoff_channel_prefixes() {
     let params = serde_json::from_value::<ThreadRealtimeStartParams>(json!({
