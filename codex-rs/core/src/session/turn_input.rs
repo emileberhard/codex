@@ -21,6 +21,7 @@ use codex_protocol::config_types::ModeKind;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::AdditionalContextEntry;
+use codex_protocol::protocol::AdditionalContextKind;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
 use codex_protocol::protocol::Event;
@@ -43,6 +44,9 @@ use uuid::Uuid;
 #[cfg(test)]
 #[path = "turn_input_tests.rs"]
 mod tests;
+
+const RESTART_RECOVERY_CONTEXT_KEY: &str = "restart_recovery";
+const RESTART_RECOVERY_CONTEXT: &str = "Continue the same turn after a planned process restart. A tool result that says a command or wait was aborted may describe restart suspension, not a user cancellation. Re-establish any required command, re-check child-agent status, and continue toward the original task. Do not report failure merely because a pre-restart process or session id no longer exists.";
 
 /// Thread settings and start-only options prepared before Core knows whether
 /// turn input starts or steers.
@@ -159,8 +163,20 @@ pub(super) async fn handle_recovery(
     thread_settings: ThreadSettingsOverrides,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
-    let request = TurnInputRequest::user_input(Vec::new()).with_thread_settings(thread_settings);
+    let request = recovery_request(thread_settings);
     start_if_idle(session, request, submission_id, /*is_recovery*/ true).await
+}
+
+fn recovery_request(thread_settings: ThreadSettingsOverrides) -> TurnInputRequest {
+    TurnInputRequest::user_input(Vec::new())
+        .with_thread_settings(thread_settings)
+        .with_additional_context(BTreeMap::from([(
+            RESTART_RECOVERY_CONTEXT_KEY.to_string(),
+            AdditionalContextEntry {
+                value: RESTART_RECOVERY_CONTEXT.to_string(),
+                kind: AdditionalContextKind::Application,
+            },
+        )]))
 }
 
 async fn start_or_steer(

@@ -233,6 +233,19 @@ async fn recovery_rejects_active_turn_without_injecting_or_applying_settings() {
     session.abort_all_tasks(TurnAbortReason::Interrupted).await;
 }
 
+#[test]
+fn recovery_request_explains_planned_restart_tool_interruptions() {
+    let request = recovery_request(ThreadSettingsOverrides::default());
+    let context = request
+        .additional_context
+        .get(RESTART_RECOVERY_CONTEXT_KEY)
+        .expect("restart recovery context");
+
+    assert_eq!(context.kind, AdditionalContextKind::Application);
+    assert!(context.value.contains("planned process restart"));
+    assert!(context.value.contains("re-check child-agent status"));
+}
+
 #[tokio::test]
 async fn start_only_rejects_plan_mode_without_injecting() {
     let (session, _turn_context, _rx) = make_session_and_context_with_rx().await;
