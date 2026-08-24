@@ -19,6 +19,8 @@ support Windows lifecycle management.
 ```sh
 codex app-server daemon start
 codex app-server daemon restart
+codex app-server daemon prepare-restart
+codex app-server daemon cancel-restart
 codex app-server daemon enable-remote-control
 codex app-server daemon disable-remote-control
 codex app-server daemon stop
@@ -74,11 +76,18 @@ remains on the old executable image until an explicit `restart`.
 `start` is idempotent and returns after app-server is ready to answer the normal
 JSON-RPC initialize handshake on the Unix control socket.
 
-`restart` stops any managed daemon and starts it again.
+`restart` stops any managed daemon and starts it again. It does not preserve
+active turns; callers that own recovery must use `prepare-restart`, suspend and
+persist their work, and then perform the stop/start transaction.
+
+`prepare-restart` closes and settles new-work admission without stopping the
+managed process. `cancel-restart` reopens admission after recovery or aborts a
+prepared restart. Both commands verify the resulting admission state before
+returning.
 
 `enable-remote-control` and `disable-remote-control` persist the launch setting
-for future starts. If a managed app-server is already running, they restart it
-so the new setting takes effect immediately.
+for future starts. If a managed app-server is already running, they update its
+remote-control connection in place without replacing the process.
 
 Top-level `codex remote-control` bootstraps with `--remote-control` when daemon
 settings do not yet exist. Otherwise it enables remote control and starts the
@@ -88,8 +97,9 @@ daemon normally.
 termination signal after the grace window if the process is still alive.
 
 All mutating lifecycle commands are serialized per `CODEX_HOME`, so a concurrent
-`start`, `restart`, `enable-remote-control`, `disable-remote-control`, `stop`,
-or `bootstrap` does not race another in-flight lifecycle operation.
+`start`, `restart`, `prepare-restart`, `cancel-restart`,
+`enable-remote-control`, `disable-remote-control`, `stop`, or `bootstrap` does
+not race another in-flight lifecycle operation.
 
 ## State
 
