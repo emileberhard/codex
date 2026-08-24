@@ -22,6 +22,7 @@ use crate::session_prefix::format_subagent_notification_message;
 use crate::thread_manager::ResumeThreadWithHistoryOptions;
 use crate::thread_manager::ThreadIdGenerator;
 use crate::thread_manager::ThreadManagerState;
+use crate::thread_manager::ThreadSpawnAdmission;
 use crate::thread_manager::default_thread_id_generator;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
 use codex_history::InitialHistory;
@@ -231,13 +232,18 @@ impl AgentControl {
         parent_turn_id: Option<String>,
         root_turn_id: Option<String>,
     ) -> CodexResult<String> {
-        let _admission = self.acquire_new_work_admission().await?;
         let state = self.upgrade()?;
-        if communication.trigger_turn {
+        let _admission = if communication.trigger_turn {
+            let admission = self.acquire_new_work_admission().await?;
             let thread = state.get_thread(agent_id).await?;
             self.ensure_execution_capacity_for_turn_start(&thread)
                 .await?;
-        }
+            Some(admission)
+        } else {
+            // This only appends to the recipient's durable input queue. It is
+            // continuation state from already-admitted work, not new ingress.
+            None
+        };
         self.send_inter_agent_communication_after_capacity_check(
             agent_id,
             &state,

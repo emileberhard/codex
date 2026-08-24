@@ -271,7 +271,7 @@ struct ThreadSpawnRequest {
 }
 
 #[derive(Clone, Copy)]
-enum ThreadSpawnAdmission {
+pub(crate) enum ThreadSpawnAdmission {
     Normal,
     RestartRecovery,
 }
@@ -336,6 +336,7 @@ pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) environment_selections: Option<Vec<TurnEnvironmentSelection>>,
     pub(crate) inherited_environments: Option<TurnEnvironmentSnapshot>,
     pub(crate) inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
+    pub(crate) admission: ThreadSpawnAdmission,
 }
 
 /// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
@@ -1124,6 +1125,26 @@ impl ThreadManager {
         .await
     }
 
+    /// Rehydrates one suspended child agent through the canonical agent-control
+    /// path while ordinary thread creation remains fenced.
+    pub async fn resume_agent_thread_after_restart(
+        &self,
+        config: Config,
+        thread_id: ThreadId,
+        session_source: SessionSource,
+    ) -> CodexResult<Arc<CodexThread>> {
+        let resumed_thread_id = self
+            .agent_control_for_config(&config)
+            .resume_agent_from_rollout_after_restart(config, thread_id, session_source)
+            .await?;
+        if resumed_thread_id != thread_id {
+            return Err(CodexErr::InvalidRequest(format!(
+                "restart recovery resumed thread {resumed_thread_id} instead of {thread_id}"
+            )));
+        }
+        self.get_thread(thread_id).await
+    }
+
     async fn resume_thread_with_history_admission(
         &self,
         config: Config,
@@ -1849,6 +1870,7 @@ impl ThreadManagerState {
             environment_selections,
             inherited_environments,
             inherited_exec_policy,
+            admission,
         } = options;
         let client_mcp_extensions = self.client_mcp_extensions_for_child(parent_thread_id).await;
         let thread_source = initial_history.get_resumed_thread_source();
@@ -1870,6 +1892,7 @@ impl ThreadManagerState {
         request.parent_thread_id = parent_thread_id;
         request.inherited_environments = inherited_environments;
         request.inherited_exec_policy = inherited_exec_policy;
+        request.admission = admission;
         Box::pin(self.spawn_thread(request)).await
     }
 

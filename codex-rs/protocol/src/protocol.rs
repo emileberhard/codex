@@ -740,10 +740,10 @@ impl Op {
             | Self::RealtimeConversationStartClientHandoffs(_)
             | Self::TurnInput { .. }
             | Self::RecoverTurn { .. }
-            | Self::InterAgentCommunication { .. }
             | Self::Compact
             | Self::Review { .. }
             | Self::RunUserShellCommand { .. } => true,
+            Self::InterAgentCommunication { communication } => communication.trigger_turn,
             Self::Interrupt
             | Self::CleanBackgroundTerminals
             | Self::RealtimeConversationAudio(_)
@@ -774,6 +774,8 @@ impl Op {
 #[cfg(test)]
 mod op_admission_tests {
     use super::Op;
+    use crate::AgentPath;
+    use crate::protocol::InterAgentCommunication;
 
     #[test]
     fn model_and_shell_work_require_admission_but_control_ops_do_not() {
@@ -786,6 +788,22 @@ mod op_admission_tests {
         );
         assert!(!Op::Interrupt.requires_new_work_admission());
         assert!(!Op::Shutdown.requires_new_work_admission());
+    }
+
+    #[test]
+    fn queued_agent_mail_is_continuation_state_not_new_work() {
+        let communication = |trigger_turn| Op::InterAgentCommunication {
+            communication: InterAgentCommunication::new(
+                AgentPath::root(),
+                AgentPath::try_from("/root/worker").expect("agent path"),
+                Vec::new(),
+                "message".to_string(),
+                trigger_turn,
+            ),
+        };
+
+        assert!(!communication(false).requires_new_work_admission());
+        assert!(communication(true).requires_new_work_admission());
     }
 }
 

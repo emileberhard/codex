@@ -192,29 +192,45 @@ impl ThreadRequestProcessor {
                 {
                     config.model_reasoning_effort = None;
                 }
-                let NewThread {
-                    thread_id: resumed_thread_id,
-                    thread,
-                    ..
-                } = self
-                    .thread_manager
-                    .resume_thread_with_history_after_restart(
-                        config,
-                        thread_history,
-                        self.auth_manager.clone(),
-                        self.request_trace_context(request_id).await,
-                        client_mcp_extensions,
-                    )
-                    .await
-                    .map_err(|error| {
-                        internal_error(format!("error resuming thread {thread_id}: {error}"))
-                    })?;
-                if resumed_thread_id != thread_id {
-                    return Err(internal_error(format!(
-                        "restart recovery resumed thread {resumed_thread_id} instead of {thread_id}"
-                    )));
+                let session_source = thread_history
+                    .get_resumed_session_sources()
+                    .map(|(source, _)| source);
+                if let Some(session_source) = session_source
+                    && session_source.is_non_root_agent()
+                {
+                    self.thread_manager
+                        .resume_agent_thread_after_restart(config, thread_id, session_source)
+                        .await
+                        .map_err(|error| {
+                            internal_error(format!(
+                                "error resuming child agent thread {thread_id}: {error}"
+                            ))
+                        })?
+                } else {
+                    let NewThread {
+                        thread_id: resumed_thread_id,
+                        thread,
+                        ..
+                    } = self
+                        .thread_manager
+                        .resume_thread_with_history_after_restart(
+                            config,
+                            thread_history,
+                            self.auth_manager.clone(),
+                            self.request_trace_context(request_id).await,
+                            client_mcp_extensions,
+                        )
+                        .await
+                        .map_err(|error| {
+                            internal_error(format!("error resuming thread {thread_id}: {error}"))
+                        })?;
+                    if resumed_thread_id != thread_id {
+                        return Err(internal_error(format!(
+                            "restart recovery resumed thread {resumed_thread_id} instead of {thread_id}"
+                        )));
+                    }
+                    thread
                 }
-                thread
             }
         };
         Self::set_app_server_client_info(

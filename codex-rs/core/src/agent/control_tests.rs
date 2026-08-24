@@ -634,6 +634,8 @@ async fn send_input_submits_user_message() {
 async fn send_inter_agent_communication_without_turn_queues_message_without_triggering_turn() {
     let harness = AgentControlHarness::new().await;
     let (thread_id, thread) = harness.start_thread().await;
+    harness.manager.begin_new_work_fence();
+    assert!(harness.manager.poll_new_work_fence());
     let communication = InterAgentCommunication::new(
         AgentPath::root(),
         AgentPath::try_from("/root/worker").expect("agent path"),
@@ -3272,7 +3274,7 @@ async fn spawn_thread_subagent_uses_role_specific_nickname_candidates() {
 }
 
 #[tokio::test]
-async fn resume_thread_subagent_restores_stored_metadata() {
+async fn restart_recovery_restores_subagent_metadata_through_agent_control() {
     let (home, config) = test_config().await;
     let thread_store = Arc::new(InMemoryThreadStore::default());
     let auth_manager = AuthManager::from_auth_for_testing(CodexAuth::from_api_key("dummy"));
@@ -3385,10 +3387,12 @@ async fn resume_thread_subagent_restores_stored_metadata() {
         .shutdown_live_agent(child_thread_id)
         .await
         .expect("child shutdown should submit");
+    harness.manager.begin_new_work_fence();
+    assert!(harness.manager.poll_new_work_fence());
 
     let resumed_thread_id = harness
         .control
-        .resume_agent_from_rollout(
+        .resume_agent_from_rollout_after_restart(
             harness.config.clone(),
             child_thread_id,
             SessionSource::SubAgent(SubAgentSource::ThreadSpawn {

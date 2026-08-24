@@ -381,6 +381,7 @@ impl AgentControl {
                 environment_selections,
                 inherited_environments,
                 inherited_exec_policy,
+                admission: ThreadSpawnAdmission::Normal,
             })
             .await
         {
@@ -897,10 +898,14 @@ impl AgentControl {
         session_source: SessionSource,
     ) -> CodexResult<ThreadId> {
         let root_depth = thread_spawn_depth(&session_source).unwrap_or(0);
-        let (resumed_thread_id, resumed_multi_agent_version) = Box::pin(
-            self.resume_single_agent_from_rollout(config.clone(), thread_id, session_source),
-        )
-        .await?;
+        let (resumed_thread_id, resumed_multi_agent_version) =
+            Box::pin(self.resume_single_agent_from_rollout(
+                config.clone(),
+                thread_id,
+                session_source,
+                ThreadSpawnAdmission::Normal,
+            ))
+            .await?;
         let state = self.upgrade()?;
         if config.multi_agent_version_from_features() == MultiAgentVersion::V2
             || resumed_multi_agent_version == MultiAgentVersion::V2
@@ -946,6 +951,7 @@ impl AgentControl {
                         config.clone(),
                         child_thread_id,
                         child_session_source,
+                        ThreadSpawnAdmission::Normal,
                     ))
                     .await
                     {
@@ -965,11 +971,28 @@ impl AgentControl {
         Ok(resumed_thread_id)
     }
 
+    pub(crate) async fn resume_agent_from_rollout_after_restart(
+        &self,
+        config: Config,
+        thread_id: ThreadId,
+        session_source: SessionSource,
+    ) -> CodexResult<ThreadId> {
+        self.resume_single_agent_from_rollout(
+            config,
+            thread_id,
+            session_source,
+            ThreadSpawnAdmission::RestartRecovery,
+        )
+        .await
+        .map(|(thread_id, _)| thread_id)
+    }
+
     async fn resume_single_agent_from_rollout(
         &self,
         config: Config,
         thread_id: ThreadId,
         session_source: SessionSource,
+        admission: ThreadSpawnAdmission,
     ) -> CodexResult<(ThreadId, MultiAgentVersion)> {
         let state = self.upgrade()?;
         let stored_thread = state
@@ -1043,6 +1066,7 @@ impl AgentControl {
                 environment_selections: None,
                 inherited_environments,
                 inherited_exec_policy,
+                admission,
             })
             .await?;
         let mut agent_metadata = agent_metadata;
