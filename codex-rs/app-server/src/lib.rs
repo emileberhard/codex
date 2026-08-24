@@ -1149,14 +1149,12 @@ pub async fn run_main_with_transport_options(
             let mut listen_for_threads = true;
             let mut shutdown_state = ShutdownState::default();
             if start_fenced {
-                debug_assert!(matches!(
-                    shutdown_state.on_signal(
-                        ShutdownSignal::PrepareRestart,
-                        /*connection_count*/ 0,
-                        /*running_turn_count*/ 0,
-                    ),
-                    ShutdownTransition::Fence
-                ));
+                let transition = shutdown_state.on_signal(
+                    ShutdownSignal::PrepareRestart,
+                    /*connection_count*/ 0,
+                    /*running_turn_count*/ 0,
+                );
+                debug_assert!(matches!(transition, ShutdownTransition::Fence));
                 processor.begin_new_work_fence();
                 processor.poll_new_work_fence();
                 info!("app server started with new-work admission fenced for recovery");
