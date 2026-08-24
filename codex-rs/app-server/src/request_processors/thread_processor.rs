@@ -13,6 +13,7 @@ use codex_app_server_protocol::ThreadSection;
 use codex_app_server_protocol::ThreadSectionAppearance;
 use codex_app_server_protocol::ThreadSectionMoveParams;
 use codex_app_server_protocol::ThreadSectionMoveResponse;
+use codex_app_server_protocol::TurnsPage;
 use codex_extension_api::ExtensionDataInit;
 use codex_extension_api::ThreadIdleCause;
 use codex_protocol::config_types::MultiAgentMode;
@@ -452,6 +453,11 @@ enum RunningThreadResumeResult {
     /// The optional stored thread contains the history-bearing probe that cold
     /// resume can reuse instead of reading the rollout again.
     NotRunning(Option<Box<StoredThread>>),
+}
+
+enum RunningThreadResumeSource {
+    Stored(StoredThread),
+    ActiveRealtime(Thread),
 }
 
 impl ThreadRequestProcessor {
@@ -3962,13 +3968,31 @@ impl ThreadRequestProcessor {
         } else if let Ok(existing_thread_id) = ThreadId::from_string(&params.thread_id)
             && let Ok(existing_thread) = self.thread_manager.get_thread(existing_thread_id).await
         {
-            let source_thread = self
-                .read_stored_thread_for_resume(
-                    &params.thread_id,
-                    /*path*/ None,
-                    /*include_history*/ false,
+            let config_snapshot = existing_thread.config_snapshot().await;
+            let rollout_path = existing_thread.rollout_path();
+            let active_realtime_without_rollout =
+                matches!(config_snapshot.history_mode, ThreadHistoryMode::Paginated)
+                    && existing_thread.has_active_realtime_conversation().await
+                    && match rollout_path.as_ref() {
+                        Some(path) => codex_rollout::existing_rollout_path(path).await.is_none(),
+                        None => false,
+                    };
+            let source_thread = if active_realtime_without_rollout {
+                RunningThreadResumeSource::ActiveRealtime(
+                    self.read_thread_view(existing_thread_id, /*include_turns*/ false)
+                        .await
+                        .map_err(thread_read_view_error)?,
                 )
-                .await?;
+            } else {
+                RunningThreadResumeSource::Stored(
+                    self.read_stored_thread_for_resume(
+                        &params.thread_id,
+                        /*path*/ None,
+                        /*include_history*/ false,
+                    )
+                    .await?,
+                )
+            };
             Some((existing_thread_id, existing_thread, source_thread))
         } else {
             let source_thread = self
@@ -3980,7 +4004,11 @@ impl ThreadRequestProcessor {
                 .await?;
             let existing_thread_id = source_thread.thread_id;
             match self.thread_manager.get_thread(existing_thread_id).await {
-                Ok(existing_thread) => Some((existing_thread_id, existing_thread, source_thread)),
+                Ok(existing_thread) => Some((
+                    existing_thread_id,
+                    existing_thread,
+                    RunningThreadResumeSource::Stored(source_thread),
+                )),
                 Err(_) => {
                     return Ok(RunningThreadResumeResult::NotRunning(Some(Box::new(
                         source_thread,
@@ -3989,13 +4017,25 @@ impl ThreadRequestProcessor {
             }
         };
 
-        if let Some((existing_thread_id, existing_thread, mut source_thread)) = running_thread {
-            let paginated_resume =
-                matches!(source_thread.history_mode, ThreadHistoryMode::Paginated);
+        if let Some((existing_thread_id, existing_thread, mut resume_source)) = running_thread {
+            let active_realtime_resume =
+                matches!(&resume_source, RunningThreadResumeSource::ActiveRealtime(_));
+            let paginated_resume = match &resume_source {
+                RunningThreadResumeSource::Stored(source_thread) => {
+                    matches!(source_thread.history_mode, ThreadHistoryMode::Paginated)
+                }
+                RunningThreadResumeSource::ActiveRealtime(_) => true,
+            };
             let existing_thread_rollout_path = existing_thread.rollout_path();
+            let source_rollout_path = match &resume_source {
+                RunningThreadResumeSource::Stored(source_thread) => {
+                    source_thread.rollout_path.as_ref()
+                }
+                RunningThreadResumeSource::ActiveRealtime(thread) => thread.path.as_ref(),
+            };
             let active_path = existing_thread_rollout_path
                 .as_ref()
-                .or(source_thread.rollout_path.as_ref());
+                .or(source_rollout_path);
             if let (Some(requested_path), Some(active_path)) = (params.path.as_ref(), active_path)
                 && !path_utils::paths_match_after_normalization(requested_path, active_path)
             {
@@ -4055,23 +4095,37 @@ impl ThreadRequestProcessor {
             let needs_history =
                 !paginated_resume && (include_turns || params.initial_turns_page.is_some());
             if needs_history {
+                let RunningThreadResumeSource::Stored(source_thread) = &resume_source else {
+                    return Err(internal_error(format!(
+                        "thread {existing_thread_id} requires persisted history"
+                    )));
+                };
                 let source_thread_id = source_thread.thread_id.to_string();
                 let source_rollout_path = source_thread.rollout_path.clone();
-                source_thread = self
-                    .read_stored_thread_for_resume(
+                resume_source = RunningThreadResumeSource::Stored(
+                    self.read_stored_thread_for_resume(
                         &source_thread_id,
                         source_rollout_path.as_ref(),
                         /*include_history*/ true,
                     )
-                    .await?;
+                    .await?,
+                );
             }
-            if paginated_resume && (include_turns || params.initial_turns_page.is_some()) {
+            if paginated_resume
+                && !active_realtime_resume
+                && (include_turns || params.initial_turns_page.is_some())
+            {
                 self.thread_store
                     .persist_thread(existing_thread_id, PersistContext::Standard)
                     .await
                     .map_err(thread_store_resume_read_error)?;
             }
             let history_items = if needs_history {
+                let RunningThreadResumeSource::Stored(source_thread) = &mut resume_source else {
+                    return Err(internal_error(format!(
+                        "thread {existing_thread_id} requires persisted history"
+                    )));
+                };
                 source_thread
                     .history
                     .take()
@@ -4102,11 +4156,15 @@ impl ThreadRequestProcessor {
             )
             .await?;
 
-            let mut thread_summary = self.stored_thread_to_api_thread(
-                source_thread,
-                config_snapshot.model_provider_id.as_str(),
-                /*include_turns*/ false,
-            );
+            let mut thread_summary = match resume_source {
+                RunningThreadResumeSource::Stored(source_thread) => self
+                    .stored_thread_to_api_thread(
+                        source_thread,
+                        config_snapshot.model_provider_id.as_str(),
+                        /*include_turns*/ false,
+                    ),
+                RunningThreadResumeSource::ActiveRealtime(thread) => thread,
+            };
             thread_summary.session_id = existing_thread.session_configured().session_id.to_string();
             thread_summary.thread_source = config_snapshot.thread_source.clone().map(Into::into);
             thread_summary.can_accept_direct_input = Some(can_accept_direct_input(
@@ -4130,12 +4188,21 @@ impl ThreadRequestProcessor {
                 .pending_resume_goal_state(existing_thread.as_ref())
                 .await;
             let paginated_turns = if paginated_resume && include_turns {
-                Some(self.paginated_thread_full_turns(existing_thread_id).await?)
+                if active_realtime_resume {
+                    Some(Vec::new())
+                } else {
+                    Some(self.paginated_thread_full_turns(existing_thread_id).await?)
+                }
             } else {
                 None
             };
             let paginated_initial_turns_page = if paginated_resume {
                 match params.initial_turns_page.as_ref() {
+                    Some(_) if active_realtime_resume => Some(TurnsPage {
+                        data: Vec::new(),
+                        next_cursor: None,
+                        backwards_cursor: None,
+                    }),
                     Some(params) => Some(
                         self.paginated_resume_initial_turns_page(existing_thread_id, params)
                             .await?,
@@ -4147,6 +4214,18 @@ impl ThreadRequestProcessor {
             };
             let paginated_initial_turns_page_with_active_slot = if paginated_resume {
                 match params.initial_turns_page.as_ref() {
+                    Some(params)
+                        if matches!(
+                            params.sort_direction.unwrap_or(SortDirection::Desc),
+                            SortDirection::Desc
+                        ) && active_realtime_resume =>
+                    {
+                        Some(TurnsPage {
+                            data: Vec::new(),
+                            next_cursor: None,
+                            backwards_cursor: None,
+                        })
+                    }
                     Some(params)
                         if matches!(
                             params.sort_direction.unwrap_or(SortDirection::Desc),
@@ -4166,7 +4245,8 @@ impl ThreadRequestProcessor {
             } else {
                 None
             };
-            let resume_cursor_store = paginated_resume.then(|| Arc::clone(&self.thread_store));
+            let resume_cursor_store = (paginated_resume && !active_realtime_resume)
+                .then(|| Arc::clone(&self.thread_store));
 
             let command = crate::thread_state::ThreadListenerCommand::SendThreadResumeResponse(
                 Box::new(crate::thread_state::PendingThreadResumeRequest {

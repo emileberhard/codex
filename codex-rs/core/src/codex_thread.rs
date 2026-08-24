@@ -812,6 +812,10 @@ impl CodexThread {
         self.session.thread_config_snapshot().await
     }
 
+    pub async fn has_active_realtime_conversation(&self) -> bool {
+        self.session.conversation.running_state().await.is_some()
+    }
+
     /// Returns thread-owned settings suitable for rollout persistence and resume.
     pub async fn thread_settings_snapshot(&self) -> ThreadSettingsSnapshot {
         self.session.thread_settings_snapshot().await
