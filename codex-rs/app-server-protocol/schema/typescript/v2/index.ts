@@ -503,6 +503,7 @@ export type { ThreadRealtimeStartTransport } from "./ThreadRealtimeStartTranspor
 export type { ThreadRealtimeStartedNotification } from "./ThreadRealtimeStartedNotification";
 export type { ThreadRealtimeTranscriptDeltaNotification } from "./ThreadRealtimeTranscriptDeltaNotification";
 export type { ThreadRealtimeTranscriptDoneNotification } from "./ThreadRealtimeTranscriptDoneNotification";
+export type { ThreadRestartSuspendOutcome } from "./ThreadRestartSuspendOutcome";
 export type { ThreadResumeInitialTurnsPageParams } from "./ThreadResumeInitialTurnsPageParams";
 export type { ThreadResumeParams } from "./ThreadResumeParams";
 export type { ThreadResumeResponse } from "./ThreadResumeResponse";

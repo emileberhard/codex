@@ -21229,7 +21229,7 @@
             ]
           },
           "useStateDbOnly": {
-            "description": "If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.",
+            "description": "Return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted defaults to true so ordinary clients stay on the responsive path; send false for an explicit repair scan.",
             "type": "boolean"
           }
         },
@@ -21780,6 +21780,95 @@
         ],
         "title": "ThreadRealtimeTranscriptDoneNotification",
         "type": "object"
+      },
+      "ThreadRestartSuspendOutcome": {
+        "description": "Result of handing one exact active turn to a replacement app-server generation.",
+        "oneOf": [
+          {
+            "properties": {
+              "status": {
+                "enum": [
+                  "suspended"
+                ],
+                "type": "string"
+              },
+              "turnId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "turnId"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "status": {
+                "enum": [
+                  "notActive"
+                ],
+                "title": "NotActiveThreadRestartSuspendOutcomeStatus",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "title": "NotActiveThreadRestartSuspendOutcome",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "actualTurnId": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "turnChanged"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "actualTurnId",
+              "status"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "status": {
+                "enum": [
+                  "hasLiveDescendants"
+                ],
+                "title": "HasLiveDescendantsThreadRestartSuspendOutcomeStatus",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "title": "HasLiveDescendantsThreadRestartSuspendOutcome",
+            "type": "object"
+          },
+          {
+            "properties": {
+              "status": {
+                "enum": [
+                  "unsupportedTask"
+                ],
+                "title": "UnsupportedTaskThreadRestartSuspendOutcomeStatus",
+                "type": "string"
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "title": "UnsupportedTaskThreadRestartSuspendOutcome",
+            "type": "object"
+          }
+        ]
       },
       "ThreadResumeInitialTurnsPageParams": {
         "properties": {

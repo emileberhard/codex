@@ -425,7 +425,7 @@ fn thread_list_params_accepts_single_cwd() {
         params.cwd,
         Some(ThreadListCwdFilter::One("/workspace".to_string()))
     );
-    assert!(!params.use_state_db_only);
+    assert!(params.use_state_db_only);
 }
 
 #[test]
@@ -452,6 +452,33 @@ fn thread_list_params_accepts_state_db_only_flag() {
     .expect("state db only flag should deserialize");
 
     assert!(params.use_state_db_only);
+}
+
+#[test]
+fn thread_list_params_preserves_explicit_repair_scan() {
+    let params = serde_json::from_value::<ThreadListParams>(json!({
+        "useStateDbOnly": false,
+    }))
+    .expect("explicit repair scan flag should deserialize");
+
+    assert!(!params.use_state_db_only);
+    assert_eq!(
+        serde_json::to_value(params).expect("params should serialize"),
+        json!({
+            "cursor": null,
+            "limit": null,
+            "sortKey": null,
+            "sortDirection": null,
+            "modelProviders": null,
+            "sourceKinds": null,
+            "archived": null,
+            "cwd": null,
+            "useStateDbOnly": false,
+            "searchTerm": null,
+            "parentThreadId": null,
+            "ancestorThreadId": null,
+        })
+    );
 }
 
 #[test]

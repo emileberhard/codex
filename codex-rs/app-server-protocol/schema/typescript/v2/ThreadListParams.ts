@@ -38,9 +38,9 @@ sectionId?: string | null, /**
  * exactly matches one of these paths are returned.
  */
 cwd?: string | Array<string> | null, /**
- * If true, return from the state DB without scanning JSONL rollouts to
- * repair thread metadata. Omitted or false preserves scan-and-repair
- * behavior.
+ * Return from the state DB without scanning JSONL rollouts to repair
+ * thread metadata. Omitted defaults to true so ordinary clients stay on
+ * the responsive path; send false for an explicit repair scan.
  */
 useStateDbOnly?: boolean, /**
  * Optional substring filter for the extracted thread title.

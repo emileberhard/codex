@@ -4336,7 +4336,7 @@
           ]
         },
         "useStateDbOnly": {
-          "description": "If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.",
+          "description": "Return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted defaults to true so ordinary clients stay on the responsive path; send false for an explicit repair scan.",
           "type": "boolean"
         }
       },

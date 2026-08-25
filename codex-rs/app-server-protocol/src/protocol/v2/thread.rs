@@ -1460,10 +1460,13 @@ pub struct ThreadListParams {
     /// exactly matches one of these paths are returned.
     #[ts(optional = nullable, type = "string | Array<string> | null")]
     pub cwd: Option<ThreadListCwdFilter>,
-    /// If true, return from the state DB without scanning JSONL rollouts to
-    /// repair thread metadata. Omitted or false preserves scan-and-repair
-    /// behavior.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    /// Return from the state DB without scanning JSONL rollouts to repair
+    /// thread metadata. Omitted defaults to true so ordinary clients stay on
+    /// the responsive path; send false for an explicit repair scan.
+    #[serde(
+        default = "default_thread_list_use_state_db_only",
+        skip_serializing_if = "bool_is_true"
+    )]
     pub use_state_db_only: bool,
     /// Optional substring filter for the extracted thread title.
     #[ts(optional = nullable)]
@@ -1477,6 +1480,15 @@ pub struct ThreadListParams {
     #[experimental("thread/list.ancestorThreadId")]
     #[ts(optional = nullable)]
     pub ancestor_thread_id: Option<String>,
+}
+
+fn default_thread_list_use_state_db_only() -> bool {
+    true
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn bool_is_true(value: &bool) -> bool {
+    *value
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
