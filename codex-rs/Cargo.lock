@@ -2205,6 +2205,7 @@ dependencies = [
  "codex-app-server-protocol",
  "codex-config",
  "codex-core",
+ "codex-http-client",
  "codex-login",
  "codex-model-provider",
  "codex-protocol",
