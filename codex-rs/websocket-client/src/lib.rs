@@ -10,6 +10,7 @@ use std::task::Poll;
 use codex_http_client::BuildCustomCaTransportError;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::build_rustls_client_config_with_custom_ca;
+use codex_http_client::load_rustls_client_config_with_custom_ca;
 use futures::FutureExt;
 use futures::Sink;
 use futures::Stream;
@@ -53,11 +54,25 @@ pub(crate) enum TcpNodelay {
 }
 
 impl WebSocketConnector {
-    /// Creates a connector using native roots and any configured Codex custom CA bundle.
+    /// Creates a connector synchronously using native roots and configured Codex custom CAs.
+    ///
+    /// Async callers must use [`Self::new_async`] so platform trust discovery runs on the blocking
+    /// pool instead of a Tokio worker.
     pub fn new(
         http_client_factory: &HttpClientFactory,
     ) -> Result<Self, BuildCustomCaTransportError> {
         Self::new_with_tls_mode(http_client_factory, WebSocketTlsMode::ExplicitCodexTls)
+    }
+
+    /// Creates a connector without running native trust discovery on an async worker.
+    pub async fn new_async(
+        http_client_factory: &HttpClientFactory,
+    ) -> Result<Self, BuildCustomCaTransportError> {
+        Ok(Self {
+            http_client_factory: http_client_factory.clone(),
+            tls_config: Some(load_rustls_client_config_with_custom_ca().await?),
+            tcp_nodelay: TcpNodelay::Default,
+        })
     }
 
     /// Creates a connector with explicit Codex TLS or the transport's existing TLS defaults.

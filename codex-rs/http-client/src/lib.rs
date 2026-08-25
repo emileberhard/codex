@@ -28,7 +28,7 @@ pub use crate::custom_ca::BuildCustomCaTransportError;
 pub use crate::custom_ca::build_reqwest_client_for_subprocess_tests;
 pub use crate::custom_ca::build_reqwest_client_with_custom_ca;
 pub use crate::custom_ca::build_rustls_client_config_with_custom_ca;
-pub use crate::custom_ca::maybe_build_rustls_client_config_with_custom_ca;
+pub use crate::custom_ca::load_rustls_client_config_with_custom_ca;
 pub use crate::error::StreamError;
 pub use crate::error::TransportError;
 pub use crate::outbound_proxy::BuildRouteAwareHttpClientError;

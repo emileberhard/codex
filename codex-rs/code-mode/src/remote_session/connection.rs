@@ -662,7 +662,8 @@ async fn connect_websocket_transport(
             "failed to build code-mode host websocket request: {error}"
         ))
     })?;
-    let connector = WebSocketConnector::new(http_client_factory)
+    let connector = WebSocketConnector::new_async(http_client_factory)
+        .await
         .map_err(|error| {
             ConnectionError::Other(format!(
                 "failed to configure code-mode host websocket TLS: {error}"

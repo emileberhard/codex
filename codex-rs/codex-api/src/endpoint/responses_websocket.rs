@@ -499,7 +499,8 @@ async fn connect_websocket(
         .map_err(|err| ApiError::Stream(format!("failed to build websocket request: {err}")))?;
     request.headers_mut().extend(headers);
 
-    let connector = WebSocketConnector::new(http_client_factory)
+    let connector = WebSocketConnector::new_async(http_client_factory)
+        .await
         .map_err(|err| ApiError::Stream(format!("failed to configure websocket TLS: {err}")))?;
     let response = connector.connect(request, websocket_config()).await;
 

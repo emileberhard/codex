@@ -36,6 +36,7 @@ use base64::Engine;
 use codex_app_server_protocol::RemoteControlConnectionStatus;
 use codex_app_server_protocol::RemoteControlStatusChangedNotification;
 use codex_core::util::backoff;
+use codex_http_client::load_rustls_client_config_with_custom_ca;
 use codex_login::AuthManager;
 use codex_login::UnauthorizedRecovery;
 use codex_state::StateRuntime;
@@ -56,15 +57,18 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio::time::MissedTickBehavior;
+use tokio_tungstenite::Connector;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_util::sync::CancellationToken;
 
 #[cfg(test)]
 use super::RemoteControlEnrollmentState;
+#[cfg(test)]
+use tokio_tungstenite::connect_async;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
@@ -1356,10 +1360,20 @@ pub(super) async fn connect_remote_control_websocket(
         connect_options.subscribe_cursor,
     )
     .await?;
+    let tls_connector = Connector::Rustls(
+        load_rustls_client_config_with_custom_ca()
+            .await
+            .map_err(io::Error::from)?,
+    );
 
     let websocket_connect_result = tokio::time::timeout(
         REMOTE_CONTROL_WEBSOCKET_CONNECT_TIMEOUT,
-        connect_async(request),
+        connect_async_tls_with_config(
+            request,
+            /* config */ None,
+            /* disable_nagle */ false,
+            Some(tls_connector),
+        ),
     )
     .await
     .map_err(|_| {

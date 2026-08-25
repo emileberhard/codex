@@ -44,7 +44,9 @@ async fn public_connector_uses_factory_and_exposes_stream_and_sink() {
         .into_client_request()
         .expect("websocket request should build");
     let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
-    let connector = WebSocketConnector::new(&factory).expect("connector should build");
+    let connector = WebSocketConnector::new_async(&factory)
+        .await
+        .expect("connector should build");
 
     let (mut websocket, _) = connector
         .connect(request, WebSocketConfig::default())
@@ -73,7 +75,8 @@ async fn public_connector_enables_tcp_nodelay_when_requested() {
         .into_client_request()
         .expect("websocket request should build");
     let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
-    let connector = WebSocketConnector::new(&factory)
+    let connector = WebSocketConnector::new_async(&factory)
+        .await
         .expect("connector should build")
         .with_tcp_nodelay();
 
@@ -97,6 +100,22 @@ async fn public_connector_enables_tcp_nodelay_when_requested() {
     );
 
     target_task.await.expect("target task should finish");
+}
+
+#[tokio::test]
+async fn async_connectors_share_one_tls_config() {
+    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
+    let first = WebSocketConnector::new_async(&factory)
+        .await
+        .expect("first connector should build");
+    let second = WebSocketConnector::new_async(&factory)
+        .await
+        .expect("second connector should build");
+
+    assert!(Arc::ptr_eq(
+        first.tls_config.as_ref().expect("first TLS config"),
+        second.tls_config.as_ref().expect("second TLS config"),
+    ));
 }
 
 #[tokio::test]
