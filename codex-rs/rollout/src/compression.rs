@@ -947,6 +947,20 @@ pub async fn existing_rollout_path(path: &Path) -> Option<PathBuf> {
     path::existing_rollout_path(path).await
 }
 
+/// Resolves a page of rollout paths in one blocking-pool task.
+pub(crate) async fn existing_rollout_paths(
+    paths: Vec<PathBuf>,
+) -> io::Result<Vec<Option<PathBuf>>> {
+    tokio::task::spawn_blocking(move || {
+        paths
+            .into_iter()
+            .map(|path| path::existing_rollout_path_blocking(&path))
+            .collect()
+    })
+    .await
+    .map_err(io::Error::other)
+}
+
 mod path {
     use std::ffi::OsStr;
     use std::fs::Metadata;
@@ -991,6 +1005,18 @@ mod path {
         existing_rollout_with_metadata(path)
             .await
             .map(|(path, _)| path)
+    }
+
+    pub(super) fn existing_rollout_path_blocking(path: &Path) -> Option<PathBuf> {
+        let plain_path = plain_rollout_path(path);
+        if std::fs::metadata(&plain_path).is_ok_and(|metadata| metadata.is_file()) {
+            return Some(plain_path);
+        }
+        let compressed_path = compressed_rollout_path(&plain_path);
+        if std::fs::metadata(&compressed_path).is_ok_and(|metadata| metadata.is_file()) {
+            return Some(compressed_path);
+        }
+        None
     }
 
     /// Resolves the plain rollout before its compressed sibling and retains the lookup metadata.

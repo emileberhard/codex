@@ -29,6 +29,33 @@ use crate::read_session_meta_line;
 use crate::search_rollout_matches;
 
 #[tokio::test]
+async fn existing_rollout_paths_resolves_batch_in_input_order() -> anyhow::Result<()> {
+    let home = TempDir::new()?;
+    let plain_path = home.path().join("rollout-plain.jsonl");
+    let plain_compressed_path = compressed_rollout_path(&plain_path);
+    fs::write(&plain_path, "plain")?;
+    fs::write(&plain_compressed_path, "stale compressed sibling")?;
+
+    let compressed_only_path = home.path().join("rollout-compressed.jsonl");
+    let compressed_path = compressed_rollout_path(&compressed_only_path);
+    fs::write(&compressed_path, "compressed")?;
+
+    let missing_path = home.path().join("rollout-missing.jsonl");
+    let resolved = existing_rollout_paths(vec![
+        plain_compressed_path,
+        missing_path,
+        compressed_only_path,
+    ])
+    .await?;
+
+    assert_eq!(
+        resolved,
+        vec![Some(plain_path), None, Some(compressed_path)]
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn load_rollout_items_reads_compressed_rollout() -> anyhow::Result<()> {
     let home = TempDir::new()?;
     let uuid = Uuid::from_u128(1);
