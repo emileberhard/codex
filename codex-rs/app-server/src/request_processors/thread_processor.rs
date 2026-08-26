@@ -1,5 +1,5 @@
-use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
+use super::persisted_resume_settings::settings_from_snapshot;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
 use super::turn_processor::can_accept_direct_input;
@@ -3919,17 +3919,20 @@ impl ThreadRequestProcessor {
         if let Some(persisted_settings) = latest_persisted_resume_settings(&resumed_history.history)
         {
             if typesafe_overrides.approval_policy.is_none() {
-                typesafe_overrides.approval_policy = Some(persisted_settings.approval_policy);
+                typesafe_overrides.approval_policy =
+                    persisted_settings.thread_settings.approval_policy;
             }
             if typesafe_overrides.approvals_reviewer.is_none()
                 && !request_overrides
                     .as_ref()
                     .is_some_and(|overrides| overrides.contains_key("approvals_reviewer"))
             {
-                typesafe_overrides.approvals_reviewer = persisted_settings.approvals_reviewer;
+                typesafe_overrides.approvals_reviewer =
+                    persisted_settings.thread_settings.approvals_reviewer;
             }
             if !has_permission_override(request_overrides.as_ref(), typesafe_overrides) {
                 typesafe_overrides.persisted_permission_profile_id = persisted_settings
+                    .thread_settings
                     .active_permission_profile
                     .map(|profile| profile.id);
             }
@@ -4745,11 +4748,7 @@ impl ThreadRequestProcessor {
         let loaded_parent_settings = if paginated_source && needs_latest_settings {
             if let Ok(parent) = self.thread_manager.get_thread(source_thread_id).await {
                 let snapshot = parent.thread_settings_snapshot().await;
-                Some(PersistedResumeSettings {
-                    approval_policy: snapshot.approval_policy,
-                    approvals_reviewer: Some(snapshot.approvals_reviewer),
-                    active_permission_profile: snapshot.active_permission_profile,
-                })
+                Some(settings_from_snapshot(&snapshot))
             } else {
                 None
             }
@@ -4783,13 +4782,16 @@ impl ThreadRequestProcessor {
         });
         if let Some(persisted_settings) = persisted_settings {
             if restore_approval_policy {
-                typesafe_overrides.approval_policy = Some(persisted_settings.approval_policy);
+                typesafe_overrides.approval_policy =
+                    persisted_settings.thread_settings.approval_policy;
             }
             if restore_approvals_reviewer {
-                typesafe_overrides.approvals_reviewer = persisted_settings.approvals_reviewer;
+                typesafe_overrides.approvals_reviewer =
+                    persisted_settings.thread_settings.approvals_reviewer;
             }
             if restore_permission_profile {
                 typesafe_overrides.persisted_permission_profile_id = persisted_settings
+                    .thread_settings
                     .active_permission_profile
                     .map(|profile| profile.id);
             }

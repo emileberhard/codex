@@ -1,5 +1,7 @@
+use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::*;
 use codex_protocol::mcp::ClientMcpExtensions;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 
 impl ThreadRequestProcessor {
     pub(crate) async fn thread_restart_suspend(
@@ -89,7 +91,7 @@ impl ThreadRequestProcessor {
                 turn,
             });
         }
-        let thread = self
+        let (thread, thread_settings) = self
             .load_restart_recovery_thread(
                 &request_id,
                 thread_id,
@@ -101,7 +103,7 @@ impl ThreadRequestProcessor {
         let submission = thread
             .recover_turn_after_restart_if_idle(RecoverTurnRequest {
                 turn_id: params.turn_id.clone(),
-                thread_settings: Default::default(),
+                thread_settings,
                 trace: self.request_trace_context(&request_id).await,
             })
             .await
@@ -149,10 +151,10 @@ impl ThreadRequestProcessor {
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
-    ) -> Result<Arc<CodexThread>, JSONRPCErrorError> {
+    ) -> Result<(Arc<CodexThread>, ThreadSettingsOverrides), JSONRPCErrorError> {
         let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
-        let thread = match self.thread_manager.get_thread(thread_id).await {
-            Ok(thread) => thread,
+        let (thread, thread_settings) = match self.thread_manager.get_thread(thread_id).await {
+            Ok(thread) => (thread, ThreadSettingsOverrides::default()),
             Err(_) => {
                 let stored_thread = self
                     .read_stored_thread_for_resume(
@@ -164,15 +166,41 @@ impl ThreadRequestProcessor {
                 let (thread_history, _) = self
                     .load_resume_initial_history_from_stored_thread(stored_thread)
                     .await?;
-                let history_cwd = thread_history.session_cwd();
+                let persisted_settings =
+                    latest_persisted_resume_settings(thread_history.get_rollout_items());
+                let thread_settings = persisted_settings
+                    .as_ref()
+                    .map(|settings| settings.thread_settings.clone())
+                    .unwrap_or_default();
+                let history_cwd = thread_settings
+                    .environments
+                    .as_ref()
+                    .map(|environments| environments.legacy_fallback_cwd.clone().into_path_buf())
+                    .or_else(|| thread_history.session_cwd());
                 let mut request_overrides = None;
                 let mut typesafe_overrides = self.build_thread_config_overrides(
-                    /*model*/ None, /*model_provider*/ None, /*service_tier*/ None,
-                    /*cwd*/ None, /*runtime_workspace_roots*/ None,
-                    /*approval_policy*/ None, /*approvals_reviewer*/ None,
-                    /*sandbox*/ None, /*permissions*/ None,
-                    /*base_instructions*/ None, /*developer_instructions*/ None,
-                    /*personality*/ None,
+                    thread_settings.model.clone(),
+                    persisted_settings
+                        .as_ref()
+                        .and_then(|settings| settings.model_provider.clone()),
+                    thread_settings.service_tier.clone(),
+                    thread_settings.environments.as_ref().map(|environments| {
+                        environments
+                            .legacy_fallback_cwd
+                            .as_path()
+                            .to_string_lossy()
+                            .into_owned()
+                    }),
+                    persisted_settings
+                        .as_ref()
+                        .and_then(|settings| settings.workspace_roots.clone()),
+                    /*approval_policy*/ None,
+                    /*approvals_reviewer*/ None,
+                    /*sandbox*/ None,
+                    /*permissions*/ None,
+                    /*base_instructions*/ None,
+                    /*developer_instructions*/ None,
+                    thread_settings.personality,
                 );
                 let persisted_metadata = self
                     .load_and_apply_persisted_resume_metadata(
@@ -198,14 +226,16 @@ impl ThreadRequestProcessor {
                 if let Some(session_source) = session_source
                     && session_source.is_non_root_agent()
                 {
-                    self.thread_manager
+                    let thread = self
+                        .thread_manager
                         .resume_agent_thread_after_restart(config, thread_id, session_source)
                         .await
                         .map_err(|error| {
                             internal_error(format!(
                                 "error resuming child agent thread {thread_id}: {error}"
                             ))
-                        })?
+                        })?;
+                    (thread, thread_settings)
                 } else {
                     let NewThread {
                         thread_id: resumed_thread_id,
@@ -229,7 +259,7 @@ impl ThreadRequestProcessor {
                             "restart recovery resumed thread {resumed_thread_id} instead of {thread_id}"
                         )));
                     }
-                    thread
+                    (thread, thread_settings)
                 }
             }
         };
@@ -251,7 +281,7 @@ impl ThreadRequestProcessor {
         self.thread_watch_manager
             .upsert_thread(&thread_id.to_string())
             .await;
-        Ok(thread)
+        Ok((thread, thread_settings))
     }
 }
 
