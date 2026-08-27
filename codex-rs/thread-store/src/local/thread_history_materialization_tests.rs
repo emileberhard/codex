@@ -23,6 +23,8 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::TokenCountEvent;
+use codex_protocol::protocol::TurnAbortReason;
+use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::TurnCompleteEvent;
 use codex_protocol::protocol::TurnStartedEvent;
 use codex_protocol::protocol::UserMessageEvent;
@@ -703,6 +705,94 @@ async fn active_turn_stores_only_its_start_position() {
         .history_base,
         None
     );
+}
+
+#[tokio::test]
+async fn repeated_turn_start_preserves_original_started_at() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+
+    let repeated_start = |started_at| {
+        RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: "turn-recovered".to_string(),
+            trace_id: None,
+            started_at: Some(started_at),
+            model_context_window: None,
+            collaboration_mode_kind: Default::default(),
+        }))
+    };
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![repeated_start(10), repeated_start(30), repeated_start(50)],
+        })
+        .await
+        .expect("append repeated starts");
+
+    let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
+        home.path().abs(),
+    ))
+    .await
+    .expect("open thread history db");
+    let started_at = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT started_at FROM thread_turns WHERE thread_id = ? AND turn_id = ?",
+    )
+    .bind(thread_id.to_string())
+    .bind("turn-recovered")
+    .fetch_one(&pool)
+    .await
+    .expect("read projected start time");
+    assert_eq!(started_at, Some(10));
+}
+
+#[tokio::test]
+async fn repeated_turn_reopens_after_abort_and_projects_final_completion() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .expect("persist session metadata");
+
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![
+                turn_started("turn-recovered"),
+                RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
+                    turn_id: Some("turn-recovered".to_string()),
+                    reason: TurnAbortReason::Replaced,
+                    started_at: Some(10),
+                    completed_at: Some(20),
+                    duration_ms: Some(10_000),
+                })),
+                turn_started("turn-recovered"),
+                turn_completed("turn-recovered"),
+            ],
+        })
+        .await
+        .expect("append recovered turn lifecycle");
+
+    let page = store
+        .list_turns(ListTurnsParams {
+            thread_id,
+            include_archived: false,
+            cursor: None,
+            page_size: 10,
+            sort_direction: SortDirection::Asc,
+            items_view: StoredTurnItemsView::NotLoaded,
+        })
+        .await
+        .expect("list recovered turn");
+
+    assert_eq!(page.turns.len(), 1);
+    assert_eq!(page.turns[0].turn_id, "turn-recovered");
+    assert_eq!(page.turns[0].status, StoredTurnStatus::Completed);
 }
 
 #[tokio::test]
@@ -1585,6 +1675,69 @@ async fn paginated_read_catches_up_a_durable_projection_suffix() {
     assert_eq!(page.turns[0].turn_id, "turn-1");
     assert_eq!(page.turns[0].status, StoredTurnStatus::Completed);
     assert!(projection_state(&pool, thread_id).await.1 > checkpoint.1);
+}
+
+#[tokio::test]
+async fn paginated_read_rebuilds_a_misaligned_projection_checkpoint() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .expect("persist session metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![turn_started("turn-1"), turn_completed("turn-1")],
+        })
+        .await
+        .expect("append projected turn");
+
+    let rollout_path = store
+        .live_rollout_path(thread_id)
+        .await
+        .expect("rollout path");
+    let (turn_start_byte_offset, _) =
+        rollout_line_byte_offsets(rollout_path.as_path(), /*ordinal*/ 1);
+    let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
+        home.path().abs(),
+    ))
+    .await
+    .expect("open thread history db");
+    sqlx::query(
+        r#"
+UPDATE thread_history_projection_state
+SET next_rollout_byte_offset = ?, next_rollout_ordinal = 1
+WHERE thread_id = ?
+        "#,
+    )
+    .bind(turn_start_byte_offset + 1)
+    .bind(thread_id.to_string())
+    .execute(&pool)
+    .await
+    .expect("misalign projection checkpoint");
+
+    let page = store
+        .list_turns(ListTurnsParams {
+            thread_id,
+            include_archived: false,
+            cursor: None,
+            page_size: 10,
+            sort_direction: SortDirection::Asc,
+            items_view: StoredTurnItemsView::NotLoaded,
+        })
+        .await
+        .expect("read should rebuild the projection");
+
+    assert_eq!(page.turns.len(), 1);
+    assert_eq!(page.turns[0].turn_id, "turn-1");
+    assert_eq!(page.turns[0].status, StoredTurnStatus::Completed);
+    let rollout_len = i64::try_from(fs::metadata(rollout_path).expect("rollout metadata").len())
+        .expect("rollout length");
+    assert_eq!(projection_state(&pool, thread_id).await, (rollout_len, 3));
 }
 
 #[tokio::test]

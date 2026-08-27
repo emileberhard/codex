@@ -100,6 +100,13 @@ impl ThreadRequestProcessor {
                 client_mcp_extensions,
             )
             .await?;
+        self.thread_state_manager
+            .thread_state(thread_id)
+            .await
+            .lock()
+            .await
+            .recovered_turn_ids
+            .insert(params.turn_id.clone());
         let submission = thread
             .recover_turn_after_restart_if_idle(RecoverTurnRequest {
                 turn_id: params.turn_id.clone(),

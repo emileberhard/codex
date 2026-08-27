@@ -293,11 +293,9 @@ ON CONFLICT(thread_id, turn_id) DO UPDATE SET
     rollout_end_byte_offset = excluded.rollout_end_byte_offset,
     status = excluded.status,
     error_json = excluded.error_json,
-    started_at = excluded.started_at,
+    started_at = COALESCE(thread_turns.started_at, excluded.started_at),
     completed_at = excluded.completed_at,
     duration_ms = excluded.duration_ms
-WHERE thread_turns.rollout_end_ordinal IS NULL
-  AND thread_turns.status = 'inProgress'
             "#,
         )
         .bind(thread_id)

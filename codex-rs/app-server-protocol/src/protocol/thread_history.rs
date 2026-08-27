@@ -1235,6 +1235,22 @@ impl ThreadHistoryBuilder {
     }
 
     fn handle_turn_started(&mut self, payload: &TurnStartedEvent) {
+        if let Some(turn) = self
+            .current_turn
+            .as_mut()
+            .filter(|turn| turn.id == payload.turn_id)
+        {
+            turn.status = TurnStatus::InProgress;
+            turn.error = None;
+            turn.started_at = turn.started_at.or(payload.started_at);
+            turn.completed_at = None;
+            turn.duration_ms = None;
+            turn.opened_explicitly = true;
+            let changed_turn = ThreadHistoryTurnChange::from_pending_turn(turn);
+            self.record_changed_turn(changed_turn);
+            return;
+        }
+
         self.finish_current_turn();
         let turn = self
             .new_turn(Some(payload.turn_id.clone()))
@@ -4876,5 +4892,74 @@ mod tests {
                 removed_turn_ids: vec!["turn-a".into()],
             }
         );
+    }
+
+    #[test]
+    fn repeated_turn_started_reopens_one_logical_turn() {
+        let mut builder = ThreadHistoryBuilder::new();
+        for event in [
+            EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: "turn-recovered".into(),
+                trace_id: None,
+                started_at: Some(10),
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            }),
+            EventMsg::UserMessage(UserMessageEvent {
+                client_id: None,
+                message: "keep this".into(),
+                images: None,
+                text_elements: Vec::new(),
+                local_images: Vec::new(),
+                ..Default::default()
+            }),
+            EventMsg::TurnAborted(TurnAbortedEvent {
+                turn_id: Some("turn-recovered".into()),
+                started_at: Some(10),
+                reason: TurnAbortReason::Replaced,
+                completed_at: Some(20),
+                duration_ms: Some(10_000),
+            }),
+            EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: "turn-recovered".into(),
+                trace_id: None,
+                started_at: Some(30),
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            }),
+            EventMsg::TurnAborted(TurnAbortedEvent {
+                turn_id: Some("turn-recovered".into()),
+                started_at: Some(10),
+                reason: TurnAbortReason::Replaced,
+                completed_at: Some(40),
+                duration_ms: Some(30_000),
+            }),
+            EventMsg::TurnStarted(TurnStartedEvent {
+                turn_id: "turn-recovered".into(),
+                trace_id: None,
+                started_at: Some(50),
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            }),
+            EventMsg::TurnComplete(TurnCompleteEvent {
+                turn_id: "turn-recovered".into(),
+                started_at: Some(10),
+                last_agent_message: None,
+                error: None,
+                completed_at: Some(60),
+                duration_ms: Some(50_000),
+                time_to_first_token_ms: None,
+            }),
+        ] {
+            builder.handle_event(&event);
+        }
+
+        let turns = builder.finish();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].id, "turn-recovered");
+        assert_eq!(turns[0].status, TurnStatus::Completed);
+        assert_eq!(turns[0].started_at, Some(10));
+        assert_eq!(turns[0].completed_at, Some(60));
+        assert_eq!(turns[0].items.len(), 1);
     }
 }

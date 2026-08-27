@@ -1015,6 +1015,15 @@ pub(crate) async fn apply_bespoke_event_handling(
                 }),
                 _ => None,
             };
+            let recovered_after_restart = if dynamic_tool_call_params.is_some() {
+                thread_state
+                    .lock()
+                    .await
+                    .recovered_turn_ids
+                    .contains(&event.turn_id)
+            } else {
+                false
+            };
             if should_emit {
                 let notification = item_event_to_server_notification(
                     EventMsg::ItemStarted(event),
@@ -1029,7 +1038,13 @@ pub(crate) async fn apply_bespoke_event_handling(
                     .send_request(ServerRequestPayload::DynamicToolCall(params))
                     .await;
                 tokio::spawn(async move {
-                    crate::dynamic_tools::on_call_response(call_id, rx, conversation).await;
+                    crate::dynamic_tools::on_call_response(
+                        call_id,
+                        rx,
+                        conversation,
+                        recovered_after_restart,
+                    )
+                    .await;
                 });
             }
         }

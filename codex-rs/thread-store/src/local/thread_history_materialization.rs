@@ -71,6 +71,93 @@ pub(super) async fn materialize_to_sqlite(
     .await
 }
 
+pub(super) async fn projection_checkpoint_is_aligned(
+    rollout_path: &Path,
+    thread_id: ThreadId,
+    projection_state: &super::thread_history::RolloutProjectionState,
+) -> ThreadStoreResult<bool> {
+    let bytes = tokio::fs::read(rollout_path)
+        .await
+        .map_err(thread_store_io_error)?;
+    if bytes.last().is_some_and(|byte| *byte != b'\n') {
+        return Err(ThreadStoreError::Internal {
+            message: format!("paginated rollout for {thread_id} has an incomplete trailing record"),
+        });
+    }
+    let session_meta = codex_rollout::read_session_meta_line(rollout_path)
+        .await
+        .map_err(thread_store_io_error)?
+        .meta;
+    if session_meta.id != thread_id {
+        return Err(ThreadStoreError::Internal {
+            message: format!(
+                "paginated rollout {} belongs to {}, not {thread_id}",
+                rollout_path.display(),
+                session_meta.id
+            ),
+        });
+    }
+
+    let mut expected_ordinal = session_meta
+        .history_base
+        .map_or(0, |base| base.end_ordinal_exclusive);
+    let mut checkpoint_aligned =
+        projection_state.next_byte_offset == 0 && projection_state.next_ordinal == expected_ordinal;
+    let mut line_start_offset = 0_u64;
+    for line_bytes in bytes.split_inclusive(|byte| *byte == b'\n') {
+        let line_end_offset = line_start_offset
+            .checked_add(u64::try_from(line_bytes.len()).map_err(|_| {
+                ThreadStoreError::Internal {
+                    message: "durable rollout byte offset overflow".to_string(),
+                }
+            })?)
+            .ok_or_else(|| ThreadStoreError::Internal {
+                message: "durable rollout byte offset overflow".to_string(),
+            })?;
+        if !line_bytes.iter().all(u8::is_ascii_whitespace) {
+            let value = serde_json::from_slice::<serde_json::Value>(line_bytes).map_err(|err| {
+                ThreadStoreError::Internal {
+                    message: format!(
+                        "paginated rollout for {thread_id} has invalid JSON at byte {line_start_offset}: {err}"
+                    ),
+                }
+            })?;
+            let line = codex_rollout::decode_rollout_line(value).map_err(|err| {
+                ThreadStoreError::Internal {
+                    message: format!(
+                        "paginated rollout for {thread_id} has an invalid record at byte {line_start_offset}: {err}"
+                    ),
+                }
+            })?;
+            let ordinal = line.ordinal.ok_or_else(|| ThreadStoreError::Internal {
+                message: format!(
+                    "paginated rollout line for {thread_id} at byte {line_start_offset} is missing an ordinal"
+                ),
+            })?;
+            if ordinal != expected_ordinal {
+                return Err(ThreadStoreError::Internal {
+                    message: format!(
+                        "paginated rollout for {thread_id} expected ordinal {expected_ordinal}, got {ordinal} at byte {line_start_offset}"
+                    ),
+                });
+            }
+            expected_ordinal =
+                expected_ordinal
+                    .checked_add(1)
+                    .ok_or_else(|| ThreadStoreError::Internal {
+                        message: "rollout ordinal exceeds SQLite integer range".to_string(),
+                    })?;
+        }
+        if projection_state.next_byte_offset == line_end_offset
+            && projection_state.next_ordinal == expected_ordinal
+        {
+            checkpoint_aligned = true;
+        }
+        line_start_offset = line_end_offset;
+    }
+    Ok(checkpoint_aligned)
+}
+
 async fn read_projection_steps(
     rollout_path: &Path,
     start_offset: u64,
