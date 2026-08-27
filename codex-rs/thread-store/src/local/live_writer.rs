@@ -8,6 +8,7 @@ use codex_rollout::RolloutItem;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::RolloutRecorderParams;
 use codex_rollout::is_persisted_rollout_item;
+use tracing::error;
 use tracing::warn;
 
 use super::LocalThreadStore;
@@ -171,7 +172,13 @@ pub(super) async fn shutdown_thread(
         )
         .await
         {
-            warn!("failed to project durable rollout during shutdown for {thread_id}: {err}");
+            error!(
+                thread_id = %thread_id,
+                rollout_id = %rollout_id,
+                rollout_path = %rollout_path.display(),
+                error = %err,
+                "durable rollout history projection failed during shutdown"
+            );
         }
     }
     sync_materialized_rollout_path(store, thread_id, rollout_path.as_path()).await?;
@@ -342,7 +349,13 @@ async fn write_and_project(
         )
         .await
         {
-            warn!("failed to project durable rollout for {thread_id}: {err}");
+            error!(
+                thread_id = %thread_id,
+                rollout_id = %rollout_id,
+                rollout_path = %rollout_path.display(),
+                error = %err,
+                "durable rollout history projection failed"
+            );
         }
     }
     if sync_rollout_path {

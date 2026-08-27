@@ -197,10 +197,38 @@ pub(super) async fn validate_thread_for_paginated_reads(
             message: format!("thread {thread_id} is archived"),
         });
     }
-    match metadata.history_mode {
-        ThreadHistoryMode::Legacy => Err(ThreadStoreError::Unsupported { operation }),
-        ThreadHistoryMode::Paginated => Ok(()),
+    if metadata.history_mode == ThreadHistoryMode::Legacy {
+        return Err(ThreadStoreError::Unsupported { operation });
     }
+
+    // JSONL is canonical and SQLite is only its paginated read projection. A failed projection
+    // must not turn into a successful read of an old prefix: retry the projection under the same
+    // per-thread lock used by writers, then surface any persistent integrity error to the client.
+    let _writer_guard = store.live_writer_locks.lock(thread_id).await;
+    let resolved =
+        super::super::thread_rollout_resolver::resolve_current_including_archived(store, thread_id)
+            .await?
+            .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
+    if resolved.path.extension().and_then(std::ffi::OsStr::to_str) == Some("zst") {
+        if super::projection_state(store, resolved.rollout_id)
+            .await?
+            .is_none()
+        {
+            return Err(ThreadStoreError::Internal {
+                message: format!(
+                    "compressed paginated rollout {} has no materialized history",
+                    resolved.path.display()
+                ),
+            });
+        }
+        return Ok(());
+    }
+    super::super::thread_history_materialization::materialize_to_sqlite(
+        store,
+        resolved.rollout_id,
+        resolved.path.as_path(),
+    )
+    .await
 }
 
 async fn load_inherited_summary_items(

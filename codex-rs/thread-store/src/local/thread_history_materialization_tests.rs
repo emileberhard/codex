@@ -1537,6 +1537,117 @@ ORDER BY turns.rollout_ordinal
 }
 
 #[tokio::test]
+async fn paginated_read_catches_up_a_durable_projection_suffix() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .expect("persist session metadata");
+
+    let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
+        home.path().abs(),
+    ))
+    .await
+    .expect("open thread history db");
+    let checkpoint = projection_state(&pool, thread_id).await;
+    let recorder = store
+        .live_recorders
+        .lock()
+        .await
+        .get(&thread_id)
+        .expect("live recorder")
+        .recorder
+        .clone();
+    recorder
+        .record_canonical_items(&[turn_started("turn-1"), turn_completed("turn-1")])
+        .await
+        .expect("queue unprojected history");
+    recorder.flush().await.expect("flush unprojected history");
+    assert_eq!(projection_state(&pool, thread_id).await, checkpoint);
+
+    let page = store
+        .list_turns(ListTurnsParams {
+            thread_id,
+            include_archived: false,
+            cursor: None,
+            page_size: 10,
+            sort_direction: SortDirection::Asc,
+            items_view: StoredTurnItemsView::NotLoaded,
+        })
+        .await
+        .expect("read should catch up the projection");
+
+    assert_eq!(page.turns.len(), 1);
+    assert_eq!(page.turns[0].turn_id, "turn-1");
+    assert_eq!(page.turns[0].status, StoredTurnStatus::Completed);
+    assert!(projection_state(&pool, thread_id).await.1 > checkpoint.1);
+}
+
+#[tokio::test]
+async fn paginated_read_rejects_a_duplicate_durable_ordinal_instead_of_returning_stale_history() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .expect("persist session metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![turn_started("turn-1"), turn_completed("turn-1")],
+        })
+        .await
+        .expect("append projected turn");
+
+    let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
+        home.path().abs(),
+    ))
+    .await
+    .expect("open thread history db");
+    let checkpoint = projection_state(&pool, thread_id).await;
+    let rollout_path = store
+        .live_rollout_path(thread_id)
+        .await
+        .expect("rollout path");
+    append_suffix(
+        rollout_path.as_path(),
+        format!(
+            "{}\n",
+            rollout_line(
+                Some(u64::try_from(checkpoint.1 - 1).expect("nonnegative ordinal")),
+                turn_started("duplicate-turn"),
+            )
+        )
+        .as_str(),
+    );
+
+    let error = store
+        .list_turns(ListTurnsParams {
+            thread_id,
+            include_archived: false,
+            cursor: None,
+            page_size: 10,
+            sort_direction: SortDirection::Asc,
+            items_view: StoredTurnItemsView::NotLoaded,
+        })
+        .await
+        .expect_err("duplicate ordinal must fail the read");
+
+    assert!(
+        error.to_string().contains("expected ordinal"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(projection_state(&pool, thread_id).await, checkpoint);
+}
+
+#[tokio::test]
 async fn next_write_catches_up_unprojected_durable_suffix() {
     let home = TempDir::new().expect("temp dir");
     let store = projection_store(home.path()).await;
@@ -2253,6 +2364,27 @@ async fn create_paginated_thread(store: &LocalThreadStore, thread_id: ThreadId) 
         store, thread_id, /*history_base*/ None, /*subagent_history_start_ordinal*/ None,
     )
     .await;
+}
+
+async fn seed_paginated_thread_metadata(store: &LocalThreadStore, thread_id: ThreadId) {
+    let rollout_path = store
+        .live_rollout_path(thread_id)
+        .await
+        .expect("rollout path");
+    let mut builder = codex_state::ThreadMetadataBuilder::new(
+        thread_id,
+        rollout_path,
+        Utc::now(),
+        SessionSource::Exec,
+    );
+    builder.history_mode = ThreadHistoryMode::Paginated;
+    store
+        .state_db
+        .as_ref()
+        .expect("state database")
+        .upsert_thread(&builder.build(store.config.default_model_provider_id.as_str()))
+        .await
+        .expect("seed thread metadata");
 }
 
 async fn prepare_paginated_fork(

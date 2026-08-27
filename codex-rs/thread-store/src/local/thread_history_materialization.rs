@@ -27,11 +27,14 @@ pub(super) async fn materialize_to_sqlite(
     let start_offset = projection_state
         .as_ref()
         .map_or(0, |state| state.next_byte_offset);
-    if projection_state.is_none()
-        && !tokio::fs::try_exists(rollout_path)
-            .await
-            .map_err(thread_store_io_error)?
-    {
+    let rollout_len = match tokio::fs::metadata(rollout_path).await {
+        Ok(metadata) => metadata.len(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound && projection_state.is_none() => {
+            return Ok(());
+        }
+        Err(err) => return Err(thread_store_io_error(err)),
+    };
+    if projection_state.is_some() && start_offset == rollout_len {
         return Ok(());
     }
     let session_meta = codex_rollout::read_session_meta_line(rollout_path)
