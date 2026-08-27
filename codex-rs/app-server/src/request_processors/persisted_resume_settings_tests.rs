@@ -104,13 +104,8 @@ fn assert_resume_settings(
     assert_eq!(settings.model.as_deref(), Some("gpt-5"));
     assert_eq!(settings.effort, Some(None));
     assert_eq!(settings.summary, None);
-    assert_eq!(
-        settings
-            .environments
-            .as_ref()
-            .map(|environments| &environments.legacy_fallback_cwd),
-        Some(&cwd())
-    );
+    assert_eq!(settings.environments, None);
+    assert_eq!(persisted.cwd, cwd());
 }
 
 #[test]

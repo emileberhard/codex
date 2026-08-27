@@ -172,10 +172,9 @@ impl ThreadRequestProcessor {
                     .as_ref()
                     .map(|settings| settings.thread_settings.clone())
                     .unwrap_or_default();
-                let history_cwd = thread_settings
-                    .environments
+                let history_cwd = persisted_settings
                     .as_ref()
-                    .map(|environments| environments.legacy_fallback_cwd.clone().into_path_buf())
+                    .map(|settings| settings.cwd.clone().into_path_buf())
                     .or_else(|| thread_history.session_cwd());
                 let mut request_overrides = None;
                 let mut typesafe_overrides = self.build_thread_config_overrides(

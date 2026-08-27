@@ -3,12 +3,13 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::TurnContextItem;
-use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_rollout::RolloutItem;
+use codex_utils_absolute_path::AbsolutePathBuf;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct PersistedResumeSettings {
     pub(super) thread_settings: ThreadSettingsOverrides,
+    pub(super) cwd: AbsolutePathBuf,
     pub(super) model_provider: Option<String>,
     pub(super) workspace_roots: Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>,
 }
@@ -58,10 +59,6 @@ fn latest_approvals_reviewer(history: &[RolloutItem]) -> Option<ApprovalsReviewe
 pub(super) fn settings_from_snapshot(snapshot: &ThreadSettingsSnapshot) -> PersistedResumeSettings {
     PersistedResumeSettings {
         thread_settings: ThreadSettingsOverrides {
-            environments: Some(TurnEnvironmentSelections::new(
-                snapshot.cwd.clone(),
-                Vec::new(),
-            )),
             approval_policy: Some(snapshot.approval_policy),
             approvals_reviewer: Some(snapshot.approvals_reviewer),
             permission_profile: Some(snapshot.permission_profile.clone()),
@@ -74,6 +71,7 @@ pub(super) fn settings_from_snapshot(snapshot: &ThreadSettingsSnapshot) -> Persi
             personality: snapshot.personality,
             ..Default::default()
         },
+        cwd: snapshot.cwd.clone(),
         model_provider: Some(snapshot.model_provider_id.clone()),
         workspace_roots: None,
     }
@@ -86,10 +84,6 @@ fn settings_from_turn_context(
 ) -> PersistedResumeSettings {
     PersistedResumeSettings {
         thread_settings: ThreadSettingsOverrides {
-            environments: Some(TurnEnvironmentSelections::new(
-                turn_context.cwd.clone(),
-                Vec::new(),
-            )),
             approval_policy: Some(turn_context.approval_policy),
             approvals_reviewer: turn_context
                 .approvals_reviewer
@@ -111,6 +105,7 @@ fn settings_from_turn_context(
                 .or_else(|| previous_snapshot.and_then(|snapshot| snapshot.personality)),
             ..Default::default()
         },
+        cwd: turn_context.cwd.clone(),
         model_provider: previous_snapshot.map(|snapshot| snapshot.model_provider_id.clone()),
         workspace_roots: turn_context.workspace_roots.clone(),
     }
