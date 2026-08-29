@@ -2,6 +2,7 @@ use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::*;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::ThreadSettingsOverrides;
+use codex_protocol::turn_input::CyberAccessProgram;
 
 impl ThreadRequestProcessor {
     pub(crate) async fn thread_restart_suspend(
@@ -91,7 +92,7 @@ impl ThreadRequestProcessor {
                 turn,
             });
         }
-        let (thread, thread_settings) = self
+        let (thread, thread_settings, cyber_access_program) = self
             .load_restart_recovery_thread(
                 &request_id,
                 thread_id,
@@ -112,6 +113,7 @@ impl ThreadRequestProcessor {
                 turn_id: params.turn_id.clone(),
                 thread_settings,
                 trace: self.request_trace_context(&request_id).await,
+                cyber_access_program,
             })
             .await
             .map_err(|error| {
@@ -158,10 +160,21 @@ impl ThreadRequestProcessor {
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
-    ) -> Result<(Arc<CodexThread>, ThreadSettingsOverrides), JSONRPCErrorError> {
+    ) -> Result<
+        (
+            Arc<CodexThread>,
+            ThreadSettingsOverrides,
+            Option<CyberAccessProgram>,
+        ),
+        JSONRPCErrorError,
+    > {
         let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
-        let (thread, thread_settings) = match self.thread_manager.get_thread(thread_id).await {
-            Ok(thread) => (thread, ThreadSettingsOverrides::default()),
+        let (thread, thread_settings, cyber_access_program) = match self
+            .thread_manager
+            .get_thread(thread_id)
+            .await
+        {
+            Ok(thread) => (thread, ThreadSettingsOverrides::default(), None),
             Err(_) => {
                 let stored_thread = self
                     .read_stored_thread_for_resume(
@@ -179,6 +192,9 @@ impl ThreadRequestProcessor {
                     .as_ref()
                     .map(|settings| settings.thread_settings.clone())
                     .unwrap_or_default();
+                let cyber_access_program = persisted_settings
+                    .as_ref()
+                    .and_then(|settings| settings.cyber_access_program);
                 let history_cwd = persisted_settings
                     .as_ref()
                     .map(|settings| settings.cwd.clone().into_path_buf())
@@ -226,6 +242,7 @@ impl ThreadRequestProcessor {
                 {
                     config.model_reasoning_effort = None;
                 }
+                let multi_agent_version = thread_history.get_multi_agent_version();
                 let session_source = thread_history
                     .get_resumed_session_sources()
                     .map(|(source, _)| source);
@@ -234,14 +251,19 @@ impl ThreadRequestProcessor {
                 {
                     let thread = self
                         .thread_manager
-                        .resume_agent_thread_after_restart(config, thread_id, session_source)
+                        .resume_agent_thread_after_restart(
+                            config,
+                            thread_id,
+                            session_source,
+                            multi_agent_version,
+                        )
                         .await
                         .map_err(|error| {
                             internal_error(format!(
                                 "error resuming child agent thread {thread_id}: {error}"
                             ))
                         })?;
-                    (thread, thread_settings)
+                    (thread, thread_settings, cyber_access_program)
                 } else {
                     let NewThread {
                         thread_id: resumed_thread_id,
@@ -265,7 +287,7 @@ impl ThreadRequestProcessor {
                             "restart recovery resumed thread {resumed_thread_id} instead of {thread_id}"
                         )));
                     }
-                    (thread, thread_settings)
+                    (thread, thread_settings, cyber_access_program)
                 }
             }
         };
@@ -287,7 +309,7 @@ impl ThreadRequestProcessor {
         self.thread_watch_manager
             .upsert_thread(&thread_id.to_string())
             .await;
-        Ok((thread, thread_settings))
+        Ok((thread, thread_settings, cyber_access_program))
     }
 }
 

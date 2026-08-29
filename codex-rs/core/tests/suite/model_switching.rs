@@ -128,6 +128,7 @@ fn test_model_info(
         model_specialty: None,
         tool_mode: None,
         multi_agent_version: None,
+        multi_agent_reasoning_effort: None,
         priority: 1,
         additional_speed_tiers: Vec::new(),
         service_tiers: Vec::new(),
@@ -992,6 +993,7 @@ async fn model_change_from_multimodal_to_text_strips_prior_media_content() -> Re
     assert_eq!(requests.len(), 2, "expected two model requests");
 
     let first_request = requests.first().expect("expected first request");
+    assert!(first_request.has_content_kinds(&["user.image", "user.audio", "user.text"]));
     assert!(
         !first_request.message_input_image_urls("user").is_empty(),
         "first request should include the uploaded image"
@@ -1002,6 +1004,11 @@ async fn model_change_from_multimodal_to_text_strips_prior_media_content() -> Re
     );
 
     let second_request = requests.last().expect("expected second request");
+    assert!(second_request.has_content_kinds(&[
+        "images.unsupported",
+        "audio.unsupported",
+        "user.text",
+    ]));
     assert!(
         second_request.message_input_image_urls("user").is_empty(),
         "second request should strip unsupported image content"
@@ -1358,6 +1365,7 @@ async fn model_switch_to_smaller_model_updates_token_context_window() -> Result<
         model_specialty: None,
         tool_mode: None,
         multi_agent_version: None,
+        multi_agent_reasoning_effort: None,
         priority: 1,
         additional_speed_tiers: Vec::new(),
         service_tiers: Vec::new(),

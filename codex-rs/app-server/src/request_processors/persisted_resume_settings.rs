@@ -3,6 +3,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::TurnContextItem;
+use codex_protocol::turn_input::CyberAccessProgram;
 use codex_rollout::RolloutItem;
 use codex_utils_absolute_path::AbsolutePathBuf;
 
@@ -12,6 +13,7 @@ pub(super) struct PersistedResumeSettings {
     pub(super) cwd: AbsolutePathBuf,
     pub(super) model_provider: Option<String>,
     pub(super) workspace_roots: Option<Vec<codex_utils_absolute_path::AbsolutePathBuf>>,
+    pub(super) cyber_access_program: Option<CyberAccessProgram>,
 }
 
 pub(super) fn latest_persisted_resume_settings(
@@ -74,6 +76,7 @@ pub(super) fn settings_from_snapshot(snapshot: &ThreadSettingsSnapshot) -> Persi
         cwd: snapshot.cwd.clone(),
         model_provider: Some(snapshot.model_provider_id.clone()),
         workspace_roots: None,
+        cyber_access_program: None,
     }
 }
 
@@ -108,6 +111,7 @@ fn settings_from_turn_context(
         cwd: turn_context.cwd.clone(),
         model_provider: previous_snapshot.map(|snapshot| snapshot.model_provider_id.clone()),
         workspace_roots: turn_context.workspace_roots.clone(),
+        cyber_access_program: turn_context.cyber_access_program,
     }
 }
 

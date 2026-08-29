@@ -10,6 +10,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ThreadSettingsAppliedEvent;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use codex_protocol::protocol::TurnContextItem;
+use codex_protocol::turn_input::CyberAccessProgram;
 use codex_rollout::RolloutItem;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use pretty_assertions::assert_eq;
@@ -80,6 +81,7 @@ fn turn_context_item(
         multi_agent_version: None,
         multi_agent_mode: None,
         realtime_active: None,
+        cyber_access_program: None,
         effort: None,
         summary: codex_protocol::config_types::ReasoningSummary::Auto,
     })
@@ -133,6 +135,7 @@ fn latest_settings_snapshot_wins() {
     let persisted = latest_persisted_resume_settings(&history).expect("persisted settings");
     assert_eq!(persisted.model_provider.as_deref(), Some("openai"));
     assert_eq!(persisted.workspace_roots, None);
+    assert_eq!(persisted.cyber_access_program, None);
     assert_eq!(persisted.thread_settings.service_tier, Some(None));
     assert_eq!(
         persisted
@@ -171,6 +174,7 @@ fn latest_turn_context_wins_over_earlier_settings_update() {
     let persisted = latest_persisted_resume_settings(&history).expect("persisted settings");
     assert_eq!(persisted.model_provider.as_deref(), Some("openai"));
     assert_eq!(persisted.workspace_roots, Some(vec![cwd()]));
+    assert_eq!(persisted.cyber_access_program, None);
     assert_eq!(persisted.thread_settings.service_tier, Some(None));
     assert_eq!(
         persisted
@@ -179,6 +183,27 @@ fn latest_turn_context_wins_over_earlier_settings_update() {
             .as_ref()
             .map(|mode| mode.mode),
         Some(ModeKind::Default)
+    );
+}
+
+#[test]
+fn latest_turn_context_preserves_cyber_access_program() {
+    let mut item = turn_context_item(
+        "turn-1",
+        AskForApproval::Never,
+        Some(ApprovalsReviewer::User),
+        PermissionProfile::read_only(),
+        /*active_permission_profile*/ None,
+    );
+    let RolloutItem::TurnContext(turn_context) = &mut item else {
+        panic!("expected turn context");
+    };
+    turn_context.cyber_access_program = Some(CyberAccessProgram::DaybreakBlue);
+
+    let persisted = latest_persisted_resume_settings(&[item]).expect("persisted settings");
+    assert_eq!(
+        persisted.cyber_access_program,
+        Some(CyberAccessProgram::DaybreakBlue)
     );
 }
 
