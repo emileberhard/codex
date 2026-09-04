@@ -19,6 +19,7 @@ use crate::session::emit_subagent_session_started;
 use crate::session::multi_agents::ResolvedMultiAgentV2UsageHints;
 use crate::session_prefix::format_inter_agent_completion_message;
 use crate::session_prefix::format_subagent_context_line;
+use crate::thread_manager::NewWorkAdmission;
 use crate::thread_manager::ResumeThreadWithHistoryOptions;
 use crate::thread_manager::ThreadIdGenerator;
 use crate::thread_manager::ThreadManagerState;
@@ -26,6 +27,7 @@ use crate::thread_manager::ThreadSpawnAdmission;
 use crate::thread_manager::default_thread_id_generator;
 use crate::thread_rollout_truncation::truncate_rollout_to_last_n_fork_turns;
 use crate::turn_timing::now_unix_timestamp_ms;
+use arc_swap::ArcSwapOption;
 use codex_history::InitialHistory;
 use codex_history::ResumedHistory;
 use codex_history::RolloutItem;
@@ -73,6 +75,7 @@ use self::residency::V2Residency;
 mod execution;
 mod legacy;
 mod residency;
+mod service_tier;
 mod spawn;
 mod user_authorization;
 
@@ -115,13 +118,15 @@ pub(crate) struct ListedAgent {
 /// which keeps the registry scoped to that root thread rather than the entire `ThreadManager`.
 #[derive(Clone)]
 pub(crate) struct AgentControl {
-    /// ID shared by the whole agent control session. This means every sub-agents from a common
-    /// root share the same session ID.
+    /// session_id is equal to the root thread's ID.
     session_id: SessionId,
     /// Weak handle back to the global thread registry/state.
     /// This is `Weak` to avoid reference cycles and shadow persistence of the form
     /// `ThreadManagerState -> CodexThread -> Session -> SessionServices -> ThreadManagerState`.
     manager: Weak<ThreadManagerState>,
+    /// Restart admission is independent from the thread registry so a live
+    /// `CodexThread` can keep accepting turns after its creating manager handle is dropped.
+    new_work_admission: Arc<NewWorkAdmission>,
     /// Captured at construction so delegates retain their manager's allocation policy.
     thread_id_generator: ThreadIdGenerator,
     state: Arc<AgentRegistry>,
@@ -129,12 +134,15 @@ pub(crate) struct AgentControl {
     agent_execution_limiter: Arc<AgentExecutionLimiter>,
     /// Session-scoped state shared by the root thread and every cloned sub-agent control handle.
     rollout_budget: Arc<RolloutBudget>,
+    /// The user-selected root routing tier, shared by the entire agent tree.
+    root_service_tier: Arc<ArcSwapOption<String>>,
 }
 
 impl Default for AgentControl {
     fn default() -> Self {
         Self::new(
             Weak::default(),
+            Arc::default(),
             default_thread_id_generator(),
             /*rollout_budget*/ None,
         )
@@ -145,11 +153,11 @@ impl AgentControl {
     pub(crate) async fn acquire_new_work_admission(
         &self,
     ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
-        self.upgrade()?.acquire_new_work_admission().await
+        self.new_work_admission.acquire().await
     }
 
     pub(crate) fn require_settled_restart_fence(&self) -> CodexResult<()> {
-        if self.upgrade()?.new_work_admission_fenced() {
+        if self.new_work_admission.is_fenced() {
             return Ok(());
         }
         Err(CodexErr::InvalidRequest(
@@ -160,17 +168,20 @@ impl AgentControl {
     /// Construct a new `AgentControl` that can spawn/message agents via the given manager state.
     pub(crate) fn new(
         manager: Weak<ThreadManagerState>,
+        new_work_admission: Arc<NewWorkAdmission>,
         thread_id_generator: ThreadIdGenerator,
         rollout_budget: Option<RolloutBudgetConfig>,
     ) -> Self {
         let control = Self {
             session_id: SessionId::default(),
             manager,
+            new_work_admission,
             thread_id_generator,
             state: Arc::default(),
             v2_residency: Arc::default(),
             agent_execution_limiter: Arc::default(),
             rollout_budget: Arc::default(),
+            root_service_tier: Arc::new(ArcSwapOption::from(None)),
         };
         if let Some(rollout_budget) = rollout_budget {
             control.rollout_budget.configure(rollout_budget);

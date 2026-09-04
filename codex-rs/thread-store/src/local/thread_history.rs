@@ -334,8 +334,14 @@ ON CONFLICT(thread_id, turn_id) DO UPDATE SET
     started_at = COALESCE(thread_turns.started_at, excluded.started_at),
     completed_at = excluded.completed_at,
     duration_ms = excluded.duration_ms
-WHERE thread_turns.rollout_end_ordinal IS NULL
-  AND thread_turns.status = 'inProgress'
+WHERE (
+    thread_turns.rollout_end_ordinal IS NULL
+    AND thread_turns.status = 'inProgress'
+)
+OR (
+    thread_turns.status = 'interrupted'
+    AND excluded.status = 'inProgress'
+)
             "#,
         )
         .bind(thread_id)

@@ -36,6 +36,7 @@ use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingEnvelope;
 use crate::outgoing_message::OutgoingMessageSender;
 use crate::outgoing_message::QueuedOutgoingMessage;
+use crate::plugin_config_reload::PluginStartupConfig;
 use crate::restart_recovery::RestartRecoveryGrantFile;
 use crate::transport::CHANNEL_CAPACITY;
 use crate::transport::ConnectionOrigin;
@@ -105,6 +106,7 @@ mod attestation;
 mod auth_mode;
 mod bespoke_event_handling;
 mod code_mode_host;
+mod codex_home_metrics;
 mod command_exec;
 mod config_layer;
 mod config_manager;
@@ -127,10 +129,10 @@ mod mcp_refresh;
 mod message_processor;
 mod models;
 mod models_refresh_worker;
+mod notification_media;
 mod otel_reloader;
 mod outgoing_message;
-mod realtime_event_handling;
-mod realtime_history;
+mod plugin_config_reload;
 mod request_processors;
 mod request_serialization;
 mod restart_recovery;
@@ -733,6 +735,7 @@ pub async fn run_main_with_transport_options(
         }
     };
     let mut config_warnings = Vec::new();
+    let mut plugin_startup_config = PluginStartupConfig::Current;
     let config = match config_manager
         .load_latest_config(/*fallback_cwd*/ None)
         .await
@@ -748,6 +751,7 @@ pub async fn run_main_with_transport_options(
 
             let message = config_warning_from_error("Invalid configuration; using defaults.", &err);
             config_warnings.push(message);
+            plugin_startup_config = PluginStartupConfig::Defaults;
             config_manager.load_default_config().await.map_err(|e| {
                 std::io::Error::new(
                     ErrorKind::InvalidData,
@@ -1031,6 +1035,11 @@ pub async fn run_main_with_transport_options(
     }
     transport_accept_handles.push(remote_control_accept_handle);
 
+    // Only the standalone server measures its local home, not embedded/cloud runtimes.
+    if let Some(metrics) = otel.as_ref().and_then(codex_otel::OtelProvider::metrics) {
+        codex_home_metrics::spawn(&config, metrics.clone(), transport_shutdown_token.clone());
+    }
+
     let otel_reloader_handle = otel_reloader::spawn(
         otel,
         otel_logger_reload_handle,
@@ -1122,7 +1131,11 @@ pub async fn run_main_with_transport_options(
             code_mode_session_provider,
             rpc_transport: analytics_rpc_transport(&transport),
             remote_control_handle: Some(remote_control_handle.clone()),
-            plugin_startup_tasks: runtime_options.plugin_startup_tasks,
+            plugin_startup_tasks: matches!(
+                runtime_options.plugin_startup_tasks,
+                PluginStartupTasks::Start
+            )
+            .then_some(plugin_startup_config),
             restart_recovery_grant: runtime_options.restart_recovery_grant.clone(),
         }));
         let mut thread_created_rx = processor.thread_created_receiver();

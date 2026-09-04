@@ -223,7 +223,7 @@ async fn websocket_transport_second_sigterm_forces_exit_while_turn_running() -> 
 }
 
 #[tokio::test]
-async fn websocket_transport_repeated_sighup_keeps_waiting_for_running_turn() -> Result<()> {
+async fn websocket_transport_repeated_sighup_keeps_prepared_restart_fenced() -> Result<()> {
     let GracefulCtrlCFixture {
         _codex_home,
         _server,
@@ -237,10 +237,14 @@ async fn websocket_transport_repeated_sighup_keeps_waiting_for_running_turn() ->
     send_sighup(&process)?;
     assert_process_does_not_exit_within(&mut process, Duration::from_millis(300)).await?;
 
+    sleep(Duration::from_secs(3)).await;
+    assert_process_does_not_exit_within(&mut process, Duration::from_millis(300)).await?;
+
+    send_sigterm(&process)?;
     let status = wait_for_process_exit_within(
         &mut process,
-        Duration::from_secs(10),
-        "timed out waiting for graceful repeated SIGHUP restart shutdown",
+        Duration::from_secs(2),
+        "timed out waiting for prepared restart shutdown after SIGTERM",
     )
     .await?;
     assert!(status.success(), "expected graceful exit, got {status}");

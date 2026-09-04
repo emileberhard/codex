@@ -84,6 +84,7 @@ use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
 use codex_thread_store::UpdateThreadMetadataParams;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_git_discovery::GitRootDiscovery;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use std::collections::HashMap;
@@ -345,18 +346,70 @@ pub(crate) struct ResumeThreadWithHistoryOptions {
     pub(crate) client_mcp_extensions: Option<ClientMcpExtensions>,
 }
 
+#[derive(Default)]
+pub(crate) struct NewWorkAdmission {
+    gate: Arc<RwLock<()>>,
+    fenced: AtomicBool,
+    fence_ready: AtomicBool,
+}
+
+impl NewWorkAdmission {
+    fn begin_fence(&self) {
+        self.fenced.store(true, Ordering::Release);
+        self.fence_ready.store(false, Ordering::Release);
+    }
+
+    fn poll_fence(&self) -> bool {
+        if !self.fenced.load(Ordering::Acquire) {
+            return false;
+        }
+        if self.gate.clone().try_write_owned().is_err() {
+            return false;
+        }
+        self.fence_ready.store(true, Ordering::Release);
+        true
+    }
+
+    fn unfence(&self) {
+        self.fenced.store(false, Ordering::Release);
+        self.fence_ready.store(false, Ordering::Release);
+    }
+
+    pub(crate) fn is_fenced(&self) -> bool {
+        self.fence_ready.load(Ordering::Acquire)
+    }
+
+    fn is_closed(&self) -> bool {
+        self.fenced.load(Ordering::Acquire)
+    }
+
+    pub(crate) async fn acquire(&self) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
+        if self.fenced.load(Ordering::Acquire) {
+            return Err(CodexErr::InvalidRequest(
+                "app server is draining for restart; new work is not accepted".to_string(),
+            ));
+        }
+        let admission = self.gate.clone().read_owned().await;
+        if self.fenced.load(Ordering::Acquire) {
+            return Err(CodexErr::InvalidRequest(
+                "app server is draining for restart; new work is not accepted".to_string(),
+            ));
+        }
+        Ok(admission)
+    }
+}
+
 /// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
 /// `Arc` reference that can be downgraded to by `AgentControl` while preventing every single
 /// function to require an `Arc<&Self>`.
 pub(crate) struct ThreadManagerState {
     threads: Arc<RwLock<HashMap<ThreadId, Arc<CodexThread>>>>,
-    new_work_admission: Arc<RwLock<()>>,
-    new_work_admission_fenced: AtomicBool,
-    new_work_admission_fence_ready: AtomicBool,
+    new_work_admission: Arc<NewWorkAdmission>,
     thread_created_tx: broadcast::Sender<ThreadId>,
     thread_id_generator: ThreadIdGenerator,
     auth_manager: Arc<AuthManager>,
     models_manager: SharedModelsManager,
+    git_root_discovery: Arc<GitRootDiscovery>,
     environment_manager: Arc<EnvironmentManager>,
     starting_mcp_runtimes: std::sync::Mutex<Vec<std::sync::Weak<AtomicBool>>>,
     skills_service: Arc<HostSkillsService>,
@@ -481,12 +534,11 @@ impl ThreadManager {
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
-                new_work_admission: Arc::new(RwLock::new(())),
-                new_work_admission_fenced: AtomicBool::new(false),
-                new_work_admission_fence_ready: AtomicBool::new(false),
+                new_work_admission: Arc::default(),
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 models_manager,
+                git_root_discovery: Arc::default(),
                 environment_manager,
                 starting_mcp_runtimes: std::sync::Mutex::new(Vec::new()),
                 skills_service,
@@ -630,13 +682,12 @@ impl ThreadManager {
         Self {
             state: Arc::new(ThreadManagerState {
                 threads: Arc::new(RwLock::new(HashMap::new())),
-                new_work_admission: Arc::new(RwLock::new(())),
-                new_work_admission_fenced: AtomicBool::new(false),
-                new_work_admission_fence_ready: AtomicBool::new(false),
+                new_work_admission: Arc::default(),
                 thread_created_tx,
                 thread_id_generator: default_thread_id_generator(),
                 models_manager: create_model_provider(provider, Some(auth_manager.clone()))
                     .models_manager(codex_home, /*config_model_catalog*/ None),
+                git_root_discovery: Arc::default(),
                 environment_manager,
                 starting_mcp_runtimes: std::sync::Mutex::new(Vec::new()),
                 skills_service,
@@ -669,40 +720,15 @@ impl ThreadManager {
     /// Prevent new thread and turn work while a managed restart snapshots the
     /// currently running task trees. Existing turns continue to completion.
     pub fn begin_new_work_fence(&self) {
-        self.state
-            .new_work_admission_fenced
-            .store(true, Ordering::Release);
-        self.state
-            .new_work_admission_fence_ready
-            .store(false, Ordering::Release);
+        self.state.new_work_admission.begin_fence();
     }
 
     pub fn poll_new_work_fence(&self) -> bool {
-        if !self.state.new_work_admission_fenced.load(Ordering::Acquire) {
-            return false;
-        }
-        if self
-            .state
-            .new_work_admission
-            .clone()
-            .try_write_owned()
-            .is_err()
-        {
-            return false;
-        }
-        self.state
-            .new_work_admission_fence_ready
-            .store(true, Ordering::Release);
-        true
+        self.state.new_work_admission.poll_fence()
     }
 
     pub fn unfence_new_work(&self) {
-        self.state
-            .new_work_admission_fenced
-            .store(false, Ordering::Release);
-        self.state
-            .new_work_admission_fence_ready
-            .store(false, Ordering::Release);
+        self.state.new_work_admission.unfence();
     }
 
     pub fn new_work_admission_fenced(&self) -> bool {
@@ -710,7 +736,7 @@ impl ThreadManager {
     }
 
     pub fn new_work_admission_closed(&self) -> bool {
-        self.state.new_work_admission_fenced.load(Ordering::Acquire)
+        self.state.new_work_admission.is_closed()
     }
 
     /// Admit one externally submitted unit of work and keep it ordered before
@@ -850,6 +876,10 @@ impl ThreadManager {
                 })?;
         }
         Ok(())
+    }
+
+    pub(crate) fn git_root_discovery(&self) -> Arc<GitRootDiscovery> {
+        Arc::clone(&self.state.git_root_discovery)
     }
 
     pub fn get_models_manager(&self) -> SharedModelsManager {
@@ -1186,14 +1216,14 @@ impl ThreadManager {
         parent_trace: Option<W3cTraceContext>,
         client_mcp_extensions: ClientMcpExtensions,
     ) -> CodexResult<NewThread> {
-        self.resume_thread_with_history_admission(
+        Box::pin(self.resume_thread_with_history_admission(
             config,
             initial_history,
             auth_manager,
             parent_trace,
             client_mcp_extensions,
             ThreadSpawnAdmission::Normal,
-        )
+        ))
         .await
     }
 
@@ -1206,14 +1236,14 @@ impl ThreadManager {
         parent_trace: Option<W3cTraceContext>,
         client_mcp_extensions: ClientMcpExtensions,
     ) -> CodexResult<NewThread> {
-        self.resume_thread_with_history_admission(
+        Box::pin(self.resume_thread_with_history_admission(
             config,
             initial_history,
             auth_manager,
             parent_trace,
             client_mcp_extensions,
             ThreadSpawnAdmission::RestartRecovery,
-        )
+        ))
         .await
     }
 
@@ -1564,6 +1594,7 @@ impl ThreadManager {
     pub(crate) fn agent_control(&self) -> AgentControl {
         AgentControl::new(
             Arc::downgrade(&self.state),
+            Arc::clone(&self.state.new_work_admission),
             self.state.thread_id_generator.clone(),
             /*rollout_budget*/ None,
         )
@@ -1572,6 +1603,7 @@ impl ThreadManager {
     fn agent_control_for_config(&self, config: &Config) -> AgentControl {
         AgentControl::new(
             Arc::downgrade(&self.state),
+            Arc::clone(&self.state.new_work_admission),
             self.state.thread_id_generator.clone(),
             config.rollout_budget.clone(),
         )
@@ -1597,24 +1629,13 @@ impl ThreadManager {
 
 impl ThreadManagerState {
     pub(crate) fn new_work_admission_fenced(&self) -> bool {
-        self.new_work_admission_fence_ready.load(Ordering::Acquire)
+        self.new_work_admission.is_fenced()
     }
 
     pub(crate) async fn acquire_new_work_admission(
         &self,
     ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
-        if self.new_work_admission_fenced.load(Ordering::Acquire) {
-            return Err(CodexErr::InvalidRequest(
-                "app server is draining for restart; new work is not accepted".to_string(),
-            ));
-        }
-        let admission = self.new_work_admission.clone().read_owned().await;
-        if self.new_work_admission_fenced.load(Ordering::Acquire) {
-            return Err(CodexErr::InvalidRequest(
-                "app server is draining for restart; new work is not accepted".to_string(),
-            ));
-        }
-        Ok(admission)
+        self.new_work_admission.acquire().await
     }
 
     pub(crate) fn agent_graph_store(&self) -> Option<Arc<dyn AgentGraphStore>> {
@@ -2186,13 +2207,14 @@ impl ThreadManagerState {
         } else {
             codex_sandboxing::WindowsSandboxProxySettingsMode::Reconcile
         };
-        let (session, io) = Box::pin(Session::spawn(SessionSpawnArgs {
+        let (session, io) = Session::spawn(SessionSpawnArgs {
             config,
             allow_provider_model_fallback,
             user_instructions,
             installation_id: self.installation_id.clone(),
             auth_manager,
             models_manager: Arc::clone(&self.models_manager),
+            git_root_discovery: Arc::clone(&self.git_root_discovery),
             environment_manager: Arc::clone(&self.environment_manager),
             skills_service: Arc::clone(&self.skills_service),
             plugins_manager: Arc::clone(&self.plugins_manager),
@@ -2226,7 +2248,7 @@ impl ThreadManagerState {
             inherited_multi_agent_version: multi_agent_version,
             git_enrichment_policy: GitEnrichmentPolicy::Fresh,
             windows_sandbox_proxy_settings_mode,
-        }))
+        })
         .await?;
         // Enable Full Access form input only after session startup so a required MCP server cannot
         // block startup while waiting for form input.
