@@ -842,7 +842,8 @@ mod op_admission_tests {
         assert!(Op::Compact.requires_new_work_admission());
         assert!(
             Op::RunUserShellCommand {
-                command: "true".to_string()
+                command: "true".to_string(),
+                timeout_ms: None,
             }
             .requires_new_work_admission()
         );
