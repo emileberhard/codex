@@ -2534,6 +2534,15 @@
         "item": {
           "$ref": "#/definitions/ThreadItem"
         },
+        "startedAtOrdinal": {
+          "description": "Stable first-projection source order; old recordings use their completion position.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "threadId": {
           "type": "string"
         },
@@ -2652,6 +2661,15 @@
           "description": "Unix timestamp (in milliseconds) when this item lifecycle started.",
           "format": "int64",
           "type": "integer"
+        },
+        "startedAtOrdinal": {
+          "description": "Stable first-projection source order; old recordings use their completion position.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "threadId": {
           "type": "string"

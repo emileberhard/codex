@@ -1,7 +1,7 @@
 //! Stateless projection from canonical paginated rollout records to thread-history changes.
 //!
 //! This module is only for the new paginated rollout format that persists canonical
-//! `ItemCompleted(TurnItem)` records, not legacy event-only rollouts.
+//! `ItemStarted(TurnItem)` and `ItemCompleted(TurnItem)` records, not legacy event-only rollouts.
 
 use codex_protocol::protocol::EventMsg;
 use codex_rollout::RolloutItem;
@@ -67,8 +67,19 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
                 ..Default::default()
             }
         }
+        RolloutItem::EventMsg(EventMsg::ItemStarted(event)) => ThreadHistoryChangeSet {
+            changed_items: vec![ThreadHistoryItemChange {
+                is_complete: false,
+                turn_id: event.turn_id.clone(),
+                item: ThreadItem::from(event.item.clone()),
+                started_at_ms: Some(event.started_at_ms),
+                completed_at_ms: None,
+            }],
+            ..Default::default()
+        },
         RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => ThreadHistoryChangeSet {
             changed_items: vec![ThreadHistoryItemChange {
+                is_complete: true,
                 turn_id: event.turn_id.clone(),
                 item: ThreadItem::from(event.item.clone()),
                 started_at_ms: event.started_at_ms,

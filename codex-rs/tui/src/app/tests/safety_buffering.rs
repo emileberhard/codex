@@ -361,7 +361,7 @@ async fn run_safety_retry(
         }
     }
     response_sequences.push(active_chunks);
-    if committed_steer.is_some() {
+    if let Some(committed_steer) = committed_steer {
         response_sequences.push(steered_chunks);
     }
     if scenario == SafetyRetryScenario::RetryTwice {
@@ -779,12 +779,17 @@ goals = true
         1,
         "the fork should render the retried prompt once: {forked_history}"
     );
-    if committed_steer.is_some() {
+    if let Some(committed_steer) = committed_steer {
         let rendered_retry = forked_history
             .lines()
             .skip_while(|line| !line.contains(RETRY_PROMPT))
             .collect::<Vec<_>>()
             .join("\n");
+        assert_eq!(
+            rendered_retry.matches(committed_steer).count(),
+            1,
+            "an acknowledged steer must not become another retry submission"
+        );
         insta::assert_snapshot!("safety_retry_committed_steer_history", rendered_retry);
     }
 
@@ -836,7 +841,11 @@ goals = true
         .await?
         .goal
         .expect("retry goal");
-    let expected_source_tokens = if committed_steer.is_some() { 150 } else { 50 };
+    let expected_source_tokens = if let Some(committed_steer) = committed_steer {
+        150
+    } else {
+        50
+    };
     assert_eq!(source_goal.objective, RETRY_GOAL);
     assert_eq!(source_goal.tokens_used, expected_source_tokens);
     assert!(source_goal.time_used_seconds >= 12);

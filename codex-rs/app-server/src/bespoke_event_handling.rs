@@ -158,6 +158,7 @@ pub(crate) async fn apply_bespoke_event_handling(
     thread_watch_manager: ThreadWatchManager,
     thread_list_state_permit: Arc<tokio::sync::Semaphore>,
     fallback_model_provider: String,
+    thread_store: Option<&dyn codex_thread_store::ThreadStore>,
 ) {
     let Event {
         id: event_turn_id,
@@ -1116,6 +1117,8 @@ pub(crate) async fn apply_bespoke_event_handling(
                     &conversation_id.to_string(),
                     &event_turn_id,
                 );
+                crate::item_position::attach(&mut notification, thread_store, conversation_id)
+                    .await;
                 if conversation.enabled(Feature::OmitAppServerNotificationMedia) {
                     notification = without_notification_media(notification);
                 }
@@ -1158,6 +1161,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &conversation_id.to_string(),
                 &event_turn_id,
             );
+            crate::item_position::attach(&mut notification, thread_store, conversation_id).await;
             if conversation.enabled(Feature::OmitAppServerNotificationMedia) {
                 notification = without_notification_media(notification);
             }
@@ -1508,6 +1512,7 @@ async fn start_command_execution_item(
     };
     if first_start {
         let notification = ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: conversation_id.to_string(),
             turn_id,
             started_at_ms: now_unix_timestamp_ms(),
@@ -1570,6 +1575,7 @@ async fn complete_command_execution_item(
         duration_ms: None,
     };
     let notification = ItemCompletedNotification {
+        started_at_ordinal: None,
         thread_id: conversation_id.to_string(),
         turn_id,
         completed_at_ms: now_unix_timestamp_ms(),
@@ -2483,6 +2489,7 @@ mod tests {
                 self.thread_watch_manager.clone(),
                 Arc::new(tokio::sync::Semaphore::new(/*permits*/ 1)),
                 "test-provider".to_string(),
+                None,
             )
             .await;
         }
@@ -3328,6 +3335,7 @@ mod tests {
             thread_watch_manager.clone(),
             Arc::new(tokio::sync::Semaphore::new(/*permits*/ 1)),
             "test-provider".to_string(),
+            None,
         )
         .await;
 
@@ -3370,6 +3378,7 @@ mod tests {
                 thread_watch_manager.clone(),
                 Arc::new(tokio::sync::Semaphore::new(/*permits*/ 1)),
                 "test-provider".to_string(),
+                None,
             )
             .await;
 
@@ -3451,6 +3460,7 @@ mod tests {
             thread_watch_manager.clone(),
             Arc::new(tokio::sync::Semaphore::new(/*permits*/ 1)),
             "test-provider".to_string(),
+            None,
         )
         .await;
 
@@ -3468,6 +3478,7 @@ mod tests {
         assert_eq!(
             payload,
             ItemCompletedNotification {
+                started_at_ordinal: None,
                 item: ThreadItem::SubAgentActivity {
                     id: "activity-1".to_string(),
                     kind: codex_app_server_protocol::SubAgentActivityKind::Interrupted,
@@ -3546,6 +3557,7 @@ mod tests {
             ThreadWatchManager::new(),
             Arc::new(tokio::sync::Semaphore::new(/*permits*/ 1)),
             "test-provider".to_string(),
+            None,
         )
         .await;
 

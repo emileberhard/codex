@@ -1468,7 +1468,7 @@ async fn realtime_timeline_splits_accepted_steering_and_persists_promoted_artifa
         })
         .context("accepted steering should be included in the timeline")?;
     assert!(transcript_index < steering_index);
-    // Inline artifacts are promoted while streaming, before their final item.
+    // An artifact keeps its first-start position when promotion and completion arrive.
     assert_eq!(
         page.data
             .iter()
@@ -1485,7 +1485,7 @@ async fn realtime_timeline_splits_accepted_steering_and_persists_promoted_artifa
                 _ => None,
             })
             .collect::<Vec<_>>(),
-        vec!["promotion", "artifact"]
+        vec!["artifact", "promotion"]
     );
     for entry in &page.data {
         if let ThreadTimelineEntry::Realtime { item, .. } = entry {

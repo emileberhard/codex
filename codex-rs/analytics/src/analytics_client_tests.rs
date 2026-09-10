@@ -820,6 +820,7 @@ async fn ingest_completed_command_execution_item(
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                 ItemStartedNotification {
+                    started_at_ordinal: None,
                     thread_id: thread_id.to_string(),
                     turn_id: "turn-1".to_string(),
                     started_at_ms: 1_000,
@@ -838,6 +839,7 @@ async fn ingest_completed_command_execution_item(
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: thread_id.to_string(),
                     turn_id: "turn-1".to_string(),
                     completed_at_ms: 1_042,
@@ -2639,6 +2641,7 @@ async fn item_lifecycle_notifications_publish_command_execution_event() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                 ItemStartedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-1".to_string(),
                     turn_id: "turn-1".to_string(),
                     started_at_ms: 1_000,
@@ -2661,6 +2664,7 @@ async fn item_lifecycle_notifications_publish_command_execution_event() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-1".to_string(),
                     turn_id: "turn-1".to_string(),
                     completed_at_ms: 1_045,
@@ -3772,6 +3776,7 @@ async fn subagent_tool_items_inherit_parent_connection_metadata() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                 ItemStartedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-subagent".to_string(),
                     turn_id: "turn-subagent".to_string(),
                     started_at_ms: 1_000,
@@ -3789,6 +3794,7 @@ async fn subagent_tool_items_inherit_parent_connection_metadata() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-subagent".to_string(),
                     turn_id: "turn-subagent".to_string(),
                     completed_at_ms: 1_042,
@@ -5189,6 +5195,7 @@ async fn image_generation_events_preserve_transparent_background_metadata() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                     ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         started_at_ms: 998,
@@ -5202,6 +5209,7 @@ async fn image_generation_events_preserve_transparent_background_metadata() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                     ItemCompletedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         completed_at_ms: 1_000,
@@ -5336,6 +5344,7 @@ async fn turn_event_counts_completed_tool_items() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                     ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         started_at_ms: 998,
@@ -5352,6 +5361,7 @@ async fn turn_event_counts_completed_tool_items() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                     ItemCompletedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         completed_at_ms: 1_000,
@@ -5598,6 +5608,7 @@ async fn completed_background_tool_item_emits_after_turn_event() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                 ItemStartedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-2".to_string(),
                     turn_id: "turn-2".to_string(),
                     started_at_ms: 998,
@@ -5633,6 +5644,7 @@ async fn completed_background_tool_item_emits_after_turn_event() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-2".to_string(),
                     turn_id: "turn-2".to_string(),
                     completed_at_ms: 1_000,
@@ -5720,6 +5732,7 @@ async fn item_completed_without_turn_state_does_not_create_turn_state() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-2".to_string(),
                     turn_id: "turn-2".to_string(),
                     completed_at_ms: 1_000,

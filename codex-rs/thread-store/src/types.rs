@@ -459,6 +459,9 @@ pub struct TurnPage {
 /// Parameters for listing persisted items within a thread.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListItemsParams {
+    /// Optional exact item identity, used to attach persisted positions to live notifications.
+    #[serde(default)]
+    pub item_id: Option<String>,
     /// Thread id to read.
     pub thread_id: ThreadId,
     /// Optional turn id to filter by. When omitted, returns items across the thread.
@@ -489,6 +492,12 @@ pub enum ItemSortKey {
 /// A projected app-server `ThreadItem` snapshot within a turn.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredThreadItem {
+    /// Immutable source ordinal of first projection (completion for old recordings).
+    pub started_at_ordinal: u64,
+    /// Whether the snapshot includes the canonical completion.
+    pub is_complete: bool,
+    /// Completion timestamp, absent when the recording does not contain one.
+    pub completed_at_ms: Option<i64>,
     /// Turn containing this item.
     pub turn_id: String,
     /// Stable item identifier within the turn.

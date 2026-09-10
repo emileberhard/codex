@@ -153,6 +153,7 @@ async fn live_app_server_review_prompt_item_is_not_rendered() {
     };
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -166,6 +167,7 @@ async fn live_app_server_review_prompt_item_is_not_rendered() {
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -177,6 +179,7 @@ async fn live_app_server_review_prompt_item_is_not_rendered() {
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,

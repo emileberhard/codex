@@ -394,6 +394,10 @@ fn thread_items_list_round_trips() {
     );
     let response = ThreadItemsListResponse {
         data: vec![ThreadItemEntry {
+            started_at_ordinal: None,
+            started_at_ms: None,
+            completed_at_ms: None,
+            is_complete: None,
             turn_id: "turn_456".to_string(),
             item: ThreadItem::ContextCompaction {
                 id: "item_1".to_string(),

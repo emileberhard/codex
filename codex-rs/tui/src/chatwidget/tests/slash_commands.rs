@@ -1830,6 +1830,7 @@ async fn slash_copy_state_tracks_plan_item_completion() {
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: String::new(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,

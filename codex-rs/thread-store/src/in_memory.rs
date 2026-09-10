@@ -91,6 +91,7 @@ mod tests {
 
         let items_err = store
             .list_items(ListItemsParams {
+                item_id: None,
                 thread_id,
                 turn_id: None,
                 include_archived: true,

@@ -84,6 +84,7 @@ async fn enqueue_pending_patch(app: &mut App, thread_id: ThreadId) -> Result<()>
     app.enqueue_thread_notification(
         thread_id,
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id.to_string(),
             turn_id: TURN_ID.to_string(),
             started_at_ms: 0,
@@ -262,6 +263,7 @@ async fn active_patch_approval_preserves_deferred_startup_protection() -> Result
 
     app.chat_widget.handle_server_notification(
         ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id.to_string(),
             turn_id: TURN_ID.to_string(),
             completed_at_ms: 0,

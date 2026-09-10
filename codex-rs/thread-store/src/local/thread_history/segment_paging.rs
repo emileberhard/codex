@@ -59,10 +59,15 @@ pub(super) async fn page_turn_rows(
         if remaining == 0 {
             break;
         }
-        let mut query =
-            QueryBuilder::<Sqlite>::new(if matches!(items_view, StoredTurnItemsView::Summary) {
-                r#"
-WITH page_turns AS (
+        let mut query = QueryBuilder::<Sqlite>::new("");
+        if matches!(items_view, StoredTurnItemsView::Summary) {
+            query.push("WITH visible_items AS (");
+            push_visible_items(&mut query, segment)?;
+            query.push("), ");
+        }
+        query.push(if matches!(items_view, StoredTurnItemsView::Summary) {
+            r#"
+page_turns AS (
 SELECT
     turn_id,
     rollout_ordinal,
@@ -76,8 +81,8 @@ SELECT
 FROM thread_turns
 WHERE thread_id =
             "#
-            } else {
-                r#"
+        } else {
+            r#"
 SELECT
     turn_id,
     rollout_ordinal,
@@ -91,7 +96,7 @@ SELECT
 FROM thread_turns
 WHERE thread_id =
             "#
-            });
+        });
         query.push_bind(segment.rollout_id().to_string());
         push_segment_range(&mut query, segment)?;
         for newer_segment in &lineage.segments()[segment_index + 1..] {
@@ -128,14 +133,14 @@ SELECT
     final_agent.created_at_ms AS summary_final_agent_created_at_ms,
     final_agent.item_json AS summary_final_agent_item_json
 FROM page_turns
-LEFT JOIN thread_items AS first_user
+LEFT JOIN visible_items AS first_user
   ON first_user.thread_id =
                 "#,
             );
             push_summary_item_join(&mut query, segment, "first_user", "first_user_item_id")?;
             query.push(
                 r#"
-LEFT JOIN thread_items AS final_agent
+LEFT JOIN visible_items AS final_agent
   ON final_agent.thread_id =
                 "#,
             );
@@ -187,13 +192,16 @@ fn push_summary_item_join(
         .push(item_id_column)
         .push(" AND ")
         .push(alias)
+        .push(".is_complete = 1")
+        .push(" AND ")
+        .push(alias)
         .push(".rollout_ordinal >= ")
         .push_bind(sqlite_integer(segment.start_ordinal())?);
     if let Some(end_ordinal) = segment.end_ordinal() {
         query
             .push(" AND ")
             .push(alias)
-            .push(".rollout_ordinal < ")
+            .push(".updated_at_ordinal < ")
             .push_bind(sqlite_integer(end_ordinal)?);
     }
     Ok(())
@@ -233,7 +241,7 @@ pub(super) async fn page_item_rows(
     let cursor = parse_cursor(
         params.cursor.as_deref(),
         params.thread_id,
-        CursorScope::ItemsByCreatedAtOrdinal,
+        CursorScope::ItemsByFirstProjectionV2,
     )?;
     let mut rows = Vec::new();
     for (_, segment, segment_cursor) in
@@ -243,12 +251,10 @@ pub(super) async fn page_item_rows(
         if remaining == 0 {
             break;
         }
-        let mut query = QueryBuilder::<Sqlite>::new(
-            r#"
-SELECT turn_id, item_id, rollout_ordinal, updated_at_ordinal, created_at_ms, item_json
-FROM thread_items
-WHERE thread_id =
-            "#,
+        let mut query = QueryBuilder::<Sqlite>::new("WITH visible_items AS (");
+        push_visible_items(&mut query, segment)?;
+        query.push(
+            ") SELECT turn_id, item_id, rollout_ordinal, rollout_ordinal AS started_at_ordinal, created_at_ms, item_json, is_complete, completed_at_ms, updated_at_ordinal FROM visible_items WHERE thread_id = ",
         );
         query.push_bind(segment.rollout_id().to_string());
         push_segment_range(&mut query, segment)?;
@@ -256,6 +262,9 @@ WHERE thread_id =
             query
                 .push(" AND updated_at_ordinal > ")
                 .push_bind(sqlite_integer(after_updated_at_ordinal)?);
+        }
+        if let Some(item_id) = params.item_id.as_deref() {
+            query.push(" AND item_id = ").push_bind(item_id);
         }
         if let Some(turn_id) = params.turn_id.as_deref() {
             query.push(" AND turn_id = ").push_bind(turn_id);
@@ -275,7 +284,7 @@ WHERE thread_id =
     }
     finish_page(
         params.thread_id,
-        CursorScope::ItemsByCreatedAtOrdinal,
+        CursorScope::ItemsByFirstProjectionV2,
         rows,
         params.page_size,
     )
@@ -294,7 +303,7 @@ async fn page_updated_item_rows(
     )?;
     let mut query = QueryBuilder::<Sqlite>::new(
         r#"
-SELECT turn_id, item_id, updated_at_ordinal AS rollout_ordinal, updated_at_ordinal, created_at_ms, item_json
+SELECT turn_id, item_id, updated_at_ordinal AS rollout_ordinal, rollout_ordinal AS started_at_ordinal, updated_at_ordinal, created_at_ms, item_json, is_complete, completed_at_ms
 FROM thread_items
 WHERE thread_id =
         "#,
@@ -303,6 +312,9 @@ WHERE thread_id =
         .push_bind(rollout_id.to_string())
         .push(" AND updated_at_ordinal > ")
         .push_bind(sqlite_integer(after_updated_at_ordinal)?);
+    if let Some(item_id) = params.item_id.as_deref() {
+        query.push(" AND item_id = ").push_bind(item_id);
+    }
     if let Some(turn_id) = params.turn_id.as_deref() {
         query.push(" AND turn_id = ").push_bind(turn_id);
     }
@@ -375,6 +387,26 @@ fn segments_from_cursor<'a>(
             (index, &segments[index], segment_cursor)
         })
         .collect())
+}
+
+/// Current rows serve ordinary reads. Immutable fork prefixes select the last recorded
+/// snapshot inside the prefix, including an unfinished start or an earlier completion.
+fn push_visible_items(
+    query: &mut QueryBuilder<Sqlite>,
+    segment: &RolloutLineageSegment,
+) -> ThreadStoreResult<()> {
+    if let Some(end) = segment.end_ordinal() {
+        query.push(
+            "SELECT i.thread_id, i.turn_id, i.item_id, i.rollout_ordinal, i.created_at_ms, v.rollout_ordinal AS updated_at_ordinal, v.item_json, v.is_complete, v.completed_at_ms FROM thread_items i JOIN thread_item_versions v ON v.thread_id = i.thread_id AND v.turn_id = i.turn_id AND v.item_id = i.item_id WHERE i.thread_id = ",
+        ).push_bind(segment.rollout_id().to_string())
+            .push(" AND v.rollout_ordinal = (SELECT MAX(prior.rollout_ordinal) FROM thread_item_versions prior WHERE prior.thread_id = i.thread_id AND prior.turn_id = i.turn_id AND prior.item_id = i.item_id AND prior.rollout_ordinal < ")
+            .push_bind(sqlite_integer(end)?).push(")");
+    } else {
+        query
+            .push("SELECT * FROM thread_items WHERE thread_id = ")
+            .push_bind(segment.rollout_id().to_string());
+    }
+    Ok(())
 }
 
 fn push_segment_range(

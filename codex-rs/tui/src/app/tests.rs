@@ -1730,6 +1730,7 @@ async fn collab_receiver_notification_caches_thread_without_app_server_read() {
 
     app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: ThreadId::new().to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -1767,6 +1768,7 @@ async fn collab_receiver_notification_does_not_cache_not_found_thread() {
 
     app.handle_thread_event_now(ThreadBufferedEvent::Notification(Box::new(
         ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: ThreadId::new().to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -3608,6 +3610,7 @@ async fn inactive_thread_file_change_approval_recovers_buffered_changes() {
     app.enqueue_thread_notification(
         thread_id,
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id.to_string(),
             turn_id: "turn-approval".to_string(),
             started_at_ms: 0,
@@ -3679,6 +3682,7 @@ async fn active_thread_file_change_approval_recovers_buffered_changes() {
     app.enqueue_thread_notification(
         thread_id,
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id.to_string(),
             turn_id: "turn-active-approval".to_string(),
             started_at_ms: 0,
@@ -3724,6 +3728,7 @@ async fn active_thread_file_change_approval_recovers_buffered_changes() {
     assert!(app.startup_pending_protected_request);
     app.chat_widget.handle_server_notification(
         ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id.to_string(),
             turn_id: "turn-active-approval".to_string(),
             completed_at_ms: 0,
@@ -5913,6 +5918,7 @@ async fn copy_picker_opening_preserves_terminal_scrollback_without_reflow() {
     let response = "Existing response\n\n```rust\nkeep_scrollback();\n```";
     app.chat_widget.handle_server_notification(
         ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: String::new(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -7341,6 +7347,7 @@ async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Resu
         for item in selected_turn.items {
             store.push_notification(ServerNotification::ItemCompleted(
                 codex_app_server_protocol::ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: source_thread_id.to_string(),
                     turn_id: selected_turn.id.clone(),
                     completed_at_ms: 0,
@@ -7636,6 +7643,7 @@ async fn replace_chat_widget_reseeds_collab_agent_metadata_for_replay() {
             events: vec![ThreadBufferedEvent::Notification(Box::new(
                 ServerNotification::ItemStarted(
                     codex_app_server_protocol::ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-1".to_string(),
                         turn_id: "turn-1".to_string(),
                         started_at_ms: 0,

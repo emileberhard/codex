@@ -13,6 +13,7 @@ fn failed_turn_does_not_overwrite_output_last_message_file() {
 
     let collected = processor.collect_thread_events(ServerNotification::ItemCompleted(
         codex_app_server_protocol::ItemCompletedNotification {
+            started_at_ordinal: None,
             item: ThreadItem::AgentMessage {
                 id: "msg-1".to_string(),
                 text: "partial answer".to_string(),
@@ -95,6 +96,7 @@ fn mcp_tool_call_result_preserves_meta_in_jsonl_event() {
 
     let collected = processor.collect_thread_events(ServerNotification::ItemCompleted(
         codex_app_server_protocol::ItemCompletedNotification {
+            started_at_ordinal: None,
             item: ThreadItem::McpToolCall {
                 id: "mcp-1".to_string(),
                 server: "search service".to_string(),

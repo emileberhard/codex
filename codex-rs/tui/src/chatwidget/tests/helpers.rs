@@ -534,6 +534,7 @@ pub(super) fn handle_agent_reasoning_delta(chat: &mut ChatWidget, delta: impl In
 pub(super) fn handle_agent_reasoning_final(chat: &mut ChatWidget) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: chat
                 .turn_lifecycle
@@ -554,6 +555,7 @@ pub(super) fn handle_agent_reasoning_final(chat: &mut ChatWidget) {
 pub(super) fn handle_entered_review_mode(chat: &mut ChatWidget, review: impl Into<String>) {
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: chat
                 .turn_lifecycle
@@ -584,6 +586,7 @@ pub(super) fn replay_entered_review_mode(chat: &mut ChatWidget, review: impl Int
 pub(super) fn handle_exited_review_mode(chat: &mut ChatWidget) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: chat
                 .turn_lifecycle
@@ -645,6 +648,7 @@ pub(super) fn handle_patch_apply_begin(
 ) {
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: turn_id.into(),
             started_at_ms: 0,
@@ -667,6 +671,7 @@ pub(super) fn handle_patch_apply_end(
 ) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: turn_id.into(),
             completed_at_ms: 0,
@@ -687,6 +692,7 @@ pub(super) fn handle_view_image_tool_call(
 ) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -708,6 +714,7 @@ pub(super) fn handle_image_generation_end(
 ) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -873,6 +880,7 @@ pub(super) fn begin_unified_exec_startup(
 pub(super) fn handle_exec_begin(chat: &mut ChatWidget, item: AppServerThreadItem) {
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: chat
                 .turn_lifecycle
@@ -918,6 +926,7 @@ pub(super) fn complete_assistant_message(
 ) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: chat.thread_id.map(|id| id.to_string()).unwrap_or_default(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -963,6 +972,7 @@ pub(super) fn complete_user_message_for_inputs(
 ) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: chat.thread_id.map(|id| id.to_string()).unwrap_or_default(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -1108,6 +1118,7 @@ pub(super) fn end_exec(
 pub(super) fn handle_exec_end(chat: &mut ChatWidget, item: AppServerThreadItem) {
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: thread_id(chat),
             turn_id: chat
                 .turn_lifecycle

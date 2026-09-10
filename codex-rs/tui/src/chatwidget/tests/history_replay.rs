@@ -1242,6 +1242,7 @@ async fn failed_repl_mcp_tool_call_preserves_status_and_result() {
 
         chat.handle_server_notification(
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id: "thread-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 completed_at_ms: 0,
@@ -1394,6 +1395,7 @@ async fn live_reasoning_summary_is_not_rendered_twice_when_item_completes() {
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -1467,6 +1469,7 @@ async fn live_reasoning_summary_drops_empty_parts_without_losing_content() {
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,

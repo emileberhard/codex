@@ -631,6 +631,9 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
     .expect("advance first item update ordinal");
 
     let item_1 = StoredThreadItem {
+        started_at_ordinal: 1,
+        is_complete: true,
+        completed_at_ms: None,
         updated_at_ordinal: 4,
         ..expected_item("turn-1", "item-1", /*rollout_ordinal*/ 1)
     };
@@ -653,6 +656,7 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
     ] {
         let page = store
             .list_items(ListItemsParams {
+                item_id: None,
                 after_updated_at_ordinal: Some(2),
                 ..item_params(
                     thread_id,
@@ -676,6 +680,7 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
     assert_eq!(first_page.items, vec![item_2.clone(), item_3.clone()]);
     for params in [
         ListItemsParams {
+            item_id: None,
             cursor: creation_page.next_cursor,
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
         },
@@ -696,6 +701,7 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let second_page = store
         .list_items(ListItemsParams {
+            item_id: None,
             cursor: first_page.next_cursor,
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
         })
@@ -706,6 +712,7 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let exclusive_page = store
         .list_items(ListItemsParams {
+            item_id: None,
             turn_id: Some("turn-2".to_string()),
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 2)
         })
@@ -715,6 +722,7 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let descending_page = store
         .list_items(ListItemsParams {
+            item_id: None,
             sort_direction: SortDirection::Desc,
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
         })
@@ -723,6 +731,7 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
     assert_eq!(descending_page.items, vec![item_1, item_3]);
     let descending_next_page = store
         .list_items(ListItemsParams {
+            item_id: None,
             cursor: descending_page.next_cursor,
             sort_direction: SortDirection::Desc,
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
@@ -733,6 +742,7 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let error = store
         .list_items(ListItemsParams {
+            item_id: None,
             sort_key: ItemSortKey::UpdatedAtOrdinal,
             ..item_params(
                 thread_id,
@@ -754,6 +764,7 @@ async fn list_items_rejects_update_ordinals_outside_sqlite_integer_range() {
     for sort_key in [ItemSortKey::CreatedAtOrdinal, ItemSortKey::UpdatedAtOrdinal] {
         let error = store
             .list_items(ListItemsParams {
+                item_id: None,
                 sort_key,
                 ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ u64::MAX)
             })
@@ -995,6 +1006,7 @@ async fn lineage_reads_page_across_parent_and_child_segments() {
     for sort_key in [ItemSortKey::CreatedAtOrdinal, ItemSortKey::UpdatedAtOrdinal] {
         let error = store
             .list_items(ListItemsParams {
+                item_id: None,
                 sort_key,
                 ..updated_item_params(child_id, /*after_updated_at_ordinal*/ 0)
             })
@@ -1468,6 +1480,15 @@ async fn insert_item(
     .execute(db)
     .await
     .expect("insert item fixture");
+    sqlx::query(
+        "INSERT INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, completed_at_ms) SELECT thread_id, turn_id, item_id, updated_at_ordinal, item_json, is_complete, completed_at_ms FROM thread_items WHERE thread_id = ? AND turn_id = ? AND item_id = ?",
+    )
+    .bind(thread_id.to_string())
+    .bind(turn_id)
+    .bind(item_id)
+    .execute(db)
+    .await
+    .expect("insert item version fixture");
 }
 
 fn turn_params(
@@ -1495,6 +1516,7 @@ fn item_params(
     sort_direction: SortDirection,
 ) -> ListItemsParams {
     ListItemsParams {
+        item_id: None,
         thread_id,
         turn_id: turn_id.map(str::to_owned),
         include_archived: false,
@@ -1508,6 +1530,7 @@ fn item_params(
 
 fn updated_item_params(thread_id: ThreadId, after_updated_at_ordinal: u64) -> ListItemsParams {
     ListItemsParams {
+        item_id: None,
         sort_key: ItemSortKey::UpdatedAtOrdinal,
         after_updated_at_ordinal: Some(after_updated_at_ordinal),
         ..item_params(
@@ -1522,6 +1545,9 @@ fn updated_item_params(thread_id: ThreadId, after_updated_at_ordinal: u64) -> Li
 
 fn expected_item(turn_id: &str, item_id: &str, rollout_ordinal: u64) -> StoredThreadItem {
     StoredThreadItem {
+        started_at_ordinal: rollout_ordinal,
+        is_complete: true,
+        completed_at_ms: None,
         turn_id: turn_id.to_string(),
         item_id: item_id.to_string(),
         updated_at_ordinal: rollout_ordinal,

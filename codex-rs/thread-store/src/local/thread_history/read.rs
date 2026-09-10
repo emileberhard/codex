@@ -32,7 +32,7 @@ mod tests;
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub(super) enum CursorScope {
     Turns,
-    ItemsByCreatedAtOrdinal,
+    ItemsByFirstProjectionV2,
     ItemsByUpdatedAtOrdinal,
 }
 
@@ -284,12 +284,12 @@ async fn load_inherited_summary_items(
         .transpose()?;
     let rows = sqlx::query(
         r#"
-SELECT turn_id, item_id, updated_at_ordinal, created_at_ms, item_json
+SELECT turn_id, item_id, rollout_ordinal AS started_at_ordinal, updated_at_ordinal, created_at_ms, item_json, is_complete, completed_at_ms
 FROM thread_items
 WHERE thread_id = ?
   AND turn_id = ?
   AND rollout_ordinal >= ?
-  AND (? IS NULL OR rollout_ordinal < ?)
+  AND (? IS NULL OR updated_at_ordinal < ?)
   AND (item_id = ? OR item_id = ?)
 ORDER BY rollout_ordinal ASC
         "#,
@@ -430,6 +430,9 @@ impl StoredSummaryItemColumns {
         Ok(Some((
             rollout_ordinal,
             StoredThreadItem {
+                started_at_ordinal: stored_updated_at_ordinal(rollout_ordinal)?,
+                is_complete: true,
+                completed_at_ms: None,
                 turn_id,
                 item_id,
                 updated_at_ordinal: stored_updated_at_ordinal(updated_at_ordinal)?,
@@ -458,6 +461,9 @@ pub(super) fn stored_thread_item_row(
 fn stored_thread_item(row: sqlx::sqlite::SqliteRow) -> ThreadStoreResult<StoredThreadItem> {
     let updated_at_ordinal = stored_updated_at_ordinal(row.try_get("updated_at_ordinal")?)?;
     Ok(StoredThreadItem {
+        started_at_ordinal: stored_updated_at_ordinal(row.try_get("started_at_ordinal")?)?,
+        is_complete: row.try_get("is_complete")?,
+        completed_at_ms: row.try_get("completed_at_ms")?,
         turn_id: row.try_get("turn_id")?,
         item_id: row.try_get("item_id")?,
         updated_at_ordinal,

@@ -5,6 +5,10 @@ import type { ThreadItem } from "./ThreadItem";
 
 export type ThreadItemEntry = {
 /**
+ * Stable first-projection source order; old recordings use their completion position.
+ */
+startedAtOrdinal?: number, startedAtMs?: number, completedAtMs?: number, isComplete?: boolean,
+/**
  * Turn containing this item.
  */
 turnId: string, item: ThreadItem, };

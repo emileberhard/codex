@@ -9,6 +9,7 @@ fn agent_status_uses_bounded_buffered_activity() {
     let mut store = ThreadEventStore::new(/*capacity*/ 8);
     store.push_notification(ServerNotification::ItemCompleted(
         ItemCompletedNotification {
+            started_at_ordinal: None,
             item: ThreadItem::CommandExecution {
                 id: "command-1".to_string(),
                 command: "cargo test -p codex-tui".to_string(),
@@ -32,6 +33,7 @@ fn agent_status_uses_bounded_buffered_activity() {
     ));
     store.push_notification(ServerNotification::ItemCompleted(
         ItemCompletedNotification {
+            started_at_ordinal: None,
             item: ThreadItem::AgentMessage {
                 id: "message-1".to_string(),
                 text: "Finished checking the focused TUI tests.".to_string(),
@@ -71,6 +73,7 @@ fn agent_status_uses_reasoning_summaries_only() {
     let mut store = ThreadEventStore::new(/*capacity*/ 8);
     store.push_notification(ServerNotification::ItemCompleted(
         ItemCompletedNotification {
+            started_at_ordinal: None,
             item: ThreadItem::Reasoning {
                 id: "reasoning-with-summary".to_string(),
                 summary: vec!["safe summary".to_string()],
@@ -83,6 +86,7 @@ fn agent_status_uses_reasoning_summaries_only() {
     ));
     store.push_notification(ServerNotification::ItemCompleted(
         ItemCompletedNotification {
+            started_at_ordinal: None,
             item: ThreadItem::Reasoning {
                 id: "reasoning-without-summary".to_string(),
                 summary: Vec::new(),

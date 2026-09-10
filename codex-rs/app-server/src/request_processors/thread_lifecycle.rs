@@ -8,6 +8,7 @@ pub(super) const THREAD_UNLOADING_DELAY: Duration = Duration::from_secs(30 * 60)
 
 #[derive(Clone)]
 pub(super) struct ListenerTaskContext {
+    pub(super) thread_store: Arc<dyn codex_thread_store::ThreadStore>,
     pub(super) thread_manager: Arc<ThreadManager>,
     pub(super) thread_state_manager: ThreadStateManager,
     pub(super) outgoing: Arc<OutgoingMessageSender>,
@@ -267,6 +268,7 @@ pub(super) async fn ensure_listener_task_running(
         (listener_command_rx, listener_generation)
     };
     let ListenerTaskContext {
+        thread_store,
         outgoing,
         thread_manager,
         thread_state_manager,
@@ -356,6 +358,7 @@ pub(super) async fn ensure_listener_task_running(
                         thread_watch_manager.clone(),
                         thread_list_state_permit.clone(),
                         fallback_model_provider.clone(),
+                        Some(thread_store.as_ref()),
                     )
                     .await;
                     if matches!(event.msg, EventMsg::ShutdownComplete)

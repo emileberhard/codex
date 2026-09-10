@@ -1026,6 +1026,7 @@ mod tests {
         ));
         assert!(server_notification_requires_delivery(
             &ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: Some(42),
                 item: ThreadItem::AgentMessage {
                     id: "item-1".to_string(),
                     text: "Still working".to_string(),

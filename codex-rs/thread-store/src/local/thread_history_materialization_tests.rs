@@ -3024,3 +3024,6 @@ fn append_suffix(rollout_path: &std::path::Path, suffix: &str) {
     file.write_all(suffix.as_bytes()).expect("append suffix");
     file.flush().expect("flush suffix");
 }
+
+#[path = "item_lifecycle_tests.rs"]
+mod item_lifecycle;

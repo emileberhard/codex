@@ -5,9 +5,11 @@ use super::*;
 use crate::app_server_session::ForkGoalContinuation;
 use crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT;
 use crate::app_server_session::turn_permissions_overrides;
+use crate::chatwidget::InterruptedTurnNoticeMode;
 use crate::chatwidget::ThreadInputState;
 use crate::chatwidget::ThreadInputStateRestoreMode;
 use crate::chatwidget::UserMessage;
+use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::UserInput;
@@ -49,8 +51,6 @@ impl App {
         }
 
         let retry_config = self.chat_widget.config_ref().clone();
-        let input_state = self.chat_widget.capture_thread_input_state();
-
         let AppCommand::UserTurn {
             items,
             cwd,
@@ -93,6 +93,43 @@ impl App {
                 .add_error_message(format!("Failed to retry with a faster model: {err}"));
             return;
         }
+
+        // The interrupt RPC acknowledges the request before the listener necessarily
+        // delivers earlier committed steers. Capture input only after its terminal
+        // event, or a committed steer can be restored and submitted again on the fork.
+        self.chat_widget
+            .set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Suppress);
+        let settled = tokio::time::timeout(Duration::from_secs(10), async {
+            while let Some(event) = app_server.next_event().await {
+                let terminal = matches!(&event,
+                    AppServerEvent::ServerNotification(note)
+                        if matches!(note.as_ref(), ServerNotification::TurnCompleted(note)
+                            if note.thread_id == thread_id.to_string() && note.turn.id == turn_id));
+                self.handle_app_server_event(app_server, event).await;
+                while self
+                    .active_thread_rx
+                    .as_ref()
+                    .is_some_and(|rx| !rx.is_empty())
+                {
+                    self.drain_active_thread_events(tui).await?;
+                }
+                if terminal {
+                    return Ok::<_, color_eyre::Report>(());
+                }
+            }
+            color_eyre::eyre::bail!("app-server disconnected before the interrupted turn completed")
+        })
+        .await;
+        self.chat_widget
+            .set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Default);
+        if !matches!(settled, Ok(Ok(()))) {
+            self.chat_widget.add_error_message(
+                "Cannot safely retry before the interrupted turn's input acknowledgements arrive."
+                    .to_string(),
+            );
+            return;
+        }
+        let input_state = self.chat_widget.capture_thread_input_state();
 
         let thread = match async {
             let mut thread = app_server

@@ -724,6 +724,16 @@ cursors can be reused with or without `turnId`; the filter does not change the c
 Thread stores that do not implement item pagination return JSON-RPC `-32601` with message
 `thread/items/list is not supported yet`.
 
+The local paginated store also returns `startedAtOrdinal`, `startedAtMs`,
+`completedAtMs`, and `isComplete`. An item is persisted when it starts and keeps
+that first source position when completion updates its content. Lifecycle
+notifications expose the same `startedAtOrdinal`. Item cursors use the versioned
+first-projection order; older incompatible cursors must be discarded and the
+bounded range read again. A fork sees the latest item snapshot inside its source
+prefix, including an unfinished start, without later parent completions leaking
+into its history. Older completed-only recordings retain their recorded ordinal
+as a deterministic fallback; it does not prove their exact start order.
+
 `thread/searchOccurrences` searches one paginated thread without replaying its rollout. It returns
 occurrences in chronological message order from every visible user message, including steering
 messages, and final assistant messages. `snippetMatchRange` uses

@@ -1019,6 +1019,7 @@ mod tests {
 
     fn item_completed_notification(text: &str) -> ServerNotification {
         ServerNotification::ItemCompleted(codex_app_server_protocol::ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread".to_string(),
             turn_id: "turn".to_string(),
             completed_at_ms: 0,

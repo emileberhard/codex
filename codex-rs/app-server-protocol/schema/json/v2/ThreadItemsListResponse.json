@@ -1575,8 +1575,37 @@
     },
     "ThreadItemEntry": {
       "properties": {
+        "completedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "isComplete": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "item": {
           "$ref": "#/definitions/ThreadItem"
+        },
+        "startedAtMs": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "startedAtOrdinal": {
+          "description": "Stable first-projection source order; old recordings use their completion position.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "turnId": {
           "description": "Turn containing this item.",

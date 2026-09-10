@@ -249,9 +249,12 @@ clock_source = "external"
         duration_ms: DURATION_MS,
     });
     assert!(completed.completed_at_ms >= started.started_at_ms);
+    assert!(started.started_at_ordinal.is_some());
+    assert_eq!(completed.started_at_ordinal, started.started_at_ordinal);
     assert_eq!(
         started,
         ItemStartedNotification {
+            started_at_ordinal: started.started_at_ordinal,
             item: expected_item.clone(),
             thread_id: thread.id.clone(),
             turn_id: turn.id.clone(),
@@ -261,6 +264,7 @@ clock_source = "external"
     assert_eq!(
         completed,
         ItemCompletedNotification {
+            started_at_ordinal: started.started_at_ordinal,
             item: expected_item,
             thread_id: thread.id,
             turn_id: turn.id,

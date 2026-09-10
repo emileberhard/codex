@@ -69,6 +69,7 @@ pub fn item_event_to_server_notification(
                 duration_ms,
             };
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id: response.turn_id,
                 item,
@@ -88,6 +89,7 @@ pub fn item_event_to_server_notification(
                 agents_states: HashMap::new(),
             };
             ServerNotification::ItemStarted(ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -127,6 +129,7 @@ pub fn item_event_to_server_notification(
                 agents_states,
             };
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -147,6 +150,7 @@ pub fn item_event_to_server_notification(
                 agents_states: HashMap::new(),
             };
             ServerNotification::ItemStarted(ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -175,6 +179,7 @@ pub fn item_event_to_server_notification(
                 agents_states: [(receiver_id, received_status)].into_iter().collect(),
             };
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -189,6 +194,7 @@ pub fn item_event_to_server_notification(
                 agent_path: String::from(activity.agent_path),
             };
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -213,6 +219,7 @@ pub fn item_event_to_server_notification(
                 agents_states: HashMap::new(),
             };
             ServerNotification::ItemStarted(ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -249,6 +256,7 @@ pub fn item_event_to_server_notification(
                 agents_states,
             };
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -268,6 +276,7 @@ pub fn item_event_to_server_notification(
                 agents_states: HashMap::new(),
             };
             ServerNotification::ItemStarted(ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -301,6 +310,7 @@ pub fn item_event_to_server_notification(
                 agents_states,
             };
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -320,6 +330,7 @@ pub fn item_event_to_server_notification(
                 agents_states: HashMap::new(),
             };
             ServerNotification::ItemStarted(ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -353,6 +364,7 @@ pub fn item_event_to_server_notification(
                 agents_states,
             };
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item,
@@ -403,6 +415,7 @@ pub fn item_event_to_server_notification(
         }
         EventMsg::ItemStarted(item_started_event) => {
             ServerNotification::ItemStarted(ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item: item_started_event.item.into(),
@@ -411,6 +424,7 @@ pub fn item_event_to_server_notification(
         }
         EventMsg::ItemCompleted(item_completed_event) => {
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item: item_completed_event.item.into(),
@@ -427,6 +441,7 @@ pub fn item_event_to_server_notification(
         }
         EventMsg::ExecCommandBegin(exec_command_begin_event) => {
             ServerNotification::ItemStarted(ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item: build_command_execution_begin_item(&exec_command_begin_event),
@@ -456,6 +471,7 @@ pub fn item_event_to_server_notification(
         }
         EventMsg::ExecCommandEnd(exec_command_end_event) => {
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id,
                 turn_id,
                 item: build_command_execution_end_item(&exec_command_end_event),
@@ -527,6 +543,7 @@ mod tests {
         assert_item_started_server_notification(
             notification,
             ItemStartedNotification {
+                started_at_ordinal: None,
                 thread_id: "thread-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 started_at_ms: event.started_at_ms,
@@ -566,6 +583,7 @@ mod tests {
         assert_item_completed_server_notification(
             notification,
             ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id: "thread-2".to_string(),
                 turn_id: "turn-2".to_string(),
                 completed_at_ms: event.completed_at_ms,

@@ -366,6 +366,7 @@ impl AnalyticsEventsClient {
         item.status = CollabAgentToolCallStatus::InProgress;
 
         self.track_notification(&ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             item: TurnItem::CollabAgentToolCall(item).into(),
             thread_id: thread_id.clone(),
             turn_id: turn_id.clone(),
@@ -373,6 +374,7 @@ impl AnalyticsEventsClient {
         }));
         self.track_notification(&ServerNotification::ItemCompleted(
             ItemCompletedNotification {
+                started_at_ordinal: None,
                 item: completed_item,
                 thread_id,
                 turn_id,

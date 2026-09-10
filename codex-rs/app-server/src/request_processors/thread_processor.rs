@@ -1067,6 +1067,7 @@ impl ThreadRequestProcessor {
 
     fn listener_task_context(&self) -> ListenerTaskContext {
         ListenerTaskContext {
+            thread_store: Arc::clone(&self.thread_store),
             thread_manager: Arc::clone(&self.thread_manager),
             thread_state_manager: self.thread_state_manager.clone(),
             outgoing: Arc::clone(&self.outgoing),
@@ -1198,6 +1199,7 @@ impl ThreadRequestProcessor {
         );
         typesafe_overrides.ephemeral = ephemeral;
         let listener_task_context = ListenerTaskContext {
+            thread_store: Arc::clone(&self.thread_store),
             thread_manager: Arc::clone(&self.thread_manager),
             thread_state_manager: self.thread_state_manager.clone(),
             outgoing: Arc::clone(&self.outgoing),
@@ -3258,6 +3260,7 @@ impl ThreadRequestProcessor {
             let page = self
                 .thread_store
                 .list_items(StoreListItemsParams {
+                    item_id: None,
                     thread_id,
                     turn_id: Some(turn_id.to_string()),
                     include_archived: true,
@@ -3374,6 +3377,7 @@ impl ThreadRequestProcessor {
             .map_err(paginated_history_list_error)?;
         let items_page = thread_store
             .list_items(StoreListItemsParams {
+                item_id: None,
                 thread_id,
                 turn_id: None,
                 include_archived: true,
@@ -3408,6 +3412,7 @@ impl ThreadRequestProcessor {
         let page = self
             .thread_store
             .list_items(StoreListItemsParams {
+                item_id: None,
                 thread_id,
                 turn_id,
                 include_archived: true,
@@ -3436,8 +3441,19 @@ impl ThreadRequestProcessor {
             .into_iter()
             .map(|stored_item| {
                 let turn_id = stored_item.turn_id.clone();
+                let started_at_ordinal = Some(stored_item.started_at_ordinal);
+                let started_at_ms = Some(stored_item.created_at_ms);
+                let completed_at_ms = stored_item.completed_at_ms;
+                let is_complete = Some(stored_item.is_complete);
                 let item = deserialize_stored_thread_item(stored_item)?;
-                Ok(ThreadItemEntry { turn_id, item })
+                Ok(ThreadItemEntry {
+                    started_at_ordinal,
+                    started_at_ms,
+                    completed_at_ms,
+                    is_complete,
+                    turn_id,
+                    item,
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 

@@ -444,9 +444,8 @@ WHERE thread_id = ?
                 })?;
         let item_id = item.item.id().to_string();
         let item_json = serde_json::to_string(&item.item).map_err(thread_history_error)?;
-        // Completed items are immutable: local producers emit ItemCompleted exactly once per
-        // item. Tolerate an unexpected duplicate defensively so it cannot poison materialization,
-        // preserving the original creation ordinal and timestamp while updating its snapshot.
+        // First projection owns position. Completion updates that row without moving it;
+        // the initial snapshot remains available to forks whose boundary precedes completion.
         sqlx::query(
             r#"
 INSERT INTO thread_items (
@@ -457,12 +456,17 @@ INSERT INTO thread_items (
     updated_at_ordinal,
     created_at_ms,
     item_type,
-    item_json
-) VALUES (?, ?, ?, ?, ?, ?, json_extract(?, '$.type'), ?)
+    item_json,
+    is_complete,
+    completed_at_ms
+) VALUES (?, ?, ?, ?, ?, ?, json_extract(?, '$.type'), ?, ?, ?)
 ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
     updated_at_ordinal = excluded.updated_at_ordinal,
     item_type = excluded.item_type,
-    item_json = excluded.item_json
+    item_json = excluded.item_json,
+    is_complete = excluded.is_complete,
+    completed_at_ms = excluded.completed_at_ms
+WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
             "#,
         )
         .bind(thread_id)
@@ -472,11 +476,30 @@ ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
         .bind(rollout_ordinal)
         .bind(created_at_ms)
         .bind(item_json.as_str())
-        .bind(item_json)
+        .bind(item_json.as_str())
+        .bind(item.is_complete)
+        .bind(item.completed_at_ms)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;
 
+        sqlx::query(
+            "INSERT OR IGNORE INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, completed_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(thread_id)
+        .bind(item.turn_id.as_str())
+        .bind(item_id.as_str())
+        .bind(rollout_ordinal)
+        .bind(item_json.as_str())
+        .bind(item.is_complete)
+        .bind(item.completed_at_ms)
+        .execute(&mut **transaction)
+        .await
+        .map_err(thread_history_error)?;
+
+        if !item.is_complete {
+            continue;
+        }
         // Keep summary item IDs on the turn row so reads do not need to scan every item in the
         // turn.
         match item.item {

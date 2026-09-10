@@ -460,6 +460,7 @@ async fn collab_spawn_end_shows_requested_model_and_effort() {
 
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -479,6 +480,7 @@ async fn collab_spawn_end_shows_requested_model_and_effort() {
     );
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -536,6 +538,7 @@ async fn live_app_server_user_message_item_completed_does_not_duplicate_rendered
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -560,6 +563,7 @@ async fn live_app_server_user_message_omits_unsupported_media() {
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -629,6 +633,7 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
     };
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -843,6 +848,7 @@ async fn live_app_server_file_change_item_started_preserves_changes() {
 
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -877,6 +883,7 @@ async fn live_app_server_command_execution_strips_shell_wrapper() {
 
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -901,6 +908,7 @@ async fn live_app_server_command_execution_strips_shell_wrapper() {
     );
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -1000,6 +1008,7 @@ async fn live_app_server_sub_agent_activity_renders_once() {
 
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -1009,6 +1018,7 @@ async fn live_app_server_sub_agent_activity_renders_once() {
     );
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -1045,6 +1055,7 @@ async fn live_app_server_collab_wait_items_render_history() {
 
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -1068,6 +1079,7 @@ async fn live_app_server_collab_wait_items_render_history() {
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
@@ -1122,6 +1134,7 @@ async fn live_app_server_collab_spawn_completed_renders_requested_model_and_effo
 
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
@@ -1142,6 +1155,7 @@ async fn live_app_server_collab_spawn_completed_renders_requested_model_and_effo
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,

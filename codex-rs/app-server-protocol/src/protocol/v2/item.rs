@@ -1319,6 +1319,10 @@ impl From<CoreAgentStatus> for CollabAgentState {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ItemStartedNotification {
+    /// Stable first-projection source order; old recordings use their completion position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number", optional)]
+    pub started_at_ordinal: Option<u64>,
     pub item: ThreadItem,
     pub thread_id: String,
     pub turn_id: String,
@@ -1397,6 +1401,10 @@ pub struct ItemGuardianApprovalReviewCompletedNotification {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ItemCompletedNotification {
+    /// Stable first-projection source order; old recordings use their completion position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(type = "number", optional)]
+    pub started_at_ordinal: Option<u64>,
     pub item: ThreadItem,
     pub thread_id: String,
     pub turn_id: String,

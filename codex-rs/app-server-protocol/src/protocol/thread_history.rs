@@ -93,6 +93,7 @@ pub fn build_turns_from_rollout_items(items: &[RolloutItem]) -> Vec<Turn> {
 /// A materialized `ThreadItem` snapshot that changed while handling one input.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadHistoryItemChange {
+    pub is_complete: bool,
     pub turn_id: String,
     pub item: ThreadItem,
     pub started_at_ms: Option<i64>,
@@ -1466,6 +1467,7 @@ impl ThreadHistoryBuilder {
     fn record_changed_item(&mut self, turn_id: String, item: ThreadItem) {
         if let Some(change_set) = self.active_change_set.as_mut() {
             change_set.changed_items.push(ThreadHistoryItemChange {
+                is_complete: true,
                 turn_id,
                 item,
                 // Legacy events used by ThreadHistoryBuilder don't have timestamps
@@ -4744,6 +4746,7 @@ mod tests {
             changes,
             ThreadHistoryChangeSet {
                 changed_items: vec![ThreadHistoryItemChange {
+                    is_complete: true,
                     turn_id: "rollout-0".into(),
                     item: ThreadItem::UserMessage {
                         id: "item-1".into(),
@@ -4793,6 +4796,7 @@ mod tests {
             changes,
             ThreadHistoryChangeSet {
                 changed_items: vec![ThreadHistoryItemChange {
+                    is_complete: true,
                     turn_id: "rollout-0".into(),
                     item: ThreadItem::WebSearch(WebSearchItem {
                         id: "search-1".into(),
@@ -4830,6 +4834,7 @@ mod tests {
             changes,
             ThreadHistoryChangeSet {
                 changed_items: vec![ThreadHistoryItemChange {
+                    is_complete: true,
                     turn_id: "rollout-0".into(),
                     item: ThreadItem::Reasoning {
                         id: "item-1".into(),
@@ -4934,6 +4939,7 @@ mod tests {
             changes,
             ThreadHistoryChangeSet {
                 changed_items: vec![ThreadHistoryItemChange {
+                    is_complete: true,
                     turn_id: "rollout-0".into(),
                     item: ThreadItem::WebSearch(WebSearchItem {
                         id: "search-1".into(),

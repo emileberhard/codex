@@ -134,6 +134,7 @@ fn projects_completed_canonical_turn_items() {
     assert_eq!(
         user_changes.changed_items,
         vec![ThreadHistoryItemChange {
+            is_complete: true,
             turn_id: "turn-1".to_string(),
             item: ThreadItem::from(user_item),
             started_at_ms: Some(100),
@@ -143,6 +144,7 @@ fn projects_completed_canonical_turn_items() {
     assert_eq!(
         agent_changes.changed_items,
         vec![ThreadHistoryItemChange {
+            is_complete: true,
             turn_id: "turn-1".to_string(),
             item: ThreadItem::from(agent_item),
             started_at_ms: Some(100),
@@ -176,6 +178,7 @@ fn projects_optional_completed_item_lifecycle_timestamps() {
             changes,
             ThreadHistoryChangeSet {
                 changed_items: vec![ThreadHistoryItemChange {
+                    is_complete: true,
                     turn_id: "turn-1".to_string(),
                     item: ThreadItem::from(item.clone()),
                     started_at_ms,

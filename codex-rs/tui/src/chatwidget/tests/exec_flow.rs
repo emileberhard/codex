@@ -13,6 +13,7 @@ async fn replayed_command_completion_preserves_tracking_without_duplicate_starts
 
     chat.handle_server_notification(
         ServerNotification::ItemCompleted(ItemCompletedNotification {
+            started_at_ordinal: None,
             thread_id: String::new(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
