@@ -83,7 +83,7 @@ impl ObservationItems {
                 }
             }
             EventMsg::ItemCompleted(end) => {
-                let key = (end.turn_id.clone(), end.item.id().to_owned());
+                let key = (end.turn_id.clone(), end.item.id());
                 if self.ephemeral {
                     self.retain(
                         end.turn_id.clone(),

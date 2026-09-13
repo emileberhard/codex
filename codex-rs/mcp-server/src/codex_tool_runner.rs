@@ -309,9 +309,7 @@ async fn run_codex_tool_session_inner(
                     EventMsg::McpStartupUpdate(_) | EventMsg::McpStartupComplete(_) => {
                         // Ignored in MCP tool runner.
                     }
-                    EventMsg::AgentMessage(AgentMessageEvent {
-                        source_item: None, ..
-                    }) => {
+                    EventMsg::AgentMessage(AgentMessageEvent { .. }) => {
                         // TODO: think how we want to support this in the MCP
                     }
                     EventMsg::AgentReasoningRawContent(_)

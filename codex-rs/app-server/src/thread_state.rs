@@ -556,6 +556,10 @@ impl ThreadStateManager {
         Some(subscription_id)
     }
 
+    #[expect(
+        clippy::expect_used,
+        reason = "The thread was found under this same exclusive manager lock."
+    )]
     pub(crate) async fn close_observer(&self, connection_id: ConnectionId, subscription_id: &str) {
         let mut state = self.state.lock().await;
         let Some(thread_id) = state

@@ -172,7 +172,11 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
     let mut listener_gate = gate(&barrier, &format!("listener:{}", thread.id)).await?;
     let mut finish = Some(finish);
     if !matches!(timing, CompletionTiming::AfterSubscribe) {
-        finish.take().unwrap().send(()).unwrap();
+        finish
+            .take()
+            .context("response completion gate")?
+            .send(())
+            .map_err(|_| anyhow::anyhow!("response stream closed"))?;
         wait_for_completed_item(&mut observer, &thread.id, "observation-barrier").await?;
         if history_mode == "paginated" {
             timeout(DEADLINE, async {
@@ -246,7 +250,9 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
         1
     };
     if let Some(finish) = finish {
-        finish.send(()).unwrap();
+        finish
+            .send(())
+            .map_err(|_| anyhow::anyhow!("response stream closed"))?;
     }
     timeout(DEADLINE, async {
         while page.is_none() || completions.len() < expect_terminal_count {
@@ -272,7 +278,7 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
                 JSONRPCMessage::Request(request) => {
                     bail!("passive observer received request: {}", request.method)
                 }
-                JSONRPCMessage::Error(error) => bail!("RPC error: {:?}", error),
+                JSONRPCMessage::Error(error) => bail!("RPC error: {error:?}"),
                 _ => {}
             }
         }

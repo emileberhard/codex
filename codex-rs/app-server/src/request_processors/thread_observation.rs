@@ -40,19 +40,20 @@ impl ThreadRequestProcessor {
             .await
             .map_err(thread_read_view_error)?;
         let state = self.thread_state_manager.thread_state(thread_id).await;
-        let state = state.lock().await;
-        if !state.listener_matches(&conversation) {
-            return Err(closing_error());
+        {
+            let state = state.lock().await;
+            if !state.listener_matches(&conversation) {
+                return Err(closing_error());
+            }
+            let sender = state.listener_command_tx().ok_or_else(closing_error)?;
+            sender
+                .send(ThreadListenerCommand::SendThreadSubscribeResponse {
+                    request_id,
+                    thread: Box::new(thread),
+                    store: Arc::clone(&self.thread_store),
+                })
+                .map_err(|_| closing_error())?;
         }
-        let sender = state.listener_command_tx().ok_or_else(closing_error)?;
-        sender
-            .send(ThreadListenerCommand::SendThreadSubscribeResponse {
-                request_id,
-                thread: Box::new(thread),
-                store: Arc::clone(&self.thread_store),
-            })
-            .map_err(|_| closing_error())?;
-        drop(state);
         #[cfg(debug_assertions)]
         crate::thread_observation::test_barrier("subscribe", thread_id).await;
         Ok(None)
@@ -78,6 +79,10 @@ fn closing_error() -> JSONRPCErrorError {
     }
 }
 
+#[expect(
+    clippy::await_holding_invalid_type,
+    reason = "Unload and listener fences must cover membership replacement and its acknowledgement atomically."
+)]
 pub(super) async fn send_subscribe_response(
     thread_id: ThreadId,
     conversation: &Arc<CodexThread>,
@@ -93,32 +98,39 @@ pub(super) async fn send_subscribe_response(
         // This command runs between whole listener events. Core may already have
         // persisted queued events, so completed checkpoint versions dominate the
         // unfinished listener prefixes when clients merge the bounded pages.
-        let baseline = state.lock().await;
-        if !baseline.listener_matches(conversation) {
-            return Err(closing_error());
-        }
-        let live_items = baseline
-            .observation_items
-            .snapshot()
-            .map_err(|message| JSONRPCErrorError {
-                code: -32003,
-                message: message.into(),
-                data: Some(serde_json::json!({"reason":"observationCapacity"})),
-            })?
-            .into_iter()
-            .map(|item| ThreadItemEntry {
-                started_at_ordinal: None,
-                started_at_ms: item.started_at_ms,
-                completed_at_ms: item.completed_at_ms,
-                is_complete: Some(item.is_complete),
-                turn_id: item.turn_id,
-                item: item.item,
-            })
-            .collect();
-        let history_unavailable = baseline.observation_items.history_unavailable;
-        let active_turn = baseline.active_turn_metadata();
-        let listener_generation = baseline.listener_generation;
-        drop(baseline);
+        let (live_items, history_unavailable, active_turn, listener_generation) = {
+            let baseline = state.lock().await;
+            if !baseline.listener_matches(conversation) {
+                return Err(closing_error());
+            }
+            let live_items = baseline
+                .observation_items
+                .snapshot()
+                .map_err(|message| JSONRPCErrorError {
+                    code: -32003,
+                    message: message.into(),
+                    data: Some(serde_json::json!({"reason":"observationCapacity"})),
+                })?
+                .into_iter()
+                .map(|item| ThreadItemEntry {
+                    started_at_ordinal: None,
+                    started_at_ms: item.started_at_ms,
+                    completed_at_ms: item.completed_at_ms,
+                    is_complete: Some(item.is_complete),
+                    turn_id: item.turn_id,
+                    item: item.item,
+                })
+                .collect();
+            let history_unavailable = baseline.observation_items.history_unavailable;
+            let active_turn = baseline.active_turn_metadata();
+            let listener_generation = baseline.listener_generation;
+            (
+                live_items,
+                history_unavailable,
+                active_turn,
+                listener_generation,
+            )
+        };
         let cursors = if conversation.rollout_path().is_none() {
             ThreadObservationCursors {
                 turns: None,

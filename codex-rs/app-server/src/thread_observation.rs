@@ -3,6 +3,10 @@ mod text;
 pub(crate) use text::ObservationItems;
 
 #[cfg(debug_assertions)]
+#[expect(
+    clippy::expect_used,
+    reason = "A malformed or broken deterministic test barrier must fail its test process."
+)]
 pub(crate) async fn test_barrier(signal: &str, thread_id: codex_protocol::ThreadId) {
     use tokio::io::AsyncReadExt;
     use tokio::io::AsyncWriteExt;

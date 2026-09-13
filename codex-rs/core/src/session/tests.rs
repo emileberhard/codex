@@ -11789,8 +11789,8 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
         .expect("channel open");
     assert!(matches!(
         fourth.msg,
-        EventMsg::UserMessage(UserMessageEvent { source_item: None,
-                client_id: None,
+        EventMsg::UserMessage(UserMessageEvent {
+            client_id: None,
             message,
             images,
             text_elements,

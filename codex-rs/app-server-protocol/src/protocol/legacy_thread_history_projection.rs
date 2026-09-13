@@ -205,7 +205,7 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
         assert_eq!(actual, expected);
         assert!(actual.contains_key(&("last".into(), "item-4".into())));
-        assert_eq!(actual[&("first".into(), "canonical".into())].1, true);
+        assert!(actual[&("first".into(), "canonical".into())].1);
         assert!(
             matches!(&actual[&("first".into(), "reason".into())].0, ThreadItem::Reasoning { summary, content, .. } if summary == &["summary", ""] && content == &[""])
         );

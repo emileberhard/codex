@@ -530,20 +530,20 @@ impl ThreadHistoryBuilder {
         if payload.message.is_empty() && payload.source_item.is_none() {
             return;
         }
-        let legacy_id = (!payload.message.is_empty()).then(|| self.next_item_id());
-        let id = payload.source_item.as_ref().map_or_else(
-            || {
-                legacy_id
-                    .clone()
-                    .expect("source-less nonempty message allocation")
-            },
-            |source| source.id.clone(),
-        );
+        let (id, legacy_id) = if let Some(source) = &payload.source_item {
+            (
+                source.id.clone(),
+                (!payload.message.is_empty()).then(|| self.next_item_id()),
+            )
+        } else {
+            let id = self.next_item_id();
+            (id.clone(), Some(id))
+        };
         let prefix = payload
             .source_item
             .as_ref()
             .filter(|source| source.index > 0)
-            .and_then(|_| self.current_turn.as_ref())
+            .and(self.current_turn.as_ref())
             .and_then(|turn| turn.items.iter().find(|item| item.id() == id))
             .and_then(|item| match item {
                 ThreadItem::AgentMessage { text, .. } => Some(text.as_str()),
@@ -596,15 +596,15 @@ impl ThreadHistoryBuilder {
             .filter(|item| item.reasoning)
             .map(|item| item.id.clone());
         let new_slot = preceding.is_none() && !text.is_empty();
-        let legacy_id = preceding.or_else(|| new_slot.then(|| self.next_item_id()));
-        let id = source.map_or_else(
-            || {
-                legacy_id
-                    .clone()
-                    .expect("source-less nonempty reasoning allocation")
-            },
-            |source| source.id.clone(),
-        );
+        let (id, legacy_id) = if let Some(source) = source {
+            (
+                source.id.clone(),
+                preceding.or_else(|| new_slot.then(|| self.next_item_id())),
+            )
+        } else {
+            let id = preceding.unwrap_or_else(|| self.next_item_id());
+            (id.clone(), Some(id))
+        };
         let (mut summary, mut content) = self
             .current_turn
             .as_ref()
