@@ -113,9 +113,15 @@ pub(crate) struct OutgoingMessageSender {
 }
 
 #[derive(Clone)]
+pub(crate) struct ThreadRecipients {
+    pub(crate) requests: Vec<ConnectionId>,
+    pub(crate) notifications: Vec<ConnectionId>,
+}
+
+#[derive(Clone)]
 pub(crate) struct ThreadScopedOutgoingMessageSender {
     outgoing: Arc<OutgoingMessageSender>,
-    connection_ids: Arc<Vec<ConnectionId>>,
+    recipients: Arc<ThreadRecipients>,
     thread_id: ThreadId,
 }
 
@@ -129,12 +135,12 @@ struct PendingCallbackEntry {
 impl ThreadScopedOutgoingMessageSender {
     pub(crate) fn new(
         outgoing: Arc<OutgoingMessageSender>,
-        connection_ids: Vec<ConnectionId>,
+        recipients: ThreadRecipients,
         thread_id: ThreadId,
     ) -> Self {
         Self {
             outgoing,
-            connection_ids: Arc::new(connection_ids),
+            recipients: Arc::new(recipients),
             thread_id,
         }
     }
@@ -145,7 +151,7 @@ impl ThreadScopedOutgoingMessageSender {
     ) -> (RequestId, oneshot::Receiver<ClientRequestResult>) {
         self.outgoing
             .send_request_to_connections(
-                Some(self.connection_ids.as_slice()),
+                Some(self.recipients.requests.as_slice()),
                 payload,
                 Some(self.thread_id),
             )
@@ -170,11 +176,14 @@ impl ThreadScopedOutgoingMessageSender {
         self.outgoing
             .analytics_events_client
             .track_notification(&notification);
-        if self.connection_ids.is_empty() {
+        if self.recipients.notifications.is_empty() {
             return;
         }
         self.outgoing
-            .send_server_notification_to_connections(self.connection_ids.as_slice(), notification)
+            .send_server_notification_to_connections(
+                self.recipients.notifications.as_slice(),
+                notification,
+            )
             .await;
     }
 
@@ -1334,7 +1343,10 @@ mod tests {
         let thread_id = ThreadId::new();
         let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing.clone(),
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             thread_id,
         );
 
@@ -1398,7 +1410,10 @@ mod tests {
         let thread_id = ThreadId::new();
         let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing.clone(),
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             thread_id,
         );
 

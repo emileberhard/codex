@@ -2111,7 +2111,7 @@ fn append_agent_message(path: &Path, timestamp: &str, text: &str) -> anyhow::Res
         json!({
             "timestamp": timestamp,
             "type": "event_msg",
-            "payload": serde_json::to_value(EventMsg::AgentMessage(AgentMessageEvent {
+            "payload": serde_json::to_value(EventMsg::AgentMessage(AgentMessageEvent { source_item: None,
                 message: text.to_string(),
                 phase: None,
                 memory_citation: None,
@@ -2340,6 +2340,7 @@ async fn seed_pathless_store_thread(
 fn store_history_items() -> Vec<RolloutItem> {
     vec![RolloutItem::EventMsg(EventMsg::UserMessage(
         UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "history from store".to_string(),
             images: None,

@@ -67,6 +67,7 @@ fn resume_history(
                 collaboration_mode_kind: ModeKind::Default,
             })),
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "seed".to_string(),
                 images: None,

@@ -1503,6 +1503,7 @@ async fn test_updated_at_uses_file_mtime() -> Result<()> {
         timestamp: ts.to_string(),
         ordinal: None,
         item: RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "hello".into(),
             images: None,

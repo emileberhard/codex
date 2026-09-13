@@ -249,6 +249,7 @@ async fn append_rollout_item_materializes_compressed_rollout() -> anyhow::Result
     append_rollout_item_to_path(
         &rollout_path,
         &RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             message: "hello after append".to_string(),
             ..Default::default()
         })),
@@ -456,6 +457,7 @@ async fn resume_materializes_compressed_rollout_path() -> anyhow::Result<()> {
     recorder
         .record_canonical_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_item: None,
                 message: "hello after resume".to_string(),
                 ..Default::default()
             },
@@ -509,6 +511,7 @@ async fn append_materialization_preserves_compressed_rollout_permissions() -> an
     append_rollout_item_to_path(
         &rollout_path,
         &RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             message: "materialize restricted transcript".to_string(),
             ..Default::default()
         })),
@@ -738,6 +741,7 @@ fn write_rollout(path: &std::path::Path, thread_id: ThreadId, message: &str) -> 
             timestamp: "2025-01-03T12:00:01Z".to_string(),
             ordinal: None,
             item: RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 message: message.to_string(),
                 ..Default::default()
             })),

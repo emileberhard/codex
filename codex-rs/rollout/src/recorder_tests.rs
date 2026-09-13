@@ -63,6 +63,7 @@ fn paginated_session_meta_item(thread_id: ThreadId, cwd: &Path) -> RolloutItem {
 
 fn agent_message_item(message: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+        source_item: None,
         message: message.to_string(),
         phase: None,
         memory_citation: None,
@@ -223,6 +224,7 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
             timestamp: "2026-01-27T12:34:57Z".to_string(),
             ordinal: None,
             item: RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello from startup backfill".to_string(),
                 images: None,
@@ -647,6 +649,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
     recorder
         .record_canonical_items(&[RolloutItem::EventMsg(EventMsg::AgentMessage(
             AgentMessageEvent {
+                source_item: None,
                 message: "buffered-event".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -664,6 +667,7 @@ async fn recorder_materializes_on_flush_with_pending_items() -> std::io::Result<
     recorder
         .record_canonical_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "first-user-message".to_string(),
                 images: None,
@@ -903,6 +907,7 @@ async fn persist_reports_filesystem_error_and_retries_buffered_items() -> std::i
     recorder
         .record_canonical_items(&[RolloutItem::EventMsg(EventMsg::AgentMessage(
             AgentMessageEvent {
+                source_item: None,
                 message: "buffered-before-persist".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -956,6 +961,7 @@ async fn writer_state_retries_write_error_before_reporting_flush_success() -> st
     };
     state.add_items(vec![RolloutItem::EventMsg(EventMsg::AgentMessage(
         AgentMessageEvent {
+            source_item: None,
             message: "queued-after-writer-error".to_string(),
             phase: None,
             memory_citation: None,

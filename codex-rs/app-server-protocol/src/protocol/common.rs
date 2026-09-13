@@ -551,6 +551,18 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadDeleteResponse,
     },
+    #[experimental("thread/subscribe")]
+    ThreadSubscribe => "thread/subscribe" {
+        params: v2::ThreadSubscribeParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadSubscribeResponse,
+    },
+    #[experimental("thread/subscription/close")]
+    ThreadSubscriptionClose => "thread/subscription/close" {
+        params: v2::ThreadSubscriptionCloseParams,
+        serialization: None,
+        response: v2::ThreadSubscriptionCloseResponse,
+    },
     ThreadUnsubscribe => "thread/unsubscribe" {
         params: v2::ThreadUnsubscribeParams,
         serialization: thread_id(params.thread_id),

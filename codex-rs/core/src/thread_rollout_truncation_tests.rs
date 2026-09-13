@@ -184,6 +184,7 @@ fn truncate_rollout_before_turn_id_rejects_rolled_back_turn() {
 fn truncate_rollout_before_turn_id_rejects_synthetic_legacy_turn_id() {
     let rollout = vec![RolloutItem::EventMsg(EventMsg::UserMessage(
         UserMessageEvent {
+            source_item: None,
             message: "legacy".to_string(),
             ..Default::default()
         },
@@ -228,6 +229,7 @@ fn truncate_rollout_after_turn_id_rejects_rolled_back_turn() {
 fn truncate_rollout_after_turn_id_rejects_synthetic_legacy_turn_id() {
     let rollout = vec![RolloutItem::EventMsg(EventMsg::UserMessage(
         UserMessageEvent {
+            source_item: None,
             message: "legacy".to_string(),
             ..Default::default()
         },

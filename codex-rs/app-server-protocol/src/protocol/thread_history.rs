@@ -61,6 +61,8 @@ use codex_protocol::protocol::WebSearchEndEvent;
 use codex_protocol::review_format::REVIEW_FALLBACK_MESSAGE;
 use codex_rollout::CompactedItem;
 use codex_rollout::RolloutItem;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::HashMap;
 use tracing::warn;
 use uuid::Uuid;
@@ -77,6 +79,10 @@ use crate::protocol::v2::PatchChangeKind;
 use codex_protocol::protocol::ExecCommandStatus as CoreExecCommandStatus;
 #[cfg(test)]
 use codex_protocol::protocol::PatchApplyStatus as CorePatchApplyStatus;
+
+#[path = "legacy_thread_history_projection.rs"]
+mod legacy_projection;
+pub use legacy_projection::LegacyThreadHistoryProjection;
 
 /// Convert persisted [`RolloutItem`] entries into a sequence of [`Turn`] values.
 ///
@@ -223,6 +229,7 @@ impl ThreadHistoryChangeAccumulator {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct ThreadHistoryBuilder {
     // Retain the builder representation so late completions can reuse each
     // finished turn's item index without adding it to the public Turn type.
@@ -231,6 +238,7 @@ pub struct ThreadHistoryBuilder {
     next_item_index: i64,
     current_rollout_index: usize,
     next_rollout_index: usize,
+    #[serde(skip)]
     active_change_set: Option<ThreadHistoryChangeSet>,
 }
 
@@ -266,6 +274,23 @@ impl ThreadHistoryBuilder {
             .as_ref()
             .map(Turn::from)
             .or_else(|| self.turns.last().map(Turn::from))
+    }
+
+    /// Returns lifecycle metadata without materializing the active turn's items.
+    pub fn active_turn_metadata(&self) -> Option<Turn> {
+        self.current_turn
+            .as_ref()
+            .or_else(|| self.turns.last())
+            .map(|turn| Turn {
+                id: turn.id.clone(),
+                items: Vec::new(),
+                items_view: TurnItemsView::NotLoaded,
+                error: turn.error.clone(),
+                status: turn.status.clone(),
+                started_at: turn.started_at,
+                completed_at: turn.completed_at,
+                duration_ms: turn.duration_ms,
+            })
     }
 
     /// Returns the id of the active turn without materializing its items.
@@ -479,107 +504,168 @@ impl ThreadHistoryBuilder {
         }
         let id = self.next_item_id();
         let content = self.build_user_inputs(payload);
-        self.push_item_in_current_turn(ThreadItem::UserMessage {
-            id,
-            client_id: payload.client_id.clone(),
-            content,
-        });
+        if let Some(source) = &payload.source_item {
+            self.upsert_source_item(
+                ThreadItem::UserMessage {
+                    id: source.id.clone(),
+                    client_id: payload.client_id.clone(),
+                    content,
+                },
+                Some(LegacyItemSlot {
+                    id,
+                    reasoning: false,
+                }),
+                source.last,
+            );
+        } else {
+            self.push_item_in_current_turn(ThreadItem::UserMessage {
+                id,
+                client_id: payload.client_id.clone(),
+                content,
+            });
+        }
     }
 
     fn handle_agent_message(&mut self, payload: &AgentMessageEvent) {
-        if payload.message.is_empty() {
+        if payload.message.is_empty() && payload.source_item.is_none() {
             return;
         }
-
-        let id = self.next_item_id();
-        self.push_item_in_current_turn(ThreadItem::AgentMessage {
+        let legacy_id = (!payload.message.is_empty()).then(|| self.next_item_id());
+        let id = payload.source_item.as_ref().map_or_else(
+            || {
+                legacy_id
+                    .clone()
+                    .expect("source-less nonempty message allocation")
+            },
+            |source| source.id.clone(),
+        );
+        let prefix = payload
+            .source_item
+            .as_ref()
+            .filter(|source| source.index > 0)
+            .and_then(|_| self.current_turn.as_ref())
+            .and_then(|turn| turn.items.iter().find(|item| item.id() == id))
+            .and_then(|item| match item {
+                ThreadItem::AgentMessage { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let item = ThreadItem::AgentMessage {
             id,
-            text: payload.message.clone(),
+            text: format!("{prefix}{}", payload.message),
             phase: payload.phase.clone(),
             memory_citation: payload.memory_citation.clone().map(Into::into),
             delivery: payload.delivery,
             questions: payload.questions.clone(),
-        });
+        };
+        if let Some(source) = &payload.source_item {
+            self.upsert_source_item(
+                item,
+                legacy_id.map(|id| LegacyItemSlot {
+                    id,
+                    reasoning: false,
+                }),
+                source.last,
+            );
+        } else {
+            self.push_item_in_current_turn(item);
+        }
     }
 
     fn handle_agent_reasoning(&mut self, payload: &AgentReasoningEvent) {
-        if payload.text.is_empty() {
-            return;
-        }
-
-        // If the last item is a reasoning item, add the new text to the summary.
-        let existing_item_change = {
-            let tracking_changes = self.is_tracking_changes();
-            let turn = self.ensure_turn();
-            if let Some(ThreadItem::Reasoning { summary, .. }) = turn.items.last_mut() {
-                summary.push(payload.text.clone());
-                let changed_item = if tracking_changes {
-                    turn.items
-                        .last()
-                        .cloned()
-                        .map(|item| (turn.id.clone(), item))
-                } else {
-                    None
-                };
-                Some(changed_item)
-            } else {
-                None
-            }
-        };
-        if let Some(changed_item) = existing_item_change {
-            if let Some((turn_id, item)) = changed_item {
-                self.record_changed_item(turn_id, item);
-            }
-            return;
-        }
-
-        // Otherwise, create a new reasoning item.
-        let id = self.next_item_id();
-        self.push_item_in_current_turn(ThreadItem::Reasoning {
-            id,
-            summary: vec![payload.text.clone()],
-            content: Vec::new(),
-        });
+        self.handle_reasoning_part(&payload.text, payload.source_item.as_ref(), false);
     }
 
     fn handle_agent_reasoning_raw_content(&mut self, payload: &AgentReasoningRawContentEvent) {
-        if payload.text.is_empty() {
+        self.handle_reasoning_part(&payload.text, payload.source_item.as_ref(), true);
+    }
+
+    fn handle_reasoning_part(
+        &mut self,
+        text: &str,
+        source: Option<&codex_protocol::protocol::LegacyItemSource>,
+        raw: bool,
+    ) {
+        if text.is_empty() && source.is_none() {
             return;
         }
-
-        // If the last item is a reasoning item, add the new text to the content.
-        let existing_item_change = {
-            let tracking_changes = self.is_tracking_changes();
-            let turn = self.ensure_turn();
-            if let Some(ThreadItem::Reasoning { content, .. }) = turn.items.last_mut() {
-                content.push(payload.text.clone());
-                let changed_item = if tracking_changes {
-                    turn.items
-                        .last()
-                        .cloned()
-                        .map(|item| (turn.id.clone(), item))
-                } else {
-                    None
-                };
-                Some(changed_item)
+        let preceding = self
+            .ensure_turn()
+            .legacy_items
+            .last()
+            .filter(|item| item.reasoning)
+            .map(|item| item.id.clone());
+        let new_slot = preceding.is_none() && !text.is_empty();
+        let legacy_id = preceding.or_else(|| new_slot.then(|| self.next_item_id()));
+        let id = source.map_or_else(
+            || {
+                legacy_id
+                    .clone()
+                    .expect("source-less nonempty reasoning allocation")
+            },
+            |source| source.id.clone(),
+        );
+        let (mut summary, mut content) = self
+            .current_turn
+            .as_ref()
+            .and_then(|turn| turn.items.iter().find(|item| item.id() == id))
+            .and_then(|item| match item {
+                ThreadItem::Reasoning {
+                    summary, content, ..
+                } => Some((summary.clone(), content.clone())),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let parts = if raw { &mut content } else { &mut summary };
+        if let Some(source) = source {
+            if parts.len() <= source.index {
+                parts.resize_with(source.index + 1, String::new);
+            }
+            parts[source.index] = text.to_owned();
+        } else {
+            parts.push(text.to_owned());
+        }
+        self.upsert_source_item(
+            ThreadItem::Reasoning {
+                id,
+                summary,
+                content,
+            },
+            if new_slot {
+                legacy_id.map(|id| LegacyItemSlot {
+                    id,
+                    reasoning: true,
+                })
             } else {
                 None
-            }
-        };
-        if let Some(changed_item) = existing_item_change {
-            if let Some((turn_id, item)) = changed_item {
-                self.record_changed_item(turn_id, item);
-            }
-            return;
-        }
+            },
+            source.is_none_or(|source| source.last),
+        );
+    }
 
-        // Otherwise, create a new reasoning item.
-        let id = self.next_item_id();
-        self.push_item_in_current_turn(ThreadItem::Reasoning {
-            id,
-            summary: Vec::new(),
-            content: vec![payload.text.clone()],
-        });
+    fn upsert_source_item(
+        &mut self,
+        item: ThreadItem,
+        legacy_slot: Option<LegacyItemSlot>,
+        complete: bool,
+    ) {
+        let tracking = self.is_tracking_changes();
+        let turn = self.ensure_turn();
+        if let Some(slot) = legacy_slot {
+            turn.legacy_items.push(slot);
+        }
+        let item = turn.item_index.upsert(&mut turn.items, item);
+        let changed = tracking.then(|| (turn.id.clone(), item.clone()));
+        if let Some((turn_id, item)) = changed {
+            self.record_changed_item(turn_id, item);
+            if let Some(change) = self
+                .active_change_set
+                .as_mut()
+                .and_then(|changes| changes.changed_items.last_mut())
+            {
+                change.is_complete = complete;
+            }
+        }
     }
 
     fn handle_item_started(&mut self, payload: &ItemStartedEvent) {
@@ -1353,7 +1439,7 @@ impl ThreadHistoryBuilder {
             self.turns.truncate(self.turns.len().saturating_sub(n));
         }
 
-        let item_count: usize = self.turns.iter().map(|t| t.items.len()).sum();
+        let item_count: usize = self.turns.iter().map(|t| t.legacy_items.len()).sum();
         self.next_item_index = i64::try_from(item_count.saturating_add(1)).unwrap_or(i64::MAX);
     }
 
@@ -1378,6 +1464,7 @@ impl ThreadHistoryBuilder {
             id,
             items: Vec::new(),
             item_index: TurnItemIndex::default(),
+            legacy_items: Vec::new(),
             error: None,
             status: TurnStatus::Completed,
             started_at: None,
@@ -1408,6 +1495,7 @@ impl ThreadHistoryBuilder {
         let changed_item = {
             let turn = self.ensure_turn();
             let changed_item = tracking_changes.then(|| (turn.id.clone(), item.clone()));
+            turn.legacy_items.push(LegacyItemSlot::from_item(&item));
             turn.item_index.push(&mut turn.items, item);
             changed_item
         };
@@ -1422,6 +1510,7 @@ impl ThreadHistoryBuilder {
             && turn.id == turn_id
         {
             let changed_item = {
+                turn.track_legacy_upsert(&item);
                 let item = turn.item_index.upsert(&mut turn.items, item);
                 tracking_changes.then(|| (turn.id.clone(), item.clone()))
             };
@@ -1433,6 +1522,7 @@ impl ThreadHistoryBuilder {
 
         if let Some(turn) = self.turns.iter_mut().find(|turn| turn.id == turn_id) {
             let changed_item = {
+                turn.track_legacy_upsert(&item);
                 let item = turn.item_index.upsert(&mut turn.items, item);
                 tracking_changes.then(|| (turn.id.clone(), item.clone()))
             };
@@ -1452,6 +1542,7 @@ impl ThreadHistoryBuilder {
         let tracking_changes = self.is_tracking_changes();
         let changed_item = {
             let turn = self.ensure_turn();
+            turn.track_legacy_upsert(&item);
             let item = turn.item_index.upsert(&mut turn.items, item);
             tracking_changes.then(|| (turn.id.clone(), item.clone()))
         };
@@ -1492,6 +1583,22 @@ impl ThreadHistoryBuilder {
     fn record_removed_turn_ids(&mut self, removed_turn_ids: Vec<String>) {
         if let Some(change_set) = self.active_change_set.as_mut() {
             change_set.removed_turn_ids.extend(removed_turn_ids);
+        }
+    }
+
+    fn release_projected_payload(&mut self, turn_id: &str, item_id: &str) {
+        let turn = self
+            .current_turn
+            .iter_mut()
+            .chain(self.turns.iter_mut())
+            .find(|turn| turn.id == turn_id);
+        if let Some(turn) = turn
+            && let Some(index) = turn.item_index.position(&turn.items, item_id)
+        {
+            turn.items[index] = ThreadItem::Plan {
+                id: item_id.to_owned(),
+                text: String::new(),
+            };
         }
     }
 
@@ -1567,7 +1674,7 @@ const TURN_ITEM_INDEX_THRESHOLD: usize = 32;
 /// Lazily indexes a turn's append-only item list. Replacements keep the same ID
 /// and position; duplicate IDs continue to resolve to their first occurrence.
 /// Keep this index with its turn, including after completion and across rollback.
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 struct TurnItemIndex {
     positions: Option<HashMap<String, usize>>,
 }
@@ -1582,7 +1689,7 @@ impl TurnItemIndex {
         items.push(item);
     }
 
-    fn upsert<'a>(&mut self, items: &'a mut Vec<ThreadItem>, item: ThreadItem) -> &'a ThreadItem {
+    fn position(&mut self, items: &[ThreadItem], item_id: &str) -> Option<usize> {
         if self.positions.is_none() && items.len() >= TURN_ITEM_INDEX_THRESHOLD {
             let mut positions = HashMap::with_capacity(items.len());
             for (index, existing) in items.iter().enumerate() {
@@ -1591,10 +1698,14 @@ impl TurnItemIndex {
             self.positions = Some(positions);
         }
 
-        let existing_index = match &self.positions {
-            Some(positions) => positions.get(item.id()).copied(),
-            None => items.iter().position(|existing| existing.id() == item.id()),
-        };
+        match &self.positions {
+            Some(positions) => positions.get(item_id).copied(),
+            None => items.iter().position(|existing| existing.id() == item_id),
+        }
+    }
+
+    fn upsert<'a>(&mut self, items: &'a mut Vec<ThreadItem>, item: ThreadItem) -> &'a ThreadItem {
+        let existing_index = self.position(items, item.id());
         if let Some(index) = existing_index {
             items[index] = item;
             &items[index]
@@ -1606,10 +1717,27 @@ impl TurnItemIndex {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct LegacyItemSlot {
+    id: String,
+    reasoning: bool,
+}
+
+impl LegacyItemSlot {
+    fn from_item(item: &ThreadItem) -> Self {
+        Self {
+            id: item.id().to_owned(),
+            reasoning: matches!(item, ThreadItem::Reasoning { .. }),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 struct PendingTurn {
     id: String,
     items: Vec<ThreadItem>,
     item_index: TurnItemIndex,
+    legacy_items: Vec<LegacyItemSlot>,
     error: Option<TurnError>,
     status: TurnStatus,
     started_at: Option<i64>,
@@ -1626,6 +1754,18 @@ struct PendingTurn {
 }
 
 impl PendingTurn {
+    fn track_legacy_upsert(&mut self, item: &ThreadItem) {
+        if let Some(slot) = self
+            .legacy_items
+            .iter_mut()
+            .find(|slot| slot.id == item.id())
+        {
+            slot.reasoning = matches!(item, ThreadItem::Reasoning { .. });
+        } else {
+            self.legacy_items.push(LegacyItemSlot::from_item(item));
+        }
+    }
+
     fn opened_explicitly(mut self) -> Self {
         self.opened_explicitly = true;
         self
@@ -1767,6 +1907,7 @@ mod tests {
     fn builds_multiple_turns_with_reasoning_items() {
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "First turn".into(),
                 images: Some(vec!["https://example.com/one.png".into()]),
@@ -1775,6 +1916,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "Hi there".into(),
                 phase: None,
                 memory_citation: None,
@@ -1782,12 +1924,15 @@ mod tests {
                 questions: None,
             }),
             EventMsg::AgentReasoning(AgentReasoningEvent {
+                source_item: None,
                 text: "thinking".into(),
             }),
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent {
+                source_item: None,
                 text: "full reasoning".into(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Second turn".into(),
                 images: None,
@@ -1796,6 +1941,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "Reply two".into(),
                 phase: None,
                 memory_citation: None,
@@ -1997,6 +2143,7 @@ mod tests {
         let local_audio_path = PathBuf::from("/tmp/local.wav");
         let events = vec![RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "inspect these".into(),
                 images: Some(vec!["https://example.com/image.png".into()]),
@@ -2054,6 +2201,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello".into(),
                 images: None,
@@ -2408,6 +2556,7 @@ mod tests {
                 started_at_ms: 0,
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: Some("client-message-1".to_string()),
                 message: "hello".into(),
                 images: None,
@@ -2458,6 +2607,7 @@ mod tests {
             },
         ];
         let events = vec![EventMsg::AgentMessage(AgentMessageEvent {
+            source_item: None,
             message: "Final reply".into(),
             phase: Some(CoreMessagePhase::FinalAnswer),
             memory_citation: None,
@@ -2494,7 +2644,7 @@ mod tests {
                 model_context_window: None,
                 collaboration_mode_kind: Default::default(),
             })),
-            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent { source_item: None,
                 client_id: None,
                 message: "generate an image".into(),
                 images: None,
@@ -2572,6 +2722,7 @@ mod tests {
     fn splits_reasoning_when_interleaved() {
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Turn start".into(),
                 images: None,
@@ -2580,12 +2731,15 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentReasoning(AgentReasoningEvent {
+                source_item: None,
                 text: "first summary".into(),
             }),
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent {
+                source_item: None,
                 text: "first content".into(),
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "interlude".into(),
                 phase: None,
                 memory_citation: None,
@@ -2593,6 +2747,7 @@ mod tests {
                 questions: None,
             }),
             EventMsg::AgentReasoning(AgentReasoningEvent {
+                source_item: None,
                 text: "second summary".into(),
             }),
         ];
@@ -2628,6 +2783,7 @@ mod tests {
     fn marks_turn_as_interrupted_when_aborted() {
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Please do the thing".into(),
                 images: None,
@@ -2636,6 +2792,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "Working...".into(),
                 phase: None,
                 memory_citation: None,
@@ -2650,6 +2807,7 @@ mod tests {
                 duration_ms: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Let's try again".into(),
                 images: None,
@@ -2658,6 +2816,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "Second attempt complete.".into(),
                 phase: None,
                 memory_citation: None,
@@ -2730,6 +2889,7 @@ mod tests {
     fn drops_last_turns_on_thread_rollback() {
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "First".into(),
                 images: None,
@@ -2738,6 +2898,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "A1".into(),
                 phase: None,
                 memory_citation: None,
@@ -2745,6 +2906,7 @@ mod tests {
                 questions: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Second".into(),
                 images: None,
@@ -2753,6 +2915,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "A2".into(),
                 phase: None,
                 memory_citation: None,
@@ -2761,6 +2924,7 @@ mod tests {
             }),
             EventMsg::ThreadRolledBack(ThreadRolledBackEvent { num_turns: 1 }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Third".into(),
                 images: None,
@@ -2769,6 +2933,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "A3".into(),
                 phase: None,
                 memory_citation: None,
@@ -2836,6 +3001,7 @@ mod tests {
     fn thread_rollback_clears_all_turns_when_num_turns_exceeds_history() {
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "One".into(),
                 images: None,
@@ -2844,6 +3010,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "A1".into(),
                 phase: None,
                 memory_citation: None,
@@ -2851,6 +3018,7 @@ mod tests {
                 questions: None,
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Two".into(),
                 images: None,
@@ -2859,6 +3027,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "A2".into(),
                 phase: None,
                 memory_citation: None,
@@ -2887,6 +3056,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Start".into(),
                 images: None,
@@ -2895,6 +3065,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "Steer".into(),
                 images: None,
@@ -2954,6 +3125,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "run tools".into(),
                 images: None,
@@ -3168,6 +3340,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "run dynamic tool".into(),
                 images: None,
@@ -3252,6 +3425,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "run tools".into(),
                 images: None,
@@ -3348,6 +3522,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "review this command".into(),
                 images: None,
@@ -3440,6 +3615,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "run a subcommand".into(),
                 images: None,
@@ -3510,6 +3686,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "first".into(),
                 images: None,
@@ -3534,6 +3711,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "second".into(),
                 images: None,
@@ -3616,6 +3794,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "first".into(),
                 images: None,
@@ -3640,6 +3819,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "second".into(),
                 images: None,
@@ -3716,6 +3896,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "apply patch".into(),
                 images: None,
@@ -3784,6 +3965,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "apply patch".into(),
                 images: None,
@@ -3852,6 +4034,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "first".into(),
                 images: None,
@@ -3876,6 +4059,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "second".into(),
                 images: None,
@@ -3893,6 +4077,7 @@ mod tests {
                 time_to_first_token_ms: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "still in b".into(),
                 phase: None,
                 memory_citation: None,
@@ -3932,6 +4117,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "first".into(),
                 images: None,
@@ -3947,6 +4133,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "second".into(),
                 images: None,
@@ -4034,6 +4221,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "first".into(),
                 images: None,
@@ -4058,6 +4246,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "second".into(),
                 images: None,
@@ -4073,6 +4262,7 @@ mod tests {
                 duration_ms: None,
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "still in b".into(),
                 phase: None,
                 memory_citation: None,
@@ -4146,6 +4336,7 @@ mod tests {
     fn reconstructs_collab_resume_end_item() {
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "resume agent".into(),
                 images: None,
@@ -4205,6 +4396,7 @@ mod tests {
             .expect("valid receiver thread id");
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "spawn agent".into(),
                 images: None,
@@ -4268,6 +4460,7 @@ mod tests {
             .expect("valid receiver thread id");
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "redirect".into(),
                 images: None,
@@ -4333,6 +4526,7 @@ mod tests {
     fn rollback_failed_error_does_not_mark_turn_failed() {
         let events = vec![
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello".into(),
                 images: None,
@@ -4341,6 +4535,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "done".into(),
                 phase: None,
                 memory_citation: None,
@@ -4375,6 +4570,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello".into(),
                 images: None,
@@ -4437,6 +4633,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello".into(),
                 images: None,
@@ -4496,6 +4693,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "retry me".into(),
                 images: None,
@@ -4566,6 +4764,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             })),
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello".into(),
                 images: None,
@@ -4734,6 +4933,7 @@ mod tests {
 
         let changes = builder.handle_rollout_item_with_changes(&RolloutItem::EventMsg(
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: Some("client-message-1".into()),
                 message: "hello".into(),
                 images: None,
@@ -4821,12 +5021,14 @@ mod tests {
         let mut builder = ThreadHistoryBuilder::new();
         builder.handle_rollout_item_with_changes(&RolloutItem::EventMsg(EventMsg::AgentReasoning(
             AgentReasoningEvent {
+                source_item: None,
                 text: "summary".into(),
             },
         )));
 
         let changes = builder.handle_rollout_item_with_changes(&RolloutItem::EventMsg(
             EventMsg::AgentReasoningRawContent(AgentReasoningRawContentEvent {
+                source_item: None,
                 text: "raw content".into(),
             }),
         ));
@@ -4881,6 +5083,7 @@ mod tests {
 
         builder.handle_rollout_item_with_changes(&RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello".into(),
                 images: None,
@@ -5017,6 +5220,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             })),
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "hello".into(),
                 images: None,
@@ -5051,6 +5255,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             }),
             EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "keep this".into(),
                 images: None,

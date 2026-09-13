@@ -335,13 +335,11 @@ async fn write_and_project(
         RolloutWriteOp::Persist => RolloutWriteOp::Persist,
         RolloutWriteOp::Flush => RolloutWriteOp::Flush,
     };
-    if matches!(history_mode, ThreadHistoryMode::Legacy) {
-        durable_write(&recorder, write_op).await?;
-    } else {
+    durable_write(&recorder, write_op).await?;
+    if !matches!(history_mode, ThreadHistoryMode::Legacy) {
         let rollout_path = recorder.rollout_path();
         // SQLite is a rebuildable view. The flush barrier must win before projection starts so it
         // can lag JSONL after failure, but can never get ahead of canonical history.
-        durable_write(&recorder, write_op).await?;
         if let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
             store,
             rollout_id,

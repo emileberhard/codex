@@ -58,6 +58,11 @@ pub(crate) struct PendingThreadResumeRequest {
 pub(crate) enum ThreadListenerCommand {
     // SendThreadResumeResponse is used to resume an already running thread by sending the thread's history to the client and atomically subscribing for new updates.
     SendThreadResumeResponse(Box<PendingThreadResumeRequest>),
+    SendThreadSubscribeResponse {
+        request_id: ConnectionRequestId,
+        thread: Box<codex_app_server_protocol::Thread>,
+        store: Arc<dyn codex_thread_store::ThreadStore>,
+    },
     // EmitThreadGoalUpdated is used to order goal updates with running-thread resume responses and goal clears.
     EmitThreadGoalUpdated {
         turn_id: Option<String>,
@@ -108,6 +113,7 @@ pub(crate) struct ThreadState {
     last_thread_settings: Option<ThreadSettings>,
     listener_command_tx: Option<mpsc::UnboundedSender<ThreadListenerCommand>>,
     current_turn_history: ThreadHistoryBuilder,
+    pub(crate) observation_items: crate::thread_observation::ObservationItems,
     listener_thread: Option<Weak<CodexThread>>,
     watch_registration: WatchRegistration,
 }
@@ -134,6 +140,8 @@ impl ThreadState {
         self.last_thread_settings = Some(thread_settings_baseline);
         let (listener_command_tx, listener_command_rx) = mpsc::unbounded_channel();
         self.listener_command_tx = Some(listener_command_tx);
+        self.observation_items =
+            crate::thread_observation::ObservationItems::new(conversation.rollout_path().is_none());
         self.listener_thread = Some(Arc::downgrade(conversation));
         self.watch_registration = watch_registration;
         (listener_command_rx, self.listener_generation)
@@ -146,6 +154,7 @@ impl ThreadState {
         self.shutdown_drain_waiter = None;
         self.listener_command_tx = None;
         self.current_turn_history.reset();
+        self.observation_items = Default::default();
         self.listener_thread = None;
         self.watch_registration = WatchRegistration::default();
     }
@@ -164,6 +173,10 @@ impl ThreadState {
         self.current_turn_history.active_turn_snapshot()
     }
 
+    pub(crate) fn active_turn_metadata(&self) -> Option<Turn> {
+        self.current_turn_history.active_turn_metadata()
+    }
+
     pub(crate) fn register_shutdown_drain_waiter(&mut self) -> oneshot::Receiver<()> {
         let (completion_tx, completion_rx) = oneshot::channel();
         self.shutdown_drain_waiter = Some(completion_tx);
@@ -175,6 +188,7 @@ impl ThreadState {
     }
 
     pub(crate) fn track_current_turn_event(&mut self, event_turn_id: &str, event: &EventMsg) {
+        self.observation_items.track(event_turn_id, event);
         if let EventMsg::TurnStarted(payload) = event {
             self.turn_summary.started_at = payload.started_at;
         }
@@ -188,7 +202,8 @@ impl ThreadState {
             self.turn_summary.last_agent_message =
                 Some(ThreadItem::from(CoreTurnItem::AgentMessage(item.clone())));
         }
-        self.current_turn_history.handle_event(event);
+        let changes = self.current_turn_history.handle_event_with_changes(event);
+        self.observation_items.track_changes(changes);
         if matches!(event, EventMsg::TurnAborted(_) | EventMsg::TurnComplete(_)) {
             self.last_terminal_turn_id = Some(event_turn_id.to_string());
             self.recovered_turn_ids.remove(event_turn_id);
@@ -265,6 +280,89 @@ mod tests {
         assert_eq!(results, vec![true, false, true, false]);
     }
 
+    #[tokio::test]
+    async fn observation_membership_keeps_execution_and_exact_handle_ownership_separate() {
+        let manager = ThreadStateManager::new();
+        let thread = ThreadId::default();
+        let interactive = ConnectionId(1);
+        let passive = ConnectionId(2);
+        for connection in [interactive, passive] {
+            manager
+                .connection_initialized(
+                    connection,
+                    ConnectionCapabilities {
+                        request_attestation: true,
+                    },
+                )
+                .await;
+        }
+        let state = manager
+            .try_ensure_connection_subscribed(thread, interactive, false)
+            .await
+            .unwrap();
+        let old = manager
+            .replace_observer(thread, passive, &state)
+            .await
+            .unwrap();
+        let newest = manager
+            .replace_observer(thread, passive, &state)
+            .await
+            .unwrap();
+        manager.close_observer(passive, &old).await;
+        manager.close_observer(interactive, &newest).await;
+        let recipients = manager.recipients(thread).await;
+        assert_eq!(recipients.requests, vec![interactive]);
+        assert_eq!(
+            recipients.notifications.into_iter().collect::<HashSet<_>>(),
+            HashSet::from([interactive, passive])
+        );
+        assert_eq!(
+            manager
+                .first_attestation_capable_connection_for_thread(thread)
+                .await,
+            Some(interactive)
+        );
+        manager.close_observer(passive, &newest).await;
+        assert_eq!(
+            manager.recipients(thread).await.notifications,
+            vec![interactive]
+        );
+        let handle = manager
+            .replace_observer(thread, interactive, &state)
+            .await
+            .unwrap();
+        manager.close_observer(interactive, &handle).await;
+        assert_eq!(
+            manager.subscribed_connection_ids(thread).await,
+            vec![interactive]
+        );
+        manager
+            .replace_observer(thread, passive, &state)
+            .await
+            .unwrap();
+        manager.remove_connection(interactive).await;
+        assert!(!manager.has_subscribers(thread).await);
+        assert_eq!(
+            manager
+                .first_attestation_capable_connection_for_thread(thread)
+                .await,
+            None
+        );
+        assert!(manager.recipients(thread).await.requests.is_empty());
+        assert_eq!(
+            manager.recipients(thread).await.notifications,
+            vec![passive]
+        );
+        manager.remove_connection(passive).await;
+        assert!(manager.recipients(thread).await.notifications.is_empty());
+        assert!(
+            manager
+                .replace_observer(thread, passive, &state)
+                .await
+                .is_none()
+        );
+    }
+
     fn thread_settings(model: &str) -> ThreadSettings {
         ThreadSettings {
             cwd: AbsolutePathBuf::from_absolute_path("/tmp").expect("absolute path"),
@@ -296,6 +394,7 @@ mod tests {
 struct ThreadEntry {
     state: Arc<Mutex<ThreadState>>,
     connection_ids: HashSet<ConnectionId>,
+    observers: HashMap<ConnectionId, String>,
     has_connections_watcher: watch::Sender<bool>,
 }
 
@@ -304,6 +403,7 @@ impl Default for ThreadEntry {
         Self {
             state: Arc::new(Mutex::new(ThreadState::default())),
             connection_ids: HashSet::new(),
+            observers: HashMap::new(),
             has_connections_watcher: watch::channel(false).0,
         }
     }
@@ -401,6 +501,94 @@ impl ThreadStateManager {
             .get(&thread_id)
             .map(|thread_entry| thread_entry.connection_ids.iter().copied().collect())
             .unwrap_or_default()
+    }
+
+    pub(crate) async fn recipients(
+        &self,
+        thread_id: ThreadId,
+    ) -> crate::outgoing_message::ThreadRecipients {
+        let state = self.state.lock().await;
+        let Some(entry) = state.threads.get(&thread_id) else {
+            return crate::outgoing_message::ThreadRecipients {
+                requests: Vec::new(),
+                notifications: Vec::new(),
+            };
+        };
+        let requests = entry.connection_ids.iter().copied().collect::<Vec<_>>();
+        let notifications = entry
+            .connection_ids
+            .iter()
+            .chain(entry.observers.keys())
+            .copied()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        crate::outgoing_message::ThreadRecipients {
+            requests,
+            notifications,
+        }
+    }
+
+    /// Called only by the existing listener under the pending-unload fence.
+    pub(crate) async fn replace_observer(
+        &self,
+        thread_id: ThreadId,
+        connection_id: ConnectionId,
+        expected_state: &Arc<Mutex<ThreadState>>,
+    ) -> Option<String> {
+        let mut state = self.state.lock().await;
+        if !state.live_connections.contains_key(&connection_id) {
+            return None;
+        }
+        let entry = state.threads.get_mut(&thread_id)?;
+        if !Arc::ptr_eq(&entry.state, expected_state) {
+            return None;
+        }
+        let subscription_id = uuid::Uuid::new_v4().to_string();
+        entry
+            .observers
+            .insert(connection_id, subscription_id.clone());
+        state
+            .thread_ids_by_connection
+            .entry(connection_id)
+            .or_default()
+            .insert(thread_id);
+        Some(subscription_id)
+    }
+
+    pub(crate) async fn close_observer(&self, connection_id: ConnectionId, subscription_id: &str) {
+        let mut state = self.state.lock().await;
+        let Some(thread_id) = state
+            .thread_ids_by_connection
+            .get(&connection_id)
+            .and_then(|ids| {
+                ids.iter()
+                    .find(|id| {
+                        state.threads.get(id).is_some_and(|entry| {
+                            entry
+                                .observers
+                                .get(&connection_id)
+                                .is_some_and(|id| id == subscription_id)
+                        })
+                    })
+                    .copied()
+            })
+        else {
+            return;
+        };
+        let entry = state
+            .threads
+            .get_mut(&thread_id)
+            .expect("indexed observation thread");
+        entry.observers.remove(&connection_id);
+        if !entry.connection_ids.contains(&connection_id)
+            && let Some(ids) = state.thread_ids_by_connection.get_mut(&connection_id)
+        {
+            ids.remove(&thread_id);
+            if ids.is_empty() {
+                state.thread_ids_by_connection.remove(&connection_id);
+            }
+        }
     }
 
     pub(crate) async fn thread_state(&self, thread_id: ThreadId) -> Arc<Mutex<ThreadState>> {
@@ -516,6 +704,7 @@ impl ThreadStateManager {
             }
             if let Some(thread_entry) = state.threads.get_mut(&thread_id) {
                 thread_entry.connection_ids.remove(&connection_id);
+                thread_entry.observers.remove(&connection_id);
                 thread_entry.update_has_connections();
             }
         };
@@ -594,6 +783,7 @@ impl ThreadStateManager {
             for thread_id in &thread_ids {
                 if let Some(thread_entry) = state.threads.get_mut(thread_id) {
                     thread_entry.connection_ids.remove(&connection_id);
+                    thread_entry.observers.remove(&connection_id);
                     thread_entry.update_has_connections();
                 }
             }

@@ -2,6 +2,7 @@ mod archive_thread;
 mod create_thread;
 mod delete_thread;
 mod helpers;
+mod legacy_history_materialization;
 mod list_threads;
 mod live_writer;
 mod model_context;
@@ -598,6 +599,13 @@ impl ThreadStore for LocalThreadStore {
         self.state_db.is_some()
     }
 
+    fn observation_cursors(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadStoreFuture<'_, crate::ThreadObservationCursors> {
+        Box::pin(thread_history::observation_cursors(self, thread_id))
+    }
+
     fn list_turns(&self, params: ListTurnsParams) -> ThreadStoreFuture<'_, TurnPage> {
         Box::pin(LocalThreadStore::list_turns(self, params))
     }
@@ -1039,6 +1047,7 @@ mod tests {
         live_thread
             .append_items(&[
                 RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+                    source_item: None,
                     message: "commentary".to_string(),
                     phase: Some(MessagePhase::Commentary),
                     memory_citation: None,
@@ -1983,6 +1992,7 @@ mod tests {
 
     fn user_message_item(message: &str) -> RolloutItem {
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: message.to_string(),
             images: None,

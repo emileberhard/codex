@@ -31,6 +31,192 @@ use crate::StoredTurnStatus;
 use crate::local::test_support::test_config;
 
 #[tokio::test]
+async fn observation_turn_page_preserves_pre_completion_metadata_and_summary() {
+    let (home, store, thread_id) = store_with_mode(ThreadHistoryMode::Paginated).await;
+    write_rollout_with_end(&rollout_path(home.path(), thread_id), thread_id, None, 40);
+    let db = history_db(&store).await;
+    insert_turn(db, thread_id, "turn-1", 10, "inProgress", None, None, None).await;
+    sqlx::query("UPDATE thread_turns SET started_at = 100 WHERE thread_id = ?")
+        .bind(thread_id.to_string())
+        .execute(db)
+        .await
+        .expect("start timestamp");
+    let checkpoint = observation_cursors(&store, thread_id)
+        .await
+        .expect("checkpoint");
+    let before = store
+        .list_turns(turn_params(
+            thread_id,
+            checkpoint.turns.clone(),
+            10,
+            SortDirection::Desc,
+            StoredTurnItemsView::Summary,
+        ))
+        .await
+        .expect("checkpoint before completion");
+    insert_item(db, thread_id, "turn-1", "agent-1", 41).await;
+    sqlx::query("UPDATE thread_turns SET status = 'completed', rollout_end_ordinal = 42, completed_at = 105, duration_ms = 5000, final_agent_item_id = 'agent-1' WHERE thread_id = ?")
+        .bind(thread_id.to_string()).execute(db).await.expect("completion");
+    let after = store
+        .list_turns(turn_params(
+            thread_id,
+            checkpoint.turns,
+            10,
+            SortDirection::Desc,
+            StoredTurnItemsView::Summary,
+        ))
+        .await
+        .expect("checkpoint after completion");
+    assert_eq!(
+        serde_json::to_value(&after).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    assert_eq!(after.turns[0].status, StoredTurnStatus::InProgress);
+    assert_eq!(after.turns[0].completed_at, None);
+    assert_eq!(after.turns[0].duration_ms, None);
+    assert!(after.turns[0].items.is_empty());
+    let fresh = store
+        .list_turns(turn_params(
+            thread_id,
+            None,
+            10,
+            SortDirection::Desc,
+            StoredTurnItemsView::Summary,
+        ))
+        .await
+        .expect("live turn page");
+    assert_eq!(fresh.turns[0].status, StoredTurnStatus::Completed);
+    assert_eq!(fresh.turns[0].completed_at, Some(105));
+    assert_eq!(fresh.turns[0].duration_ms, Some(5000));
+    assert_eq!(fresh.turns[0].items.len(), 1);
+}
+
+#[tokio::test]
+async fn observation_cursors_for_metadata_only_rollout_read_empty_pages() {
+    let (_home, store, thread_id) = store_with_mode(ThreadHistoryMode::Paginated).await;
+    let checkpoint = observation_cursors(&store, thread_id)
+        .await
+        .expect("empty checkpoint");
+    if let Some(cursor) = checkpoint.items {
+        let page = store
+            .list_items(item_params(
+                thread_id,
+                None,
+                Some(cursor),
+                10,
+                SortDirection::Desc,
+            ))
+            .await
+            .expect("empty items page");
+        assert!(page.items.is_empty());
+    }
+    if let Some(cursor) = checkpoint.turns {
+        let page = store
+            .list_turns(turn_params(
+                thread_id,
+                Some(cursor),
+                10,
+                SortDirection::Desc,
+                StoredTurnItemsView::Summary,
+            ))
+            .await
+            .expect("empty turns page");
+        assert!(page.turns.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn observation_cursor_freezes_item_versions_across_pages() {
+    let (home, store, thread_id) = store_with_mode(ThreadHistoryMode::Paginated).await;
+    write_rollout_with_end(&rollout_path(home.path(), thread_id), thread_id, None, 40);
+    let db = history_db(&store).await;
+    insert_item(db, thread_id, "turn-1", "agent-1", 10).await;
+    insert_item(db, thread_id, "turn-1", "user-1", 20).await;
+    for query in [
+        "UPDATE thread_items SET is_complete = 0 WHERE item_id = 'agent-1'",
+        "UPDATE thread_item_versions SET is_complete = 0 WHERE item_id = 'agent-1'",
+    ] {
+        sqlx::query(query)
+            .execute(db)
+            .await
+            .expect("unfinished baseline");
+    }
+    let cursors = observation_cursors(&store, thread_id)
+        .await
+        .expect("checkpoint");
+    let first = store
+        .list_items(item_params(
+            thread_id,
+            None,
+            cursors.items,
+            1,
+            SortDirection::Desc,
+        ))
+        .await
+        .expect("first checkpoint page");
+    assert_eq!(
+        first
+            .items
+            .iter()
+            .map(|item| item.item_id.as_str())
+            .collect::<Vec<_>>(),
+        ["user-1"]
+    );
+
+    // The writer commits completion and a new item between page requests.
+    sqlx::query("UPDATE thread_items SET is_complete = 1, updated_at_ordinal = 41 WHERE item_id = 'agent-1'")
+        .execute(db).await.expect("complete after checkpoint");
+    sqlx::query("INSERT INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, completed_at_ms) SELECT thread_id, turn_id, item_id, updated_at_ordinal, item_json, is_complete, completed_at_ms FROM thread_items WHERE item_id = 'agent-1'")
+        .execute(db).await.expect("completion version");
+    insert_item(db, thread_id, "turn-2", "agent-2", 42).await;
+    let second = store
+        .list_items(item_params(
+            thread_id,
+            None,
+            first.next_cursor,
+            1,
+            SortDirection::Desc,
+        ))
+        .await
+        .expect("second checkpoint page");
+    assert_eq!(second.items.len(), 1);
+    assert_eq!(
+        second.items[0],
+        StoredThreadItem {
+            is_complete: false,
+            ..expected_item("turn-1", "agent-1", 10)
+        }
+    );
+    let reverse = store
+        .list_items(item_params(
+            thread_id,
+            None,
+            second.backwards_cursor,
+            20,
+            SortDirection::Asc,
+        ))
+        .await
+        .expect("reversed checkpoint page");
+    assert_eq!(
+        reverse
+            .items
+            .iter()
+            .map(|item| item.item_id.as_str())
+            .collect::<Vec<_>>(),
+        ["agent-1", "user-1"]
+    );
+    assert!(!reverse.items[0].is_complete);
+    let fresh = store
+        .list_items(item_params(thread_id, None, None, 20, SortDirection::Asc))
+        .await
+        .expect("ordinary reads stay live");
+    assert!(fresh.items[0].is_complete);
+    assert_eq!(fresh.items[0].started_at_ordinal, 10);
+    assert_eq!(fresh.items[0].updated_at_ordinal, 41);
+    assert_eq!(fresh.items.len(), 3);
+}
+
+#[tokio::test]
 async fn list_turns_pages_projected_rows_and_applies_item_views() {
     let (_home, store, thread_id) = store_with_mode(ThreadHistoryMode::Paginated).await;
     let db = history_db(&store).await;
@@ -1056,6 +1242,7 @@ async fn lineage_reads_page_across_parent_and_child_segments() {
     assert_eq!(child_occurrences.next_cursor, None);
 
     let gap_cursor = serde_json::to_string(&HistoryCursor {
+        boundary: None,
         requested_thread_id: child_id,
         rollout_ordinal: 6,
         include_anchor: true,

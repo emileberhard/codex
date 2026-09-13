@@ -345,6 +345,19 @@ pub trait ThreadStore: Any + Send + Sync {
         })
     }
 
+    /// Captures native history cursors without loading or changing a runtime.
+    /// Item pages retain their lifecycle versions at the captured boundary.
+    fn observation_cursors(
+        &self,
+        _thread_id: ThreadId,
+    ) -> ThreadStoreFuture<'_, crate::ThreadObservationCursors> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "thread/subscribe",
+            })
+        })
+    }
+
     /// Lists turns within a stored thread.
     fn list_turns(&self, _params: ListTurnsParams) -> ThreadStoreFuture<'_, TurnPage> {
         Box::pin(async {

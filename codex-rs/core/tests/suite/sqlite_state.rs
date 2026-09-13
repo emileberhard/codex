@@ -452,6 +452,7 @@ async fn backfill_scans_existing_rollouts() -> Result<()> {
                     timestamp: "2026-01-27T12:00:01Z".to_string(),
                     ordinal: None,
                     item: RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                        source_item: None,
                         client_id: None,
                         message: "hello from backfill".to_string(),
                         images: None,

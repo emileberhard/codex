@@ -2307,6 +2307,7 @@ mod tests {
         let created_at = Utc::now();
         let history_items = vec![
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "before rollback".to_string(),
                 images: None,
@@ -2315,6 +2316,7 @@ mod tests {
                 ..Default::default()
             })),
             RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "after rollback".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -2657,7 +2659,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
         let completion_item = command_execution_completion_item("printf hi");
@@ -2735,7 +2740,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
         let completion_item = command_execution_completion_item("printf hi");
@@ -2836,7 +2844,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             Arc::clone(&outgoing_sender),
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             conversation_id,
         );
         let thread_state = new_thread_state();
@@ -3295,6 +3306,7 @@ mod tests {
             state.track_current_turn_event(
                 "turn-1",
                 &EventMsg::UserMessage(codex_protocol::protocol::UserMessageEvent {
+                    source_item: None,
                     client_id: None,
                     message: "already tracked".to_string(),
                     images: None,
@@ -3312,7 +3324,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             conversation_id,
         );
 
@@ -3431,7 +3446,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             conversation_id,
         );
 
@@ -3519,7 +3537,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             Arc::clone(&outgoing_sender),
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             conversation_id,
         );
         let thread_state = new_thread_state();
@@ -3622,7 +3643,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
         let thread_state = new_thread_state();
@@ -3739,7 +3763,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
 
@@ -3790,7 +3817,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
 
@@ -3835,7 +3865,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
         let update = UpdatePlanArgs {
@@ -3885,7 +3918,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
 
@@ -3979,7 +4015,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
 
@@ -4015,7 +4054,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
 
@@ -4136,7 +4178,10 @@ mod tests {
         ));
         let outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing,
-            vec![ConnectionId(1)],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![ConnectionId(1)],
+                notifications: vec![ConnectionId(1)],
+            },
             ThreadId::new(),
         );
         let unified_diff = "--- a\n+++ b\n".to_string();

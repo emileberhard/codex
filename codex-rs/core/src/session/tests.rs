@@ -3803,6 +3803,7 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(
             codex_protocol::protocol::UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "forked seed".to_string(),
                 images: None,
@@ -4010,6 +4011,7 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(
             codex_protocol::protocol::UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "turn 1 user".to_string(),
                 images: None,
@@ -4041,6 +4043,7 @@ async fn thread_rollback_recomputes_previous_turn_settings_and_reference_context
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(
             codex_protocol::protocol::UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "turn 2 user".to_string(),
                 images: None,
@@ -4133,6 +4136,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "turn 1 user".to_string(),
             images: None,
@@ -4198,6 +4202,7 @@ async fn thread_rollback_restores_cleared_reference_context_item_after_compactio
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "turn 2 user".to_string(),
             images: None,
@@ -4281,6 +4286,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "turn 1 user".to_string(),
             images: None,
@@ -4310,6 +4316,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "turn 2 user".to_string(),
             images: None,
@@ -4339,6 +4346,7 @@ async fn thread_rollback_persists_marker_and_replays_cumulatively() {
             },
         )),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "turn 3 user".to_string(),
             images: None,
@@ -10797,6 +10805,7 @@ async fn record_context_updates_and_set_reference_context_item_persists_full_rei
     session
         .persist_rollout_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "seed rollout".to_string(),
                 images: None,
@@ -11780,7 +11789,7 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
         .expect("channel open");
     assert!(matches!(
         fourth.msg,
-        EventMsg::UserMessage(UserMessageEvent {
+        EventMsg::UserMessage(UserMessageEvent { source_item: None,
                 client_id: None,
             message,
             images,

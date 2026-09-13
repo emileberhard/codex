@@ -149,6 +149,7 @@ fn compress_rollout(path: &Path) -> PathBuf {
 
 fn user_message(text: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+        source_item: None,
         message: text.to_string(),
         ..UserMessageEvent::default()
     }))
@@ -156,6 +157,7 @@ fn user_message(text: &str) -> RolloutItem {
 
 fn agent_message(text: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+        source_item: None,
         message: text.to_string(),
         phase: None,
         memory_citation: None,

@@ -799,6 +799,7 @@ mod tests {
 
     fn user_message(message: &str) -> UserMessageEvent {
         UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: message.to_string(),
             images: None,

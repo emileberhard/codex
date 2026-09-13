@@ -1179,6 +1179,16 @@ impl MessageProcessor {
                     )
                     .await
             }
+            ClientRequest::ThreadSubscribe { params, .. } => {
+                self.thread_processor
+                    .thread_subscribe(request_id.clone(), params)
+                    .await
+            }
+            ClientRequest::ThreadSubscriptionClose { params, .. } => {
+                self.thread_processor
+                    .thread_subscription_close(&request_id, params)
+                    .await
+            }
             ClientRequest::ThreadUnsubscribe { params, .. } => {
                 let thread_id = params.thread_id.clone();
                 let response = self

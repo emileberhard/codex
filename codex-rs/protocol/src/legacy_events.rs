@@ -79,6 +79,11 @@ impl UserMessageItem {
         // Legacy user-message events flatten only text inputs into `message` and
         // rebase text element ranges onto that concatenated text.
         UserMessageEvent {
+            source_item: Some(crate::protocol::LegacyItemSource {
+                id: self.id.clone(),
+                index: 0,
+                last: true,
+            }),
             client_id: self.client_id.clone(),
             message: self.message(),
             images: Some(self.image_urls()),
@@ -100,8 +105,14 @@ impl AgentMessageItem {
     pub fn as_legacy_events(&self) -> Vec<EventMsg> {
         self.content
             .iter()
-            .map(|c| match c {
+            .enumerate()
+            .map(|(index, c)| match c {
                 AgentMessageContent::Text { text } => EventMsg::AgentMessage(AgentMessageEvent {
+                    source_item: Some(crate::protocol::LegacyItemSource {
+                        id: self.id.clone(),
+                        index,
+                        last: index + 1 == self.content.len(),
+                    }),
                     message: text.clone(),
                     phase: self.phase.clone(),
                     memory_citation: self.memory_citation.clone(),
@@ -137,16 +148,27 @@ impl ExitedReviewModeItem {
 impl ReasoningItem {
     pub fn as_legacy_events(&self, show_raw_agent_reasoning: bool) -> Vec<EventMsg> {
         let mut events = Vec::new();
-        for summary in &self.summary_text {
+        for (index, summary) in self.summary_text.iter().enumerate() {
             events.push(EventMsg::AgentReasoning(AgentReasoningEvent {
+                source_item: Some(crate::protocol::LegacyItemSource {
+                    id: self.id.clone(),
+                    index,
+                    last: index + 1 == self.summary_text.len()
+                        && (!show_raw_agent_reasoning || self.raw_content.is_empty()),
+                }),
                 text: summary.clone(),
             }));
         }
 
         if show_raw_agent_reasoning {
-            for entry in &self.raw_content {
+            for (index, entry) in self.raw_content.iter().enumerate() {
                 events.push(EventMsg::AgentReasoningRawContent(
                     AgentReasoningRawContentEvent {
+                        source_item: Some(crate::protocol::LegacyItemSource {
+                            id: self.id.clone(),
+                            index,
+                            last: index + 1 == self.raw_content.len(),
+                        }),
                         text: entry.clone(),
                     },
                 ));

@@ -1111,6 +1111,7 @@ async fn thread_fork_can_cut_before_unfinished_stored_turn() -> Result<()> {
     append_rollout_item_to_path(
         &source_path,
         &RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             message: "Unfinished user message".to_string(),
             ..Default::default()
         })),

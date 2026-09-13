@@ -2141,6 +2141,19 @@ impl Session {
                 .analytics_events_client
                 .track_guardian_session_event(self.thread_id, &event);
         }
+        let legacy_events = legacy_source.as_legacy_events(self.show_raw_agent_reasoning());
+        let legacy_persisted = turn_context.history_mode == ThreadHistoryMode::Legacy
+            && matches!(legacy_source, EventMsg::ItemCompleted(_));
+        if legacy_persisted {
+            // The legacy representation is the durable completion. Commit the whole
+            // mirror batch before the canonical completion can reach a listener.
+            let records = legacy_events
+                .iter()
+                .cloned()
+                .map(RolloutItem::EventMsg)
+                .collect::<Vec<_>>();
+            self.persist_rollout_items(&records).await;
+        }
         self.send_event_raw(event).await;
         self.maybe_notify_parent_of_terminal_turn(turn_context, &legacy_source)
             .await;
@@ -2149,8 +2162,7 @@ impl Session {
         self.maybe_clear_realtime_handoff_for_event(&legacy_source)
             .await;
 
-        let show_raw_agent_reasoning = self.show_raw_agent_reasoning();
-        for legacy in legacy_source.as_legacy_events(show_raw_agent_reasoning) {
+        for legacy in legacy_events {
             self.services
                 .rollout_thread_trace
                 .record_tool_call_event(turn_context.sub_id.clone(), &legacy);
@@ -2158,7 +2170,8 @@ impl Session {
                 id: turn_context.sub_id.clone(),
                 msg: legacy,
             };
-            self.send_event_raw(legacy_event).await;
+            self.send_event_raw_with_persistence(legacy_event, !legacy_persisted)
+                .await;
         }
     }
 

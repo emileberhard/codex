@@ -281,7 +281,8 @@ async fn websocket_transport_rejects_missing_and_invalid_capability_tokens() -> 
     ];
 
     let (mut process, bind_addr) =
-        spawn_websocket_server_with_args(codex_home.path(), "ws://0.0.0.0:0", &auth_args).await?;
+        spawn_websocket_server_with_args(codex_home.path(), "ws://0.0.0.0:0", &auth_args, &[])
+            .await?;
 
     assert_websocket_connect_rejected(bind_addr, /*bearer_token*/ None).await?;
     assert_websocket_connect_rejected(bind_addr, Some("wrong-token")).await?;
@@ -320,7 +321,8 @@ async fn websocket_transport_verifies_signed_short_lived_bearer_tokens() -> Resu
     ];
 
     let (mut process, bind_addr) =
-        spawn_websocket_server_with_args(codex_home.path(), "ws://127.0.0.1:0", &auth_args).await?;
+        spawn_websocket_server_with_args(codex_home.path(), "ws://127.0.0.1:0", &auth_args, &[])
+            .await?;
     let expired_token = signed_bearer_token(
         shared_secret.as_bytes(),
         json!({
@@ -482,13 +484,14 @@ async fn websocket_disconnect_keeps_last_subscribed_thread_loaded_until_idle_tim
 }
 
 pub(super) async fn spawn_websocket_server(codex_home: &Path) -> Result<(Child, SocketAddr)> {
-    spawn_websocket_server_with_args(codex_home, "ws://127.0.0.1:0", &[]).await
+    spawn_websocket_server_with_args(codex_home, "ws://127.0.0.1:0", &[], &[]).await
 }
 
 pub(super) async fn spawn_websocket_server_with_args(
     codex_home: &Path,
     listen_url: &str,
     extra_args: &[String],
+    environment: &[(&str, &str)],
 ) -> Result<(Child, SocketAddr)> {
     let program = codex_utils_cargo_bin::cargo_bin("codex-app-server")
         .context("should find app-server binary")?;
@@ -501,7 +504,8 @@ pub(super) async fn spawn_websocket_server_with_args(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .env("CODEX_HOME", codex_home)
-        .env("RUST_LOG", "warn");
+        .env("RUST_LOG", "warn")
+        .envs(environment.iter().copied());
     let mut process = cmd
         .kill_on_drop(true)
         .spawn()

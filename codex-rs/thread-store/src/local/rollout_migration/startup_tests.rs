@@ -50,6 +50,7 @@ fn write_rollout(home: &Path, thread_id: ThreadId, history_mode: ThreadHistoryMo
             git: None,
         }),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             message: "question".to_string(),
             ..UserMessageEvent::default()
         })),

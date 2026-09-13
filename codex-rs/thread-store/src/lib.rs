@@ -94,6 +94,7 @@ pub use types::StoredTurnError;
 pub use types::StoredTurnItemsView;
 pub use types::StoredTurnStatus;
 pub use types::ThreadMetadataPatch;
+pub use types::ThreadObservationCursors;
 pub use types::ThreadOccurrenceSearchPage;
 pub use types::ThreadPage;
 pub use types::ThreadPersistenceMetadata;
@@ -103,3 +104,10 @@ pub use types::ThreadSortKey;
 pub use types::TimelinePage;
 pub use types::TurnPage;
 pub use types::UpdateThreadMetadataParams;
+
+/// Whether a native history cursor carries a frozen observation boundary.
+pub fn is_observation_cursor(cursor: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(cursor)
+        .ok()
+        .is_some_and(|value| value.get("boundary").is_some_and(|value| !value.is_null()))
+}

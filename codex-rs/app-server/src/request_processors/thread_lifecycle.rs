@@ -332,6 +332,10 @@ pub(super) async fn ensure_listener_task_running(
                         thread_state.track_current_turn_event(&event.id, &event.msg);
                         thread_state.experimental_raw_events
                     };
+                    #[cfg(debug_assertions)]
+                    if matches!(&event.msg, EventMsg::AgentMessageContentDelta(delta) if delta.item_id == "observation-barrier" && delta.delta == "before ") {
+                        crate::thread_observation::test_barrier("listener", conversation_id).await;
+                    }
                     if matches!(
                         &event.msg,
                         EventMsg::RawResponseItem(_) | EventMsg::RawResponseCompleted(_)
@@ -340,7 +344,7 @@ pub(super) async fn ensure_listener_task_running(
                         continue;
                     }
                     let subscribed_connection_ids = thread_state_manager
-                        .subscribed_connection_ids(conversation_id)
+                        .recipients(conversation_id)
                         .await;
                     let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
                         outgoing_for_task.clone(),
@@ -491,6 +495,24 @@ pub(super) async fn handle_thread_listener_command(
     listener_command: ThreadListenerCommand,
 ) {
     match listener_command {
+        ThreadListenerCommand::SendThreadSubscribeResponse {
+            request_id,
+            thread,
+            store,
+        } => {
+            super::thread_observation::send_subscribe_response(
+                conversation_id,
+                conversation,
+                thread_state_manager,
+                thread_state,
+                outgoing,
+                pending_thread_unloads,
+                request_id,
+                *thread,
+                store.as_ref(),
+            )
+            .await;
+        }
         ThreadListenerCommand::SendThreadResumeResponse(resume_request) => {
             handle_pending_thread_resume_request(
                 conversation_id,
@@ -517,9 +539,7 @@ pub(super) async fn handle_thread_listener_command(
                 .await;
         }
         ThreadListenerCommand::EmitThreadQueueChanged => {
-            let subscribed_connection_ids = thread_state_manager
-                .subscribed_connection_ids(conversation_id)
-                .await;
+            let subscribed_connection_ids = thread_state_manager.recipients(conversation_id).await;
             let outgoing = ThreadScopedOutgoingMessageSender::new(
                 Arc::clone(outgoing),
                 subscribed_connection_ids,
@@ -855,9 +875,7 @@ pub(super) async fn resolve_pending_server_request(
     request_id: RequestId,
 ) {
     let thread_id = conversation_id.to_string();
-    let subscribed_connection_ids = thread_state_manager
-        .subscribed_connection_ids(conversation_id)
-        .await;
+    let subscribed_connection_ids = thread_state_manager.recipients(conversation_id).await;
     let outgoing = ThreadScopedOutgoingMessageSender::new(
         outgoing.clone(),
         subscribed_connection_ids,

@@ -166,6 +166,7 @@ mod tests {
     fn token_usage_history() -> Vec<RolloutItem> {
         vec![
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "first turn".to_string(),
                 images: None,
@@ -174,6 +175,7 @@ mod tests {
                 ..Default::default()
             })),
             RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+                source_item: None,
                 message: "first answer".to_string(),
                 phase: None,
                 memory_citation: None,
@@ -185,6 +187,7 @@ mod tests {
                 rate_limits: None,
             })),
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "second turn".to_string(),
                 images: None,

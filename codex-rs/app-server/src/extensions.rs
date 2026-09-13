@@ -150,9 +150,7 @@ pub(crate) async fn send_thread_warning(
     thread_id: ThreadId,
     message: String,
 ) {
-    let subscribed_connection_ids = thread_state_manager
-        .subscribed_connection_ids(thread_id)
-        .await;
+    let subscribed_connection_ids = thread_state_manager.recipients(thread_id).await;
     let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
         Arc::clone(outgoing),
         subscribed_connection_ids,
@@ -194,9 +192,8 @@ impl ExtensionEventSink for AppServerExtensionEventSink {
                 let outgoing = Arc::clone(&self.outgoing);
                 let thread_state_manager = self.thread_state_manager.clone();
                 tokio::spawn(async move {
-                    let subscribed_connection_ids = thread_state_manager
-                        .subscribed_connection_ids(thread_id)
-                        .await;
+                    let subscribed_connection_ids =
+                        thread_state_manager.recipients(thread_id).await;
                     let outgoing = ThreadScopedOutgoingMessageSender::new(
                         outgoing,
                         subscribed_connection_ids,

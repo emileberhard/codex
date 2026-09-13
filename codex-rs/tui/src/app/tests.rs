@@ -7300,6 +7300,7 @@ async fn prompt_edit_forks_before_selected_prompt_and_preserves_source() -> Resu
                 collaboration_mode_kind: ModeKind::default(),
             })),
             RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 message: message.to_string(),
                 images,
                 local_images,

@@ -31,6 +31,7 @@ fn preview_line(speaker: TranscriptPreviewSpeaker, text: &str) -> TranscriptPrev
 
 fn rollout_user_message(text: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+        source_item: None,
         message: text.to_string(),
         ..Default::default()
     }))
@@ -38,6 +39,7 @@ fn rollout_user_message(text: &str) -> RolloutItem {
 
 fn rollout_agent_message(text: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+        source_item: None,
         message: text.to_string(),
         phase: None,
         memory_citation: None,

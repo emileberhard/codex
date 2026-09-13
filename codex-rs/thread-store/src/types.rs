@@ -407,6 +407,13 @@ pub struct StoredTurnError {
     pub additional_details: Option<String>,
 }
 
+/// Opaque, read-only cursors bounded to one durable history prefix.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ThreadObservationCursors {
+    pub turns: Option<String>,
+    pub items: Option<String>,
+}
+
 /// Parameters for listing turns within a stored thread.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListTurnsParams {
@@ -448,6 +455,9 @@ pub struct StoredTurn {
 /// A page of stored turns.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnPage {
+    /// A checkpoint page must not be normalized against current runtime activity.
+    #[serde(default)]
+    pub is_observation_snapshot: bool,
     /// Turns returned for this page.
     pub turns: Vec<StoredTurn>,
     /// Opaque cursor to continue listing.

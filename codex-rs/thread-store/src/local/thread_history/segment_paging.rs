@@ -1,4 +1,5 @@
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::HistoryPosition;
 use sqlx::FromRow;
 use sqlx::QueryBuilder;
 use sqlx::Sqlite;
@@ -51,6 +52,8 @@ pub(super) async fn page_turn_rows(
     items_view: StoredTurnItemsView,
 ) -> ThreadStoreResult<SegmentPage<StoredTurnRow>> {
     let cursor = parse_cursor(cursor, requested_thread_id, CursorScope::Turns)?;
+    let bounded = bounded_lineage(lineage, cursor.as_ref())?;
+    let lineage = &bounded;
     let mut rows = Vec::new();
     for (segment_index, segment, segment_cursor) in
         segments_from_cursor(lineage, direction, cursor.as_ref())?
@@ -59,9 +62,19 @@ pub(super) async fn page_turn_rows(
         if remaining == 0 {
             break;
         }
-        let mut query = QueryBuilder::<Sqlite>::new("");
+        let mut query = QueryBuilder::<Sqlite>::new("WITH observation_turns AS (");
+        if let Some(boundary) = cursor.as_ref().and_then(|cursor| cursor.boundary)
+            && segment.rollout_id() == boundary.thread_id
+        {
+            query.push("SELECT t.thread_id, t.turn_id, t.rollout_ordinal, v.status, v.error_json, v.started_at, v.completed_at, v.duration_ms, v.first_user_item_id, v.final_agent_item_id FROM thread_turns t JOIN thread_turn_versions v ON v.thread_id = t.thread_id AND v.turn_id = t.turn_id WHERE v.version_ordinal = (SELECT MAX(prior.version_ordinal) FROM thread_turn_versions prior WHERE prior.thread_id = t.thread_id AND prior.turn_id = t.turn_id AND prior.version_ordinal < ")
+                .push_bind(sqlite_integer(boundary.end_ordinal_exclusive)?)
+                .push(")");
+        } else {
+            query.push("SELECT * FROM thread_turns");
+        }
+        query.push(") ");
         if matches!(items_view, StoredTurnItemsView::Summary) {
-            query.push("WITH visible_items AS (");
+            query.push(", visible_items AS (");
             push_visible_items(&mut query, segment)?;
             query.push("), ");
         }
@@ -78,7 +91,7 @@ SELECT
     duration_ms,
     first_user_item_id,
     final_agent_item_id
-FROM thread_turns
+FROM observation_turns AS thread_turns
 WHERE thread_id =
             "#
         } else {
@@ -93,7 +106,7 @@ SELECT
     duration_ms,
     first_user_item_id,
     final_agent_item_id
-FROM thread_turns
+FROM observation_turns AS thread_turns
 WHERE thread_id =
             "#
         });
@@ -173,7 +186,13 @@ LEFT JOIN visible_items AS final_agent
                 .collect::<ThreadStoreResult<Vec<_>>>()?,
         );
     }
-    finish_page(requested_thread_id, CursorScope::Turns, rows, page_size)
+    finish_page(
+        requested_thread_id,
+        CursorScope::Turns,
+        rows,
+        page_size,
+        cursor.as_ref().and_then(|cursor| cursor.boundary),
+    )
 }
 
 fn push_summary_item_join(
@@ -243,6 +262,8 @@ pub(super) async fn page_item_rows(
         params.thread_id,
         CursorScope::ItemsByFirstProjectionV2,
     )?;
+    let bounded = bounded_lineage(lineage, cursor.as_ref())?;
+    let lineage = &bounded;
     let mut rows = Vec::new();
     for (_, segment, segment_cursor) in
         segments_from_cursor(lineage, params.sort_direction, cursor.as_ref())?
@@ -287,6 +308,7 @@ pub(super) async fn page_item_rows(
         CursorScope::ItemsByFirstProjectionV2,
         rows,
         params.page_size,
+        cursor.as_ref().and_then(|cursor| cursor.boundary),
     )
 }
 
@@ -319,6 +341,9 @@ WHERE thread_id =
         query.push(" AND turn_id = ").push_bind(turn_id);
     }
     if let Some(cursor) = cursor {
+        if cursor.boundary.is_some() {
+            return Err(invalid_cursor("bounded update-order cursor"));
+        }
         let comparator = match (params.sort_direction, cursor.include_anchor) {
             (SortDirection::Asc, true) => ">=",
             (SortDirection::Asc, false) => ">",
@@ -353,7 +378,27 @@ WHERE thread_id =
         CursorScope::ItemsByUpdatedAtOrdinal,
         rows,
         params.page_size,
+        None,
     )
+}
+
+fn bounded_lineage(
+    lineage: &RolloutLineage,
+    cursor: Option<&HistoryCursor>,
+) -> ThreadStoreResult<RolloutLineage> {
+    let mut bounded = lineage.clone();
+    if let Some(boundary) = cursor.and_then(|cursor| cursor.boundary) {
+        let segment = bounded
+            .segments
+            .last_mut()
+            .filter(|segment| segment.rollout_id() == boundary.thread_id)
+            .ok_or_else(|| invalid_cursor("observation history was replaced"))?;
+        if boundary.end_ordinal_exclusive < segment.start_ordinal() {
+            return Err(invalid_cursor("observation boundary outside lineage"));
+        }
+        segment.end = Some(boundary);
+    }
+    Ok(bounded)
 }
 
 fn segments_from_cursor<'a>(
@@ -470,6 +515,7 @@ fn finish_page<T: HasPosition>(
     scope: CursorScope,
     mut rows: Vec<T>,
     page_size: usize,
+    boundary: Option<HistoryPosition>,
 ) -> ThreadStoreResult<SegmentPage<T>> {
     let has_more = rows.len() > page_size;
     rows.truncate(page_size);
@@ -498,10 +544,20 @@ fn finish_page<T: HasPosition>(
     } else {
         None
     };
+    let preserve_boundary = |cursor: Option<String>| -> ThreadStoreResult<Option<String>> {
+        cursor
+            .map(|cursor| {
+                let mut cursor: HistoryCursor =
+                    serde_json::from_str(&cursor).map_err(thread_history_error)?;
+                cursor.boundary = boundary;
+                serde_json::to_string(&cursor).map_err(thread_history_error)
+            })
+            .transpose()
+    };
     Ok(SegmentPage {
         rows,
-        next_cursor,
-        backwards_cursor,
+        next_cursor: preserve_boundary(next_cursor)?,
+        backwards_cursor: preserve_boundary(backwards_cursor)?,
     })
 }
 

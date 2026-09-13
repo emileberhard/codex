@@ -63,6 +63,67 @@ use crate::ThreadSortKey;
 use crate::ThreadStore;
 
 #[tokio::test]
+async fn observation_checkpoint_survives_canonical_projection_rebuild() {
+    let home = TempDir::new().unwrap();
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .unwrap();
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![turn_started("turn-1")],
+        })
+        .await
+        .unwrap();
+    let checkpoint = store.observation_cursors(thread_id).await.unwrap();
+    let params = ListTurnsParams {
+        thread_id,
+        include_archived: false,
+        cursor: checkpoint.turns,
+        page_size: 10,
+        sort_direction: SortDirection::Desc,
+        items_view: StoredTurnItemsView::Summary,
+    };
+    let before = store.list_turns(params.clone()).await.unwrap();
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![
+                completed_item(
+                    thread_id,
+                    "turn-1",
+                    agent_message("answer", MessagePhase::FinalAnswer),
+                ),
+                turn_completed("turn-1"),
+            ],
+        })
+        .await
+        .unwrap();
+    let after = store.list_turns(params.clone()).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&before).unwrap(),
+        serde_json::to_value(&after).unwrap()
+    );
+    assert_eq!(before.turns[0].status, StoredTurnStatus::InProgress);
+    assert!(before.turns[0].items.is_empty());
+    // Rebuild the projection from the complete canonical rollout in one transaction.
+    super::super::thread_history::delete_thread(&store, thread_id)
+        .await
+        .unwrap();
+    let rebuilt = store.list_turns(params).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&rebuilt).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    store.shutdown_thread(thread_id).await.unwrap();
+}
+
+#[tokio::test]
 async fn paginated_history_without_state_db_does_not_initialize_sqlite() {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());
@@ -137,6 +198,7 @@ async fn split_homes_support_backfill_listing_and_paginated_history() {
     recorder
         .record_canonical_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_item: None,
                 message: "existing thread".to_string(),
                 ..Default::default()
             },
@@ -3027,3 +3089,147 @@ fn append_suffix(rollout_path: &std::path::Path, suffix: &str) {
 
 #[path = "item_lifecycle_tests.rs"]
 mod item_lifecycle;
+
+async fn create_legacy_thread(store: &LocalThreadStore, thread_id: ThreadId) {
+    store
+        .create_thread(CreateThreadParams {
+            session_id: thread_id.into(),
+            thread_id,
+            extra_config: None,
+            forked_from_id: None,
+            parent_thread_id: None,
+            source: SessionSource::Exec,
+            thread_source: None,
+            originator: "test_originator".to_string(),
+            base_instructions: BaseInstructions::default(),
+            dynamic_tools: Vec::new(),
+            selected_capability_roots: Vec::new(),
+            multi_agent_version: None,
+            history_mode: ThreadHistoryMode::Legacy,
+            history_base: None,
+            subagent_history_start_ordinal: None,
+            initial_window_id: "window-1".to_string(),
+            metadata: ThreadPersistenceMetadata {
+                cwd: Some(std::env::current_dir().expect("cwd")),
+                model_provider: "test-provider".to_string(),
+                memory_mode: ThreadMemoryMode::Enabled,
+            },
+        })
+        .await
+        .expect("create paginated thread");
+}
+
+#[tokio::test]
+async fn legacy_projection_sqlite_checkpoint_reopens_and_preserves_frozen_source_identity() {
+    let home = TempDir::new().unwrap();
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_legacy_thread(&store, thread_id).await;
+    let path = store.live_rollout_path(thread_id).await.unwrap();
+    let mut metadata = codex_state::ThreadMetadataBuilder::new(
+        thread_id,
+        path.clone(),
+        Utc::now(),
+        SessionSource::Exec,
+    );
+    metadata.history_mode = ThreadHistoryMode::Legacy;
+    store
+        .state_db
+        .as_ref()
+        .unwrap()
+        .upsert_thread(&metadata.build(store.config.default_model_provider_id.as_str()))
+        .await
+        .unwrap();
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .unwrap();
+    let message = |text: &str, index, last| {
+        RolloutItem::EventMsg(EventMsg::AgentMessage(
+            codex_protocol::protocol::AgentMessageEvent {
+                source_item: Some(codex_protocol::protocol::LegacyItemSource {
+                    id: "canonical-answer".into(),
+                    index,
+                    last,
+                }),
+                message: text.into(),
+                phase: None,
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            },
+        ))
+    };
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![turn_started("legacy-turn"), message("first", 0, false)],
+        })
+        .await
+        .unwrap();
+    let cursors = store.observation_cursors(thread_id).await.unwrap();
+    let params = ListTurnsParams {
+        thread_id,
+        include_archived: false,
+        cursor: cursors.turns,
+        page_size: 10,
+        sort_direction: SortDirection::Desc,
+        items_view: StoredTurnItemsView::Summary,
+    };
+    let before = store.list_turns(params.clone()).await.unwrap();
+    let item_params = crate::ListItemsParams {
+        item_id: None,
+        thread_id,
+        turn_id: None,
+        include_archived: false,
+        cursor: cursors.items,
+        page_size: 10,
+        sort_direction: SortDirection::Desc,
+        sort_key: crate::ItemSortKey::CreatedAtOrdinal,
+        after_updated_at_ordinal: None,
+    };
+    let before_items = store.list_items(item_params.clone()).await.unwrap();
+    assert_eq!(before_items.items[0].item_id, "canonical-answer");
+    assert!(!before_items.items[0].is_complete);
+    let checkpoint = super::super::thread_history::projection_state(&store, thread_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(checkpoint.legacy_state_json.unwrap().len() < 20_000);
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![message(" second", 1, true), turn_completed("legacy-turn")],
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(store.list_turns(params.clone()).await.unwrap()).unwrap(),
+        serde_json::to_value(&before).unwrap()
+    );
+    store.shutdown_thread(thread_id).await.unwrap();
+    drop(store);
+    let store = projection_store(home.path()).await;
+    let after = store
+        .list_items(crate::ListItemsParams {
+            cursor: None,
+            ..item_params.clone()
+        })
+        .await
+        .unwrap();
+    let ThreadItem::AgentMessage { id, text, .. } =
+        serde_json::from_slice::<ThreadItem>(&after.items[0].item_json).unwrap()
+    else {
+        panic!("expected canonical message")
+    };
+    assert_eq!(id, "canonical-answer");
+    assert_eq!(text, "first second");
+    assert_eq!(
+        serde_json::to_value(store.list_items(item_params).await.unwrap()).unwrap(),
+        serde_json::to_value(before_items).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(store.list_turns(params).await.unwrap()).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+}

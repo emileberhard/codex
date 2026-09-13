@@ -2602,8 +2602,19 @@ impl fmt::Display for FinalOutput {
     }
 }
 
+/// Exact source item and section that produced a legacy event. Absent in older rollouts.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+pub struct LegacyItemSource {
+    pub id: String,
+    pub index: usize,
+    pub last: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct AgentMessageEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_item: Option<LegacyItemSource>,
     pub message: String,
     #[serde(default)]
     pub phase: Option<MessagePhase>,
@@ -2619,6 +2630,9 @@ pub struct AgentMessageEvent {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct UserMessageEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_item: Option<LegacyItemSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
     pub message: String,
@@ -2677,11 +2691,17 @@ pub fn user_message_preview(user: &UserMessageEvent) -> Option<String> {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct AgentReasoningEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_item: Option<LegacyItemSource>,
     pub text: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct AgentReasoningRawContentEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_item: Option<LegacyItemSource>,
     pub text: String,
 }
 
@@ -5971,6 +5991,7 @@ mod tests {
     #[test]
     fn user_message_event_serializes_empty_metadata_vectors() -> Result<()> {
         let event = UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "hello".to_string(),
             images: None,
@@ -6068,6 +6089,7 @@ mod tests {
     #[test]
     fn audio_only_user_message_has_placeholder_preview() {
         let event = UserMessageEvent {
+            source_item: None,
             audio: Some(vec!["https://example.com/remote.mp3".to_string()]),
             ..Default::default()
         };

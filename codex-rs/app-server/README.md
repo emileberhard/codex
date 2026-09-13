@@ -2949,3 +2949,21 @@ For server-initiated request payloads, annotate the field the same way so schema
    ```bash
    just test -p codex-app-server-protocol
    ```
+
+### Passive thread observation
+
+`thread/subscribe` observes an already loaded thread without resuming it or taking
+execution ownership. It returns `notLoaded`, or a connection-scoped subscription
+ID and checkpoint. The listener sends the checkpoint acknowledgement before later
+notifications. Passive observers never receive approval or tool requests.
+`thread/subscription/close` releases that subscription idempotently; disconnect
+and thread unload also release it.
+
+The checkpoint contains frozen backwards cursors for `thread/turns/list` and
+`thread/items/list`, active-turn metadata, and listener-consumed `liveItems`.
+Completed history versions take precedence over unfinished live prefixes. Legacy
+rollouts use an incremental SQLite projection with a bounded resumable reducer;
+new legacy mirrors preserve canonical source item IDs. Observation never persists
+a fresh or ephemeral thread. Ephemeral checkpoints retain at most 200 items and
+4 MiB, and `historyUnavailable` reports eviction of older completed items. An
+unfinished prefix that exceeds capacity fails the subscription explicitly.

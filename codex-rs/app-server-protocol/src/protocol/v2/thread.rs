@@ -762,6 +762,55 @@ pub enum ThreadUnsubscribeStatus {
 }
 
 /// Parameters for `thread/increment_elicitation`.
+/// Observe an already loaded runtime without resuming or acquiring execution requests.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSubscribeParams {
+    pub thread_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(tag = "status", rename_all = "camelCase")]
+#[ts(tag = "status", rename_all = "camelCase", export_to = "v2/")]
+pub enum ThreadSubscribeResponse {
+    NotLoaded,
+    Subscribed {
+        #[serde(rename = "subscriptionId")]
+        #[ts(rename = "subscriptionId")]
+        subscription_id: String,
+        thread: Thread,
+        checkpoint: ThreadObservationCheckpoint,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadObservationCheckpoint {
+    /// Native descending cursors retain this checkpoint's history versions.
+    pub turns_backwards_cursor: Option<String>,
+    pub items_backwards_cursor: Option<String>,
+    /// Listener-consumed active turn metadata; items are provided by bounded pages.
+    pub active_turn: Option<Turn>,
+    /// Listener-consumed items unavailable from durable history, including unfinished text.
+    pub live_items: Vec<ThreadItemEntry>,
+    /// Older ephemeral items were evicted from the bounded listener cache.
+    pub history_unavailable: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSubscriptionCloseParams {
+    pub subscription_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSubscriptionCloseResponse {}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]

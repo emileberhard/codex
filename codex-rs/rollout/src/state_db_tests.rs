@@ -357,6 +357,7 @@ fn write_rollout_with_user_message(
             timestamp: "2026-06-01T14:26:26Z".to_string(),
             ordinal: None,
             item: RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+                source_item: None,
                 message: message.to_string(),
                 ..Default::default()
             })),

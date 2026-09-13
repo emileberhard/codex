@@ -500,6 +500,7 @@ export type { ThreadMetadataGitInfoUpdateParams } from "./ThreadMetadataGitInfoU
 export type { ThreadMetadataUpdateParams } from "./ThreadMetadataUpdateParams";
 export type { ThreadMetadataUpdateResponse } from "./ThreadMetadataUpdateResponse";
 export type { ThreadNameUpdatedNotification } from "./ThreadNameUpdatedNotification";
+export type { ThreadObservationCheckpoint } from "./ThreadObservationCheckpoint";
 export type { ThreadProjectUpdatedNotification } from "./ThreadProjectUpdatedNotification";
 export type { ThreadQueueChangedNotification } from "./ThreadQueueChangedNotification";
 export type { ThreadReadParams } from "./ThreadReadParams";

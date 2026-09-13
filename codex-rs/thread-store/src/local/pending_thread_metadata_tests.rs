@@ -287,6 +287,7 @@ fn create_thread_params(thread_id: ThreadId) -> CreateThreadParams {
 
 fn user_message_item(message: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+        source_item: None,
         client_id: None,
         message: message.to_string(),
         images: None,

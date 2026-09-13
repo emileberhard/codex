@@ -863,3 +863,72 @@ async fn repair_recency_migration_succeeds_while_another_connection_holds_writer
     pool.close().await;
     repair_result.expect("current migration history should not need the writer slot");
 }
+
+#[tokio::test]
+async fn observation_turn_versions_preserve_backfill_and_older_writers() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home).await.unwrap();
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |path| {
+        let _ = std::fs::remove_dir_all(path);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let older = Migrator {
+        migrations: Cow::Owned(
+            THREAD_HISTORY_MIGRATOR
+                .migrations
+                .iter()
+                .filter(|migration| migration.version < 8)
+                .cloned()
+                .collect(),
+        ),
+        ignore_missing: true,
+        locking: THREAD_HISTORY_MIGRATOR.locking,
+        table_name: THREAD_HISTORY_MIGRATOR.table_name.clone(),
+        create_schemas: THREAD_HISTORY_MIGRATOR.create_schemas.clone(),
+        no_tx: THREAD_HISTORY_MIGRATOR.no_tx,
+    };
+    let pool = sqlite.open_thread_history_db(&older, None).await.unwrap();
+    sqlx::query("INSERT INTO thread_turns (thread_id, turn_id, rollout_ordinal, status, started_at) VALUES ('thread', 'turn', 10, 'inProgress', 100)")
+        .execute(&pool).await.unwrap();
+    sqlx::query("INSERT INTO thread_history_projection_state VALUES ('thread', 1000, 40)")
+        .execute(&pool)
+        .await
+        .unwrap();
+    THREAD_HISTORY_MIGRATOR.run(&pool).await.unwrap();
+    // The actual runtime migrator permits rollback onto this newer schema.
+    older.run(&pool).await.unwrap();
+    sqlx::query(
+        "UPDATE thread_turns SET first_user_item_id = 'late-summary' WHERE thread_id = 'thread'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE thread_turns SET status = 'failed', rollout_end_ordinal = 50, completed_at = 105, duration_ms = 5000, error_json = '{\"message\":\"failed\"}' WHERE thread_id = 'thread'")
+        .execute(&pool).await.unwrap();
+    let versions = sqlx::query_as::<_, (i64, String, Option<String>, Option<i64>, Option<i64>, Option<String>)>(
+        "SELECT version_ordinal, status, first_user_item_id, completed_at, duration_ms, error_json FROM thread_turn_versions ORDER BY version_ordinal"
+    ).fetch_all(&pool).await.unwrap();
+    assert_eq!(
+        versions,
+        vec![
+            (39, "inProgress".into(), None, None, None, None),
+            (
+                40,
+                "inProgress".into(),
+                Some("late-summary".into()),
+                None,
+                None,
+                None
+            ),
+            (
+                50,
+                "failed".into(),
+                Some("late-summary".into()),
+                Some(105),
+                Some(5000),
+                Some("{\"message\":\"failed\"}".into())
+            ),
+        ]
+    );
+    pool.close().await;
+}

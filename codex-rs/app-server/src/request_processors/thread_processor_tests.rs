@@ -281,6 +281,7 @@ mod thread_processor_behavior_tests {
     fn thread_turns_list_merges_in_progress_active_turn_before_agent_status_running() {
         let persisted_items = vec![RolloutItem::EventMsg(EventMsg::UserMessage(
             codex_protocol::protocol::UserMessageEvent {
+                source_item: None,
                 client_id: None,
                 message: "persisted".to_string(),
                 images: None,
@@ -1076,7 +1077,10 @@ mod thread_processor_behavior_tests {
         ));
         let thread_outgoing = ThreadScopedOutgoingMessageSender::new(
             outgoing.clone(),
-            vec![connection_id],
+            crate::outgoing_message::ThreadRecipients {
+                requests: vec![connection_id],
+                notifications: vec![connection_id],
+            },
             thread_id,
         );
 

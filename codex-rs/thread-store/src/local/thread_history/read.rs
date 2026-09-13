@@ -1,4 +1,5 @@
 use codex_protocol::ThreadId;
+use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::ThreadHistoryMode;
 use serde::Deserialize;
 use serde::Serialize;
@@ -43,6 +44,8 @@ pub(super) struct HistoryCursor {
     pub rollout_ordinal: u64,
     pub include_anchor: bool,
     pub scope: CursorScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary: Option<HistoryPosition>,
 }
 
 #[derive(Clone, Copy)]
@@ -91,6 +94,78 @@ struct StoredSummaryItemColumns {
 pub(super) struct StoredThreadItemRow {
     pub position: RolloutHistoryPosition,
     pub item: StoredThreadItem,
+}
+
+pub(in crate::local) async fn observation_cursors(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+) -> ThreadStoreResult<crate::ThreadObservationCursors> {
+    {
+        let _writer = store.live_writer_locks.lock(thread_id).await;
+        let recorder = store
+            .live_recorders
+            .lock()
+            .await
+            .get(&thread_id)
+            .map(|entry| entry.recorder.clone());
+        if let Some(recorder) = recorder {
+            // Flush retries an unwritten suffix; a deferred empty writer stays unmaterialized.
+            recorder
+                .flush()
+                .await
+                .map_err(super::thread_history_error)?;
+            if !tokio::fs::try_exists(recorder.rollout_path())
+                .await
+                .map_err(super::thread_history_error)?
+            {
+                return Ok(crate::ThreadObservationCursors {
+                    turns: None,
+                    items: None,
+                });
+            }
+        }
+    }
+    validate_thread_for_paginated_reads(store, thread_id, true, "thread/subscribe").await?;
+    let lineage = store.resolve_rollout_lineage(thread_id).await?;
+    let segment = lineage
+        .segments()
+        .last()
+        .ok_or_else(|| invalid_cursor("empty lineage"))?;
+    let state = super::projection_state(store, segment.rollout_id())
+        .await?
+        .ok_or_else(|| invalid_cursor("history projection unavailable"))?;
+    let boundary = HistoryPosition {
+        thread_id: segment.rollout_id(),
+        end_ordinal_exclusive: state.next_ordinal,
+        end_byte_offset: state.next_byte_offset,
+    };
+    let anchor = lineage.segments().iter().rev().find_map(|segment| {
+        segment
+            .end_ordinal()
+            .unwrap_or(state.next_ordinal)
+            .checked_sub(1)
+            .filter(|ordinal| *ordinal >= segment.start_ordinal())
+    });
+    let Some(anchor) = anchor else {
+        return Ok(crate::ThreadObservationCursors {
+            turns: None,
+            items: None,
+        });
+    };
+    let make_cursor = |scope| {
+        serde_json::to_string(&HistoryCursor {
+            requested_thread_id: thread_id,
+            rollout_ordinal: anchor,
+            include_anchor: true,
+            scope,
+            boundary: Some(boundary),
+        })
+        .map_err(super::thread_history_error)
+    };
+    Ok(crate::ThreadObservationCursors {
+        turns: Some(make_cursor(CursorScope::Turns)?),
+        items: Some(make_cursor(CursorScope::ItemsByFirstProjectionV2)?),
+    })
 }
 
 pub(in crate::local) async fn list_turns(
@@ -145,6 +220,12 @@ pub(in crate::local) async fn list_turns(
     }
 
     Ok(TurnPage {
+        is_observation_snapshot: parse_cursor(
+            params.cursor.as_deref(),
+            params.thread_id,
+            CursorScope::Turns,
+        )?
+        .is_some_and(|cursor| cursor.boundary.is_some()),
         turns,
         next_cursor: page.next_cursor,
         backwards_cursor: page.backwards_cursor,
@@ -198,9 +279,6 @@ pub(super) async fn validate_thread_for_paginated_reads(
             message: format!("thread {thread_id} is archived"),
         });
     }
-    if metadata.history_mode == ThreadHistoryMode::Legacy {
-        return Err(ThreadStoreError::Unsupported { operation });
-    }
 
     // JSONL is canonical and SQLite is only its paginated read projection. A failed projection
     // must not turn into a successful read of an old prefix: retry the projection under the same
@@ -210,6 +288,14 @@ pub(super) async fn validate_thread_for_paginated_reads(
         super::super::thread_rollout_resolver::resolve_current_including_archived(store, thread_id)
             .await?
             .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
+    if metadata.history_mode == ThreadHistoryMode::Legacy {
+        return super::super::legacy_history_materialization::materialize(
+            store,
+            resolved.rollout_id,
+            &resolved.path,
+        )
+        .await;
+    }
     if resolved.path.extension().and_then(std::ffi::OsStr::to_str) == Some("zst") {
         if super::projection_state(store, resolved.rollout_id)
             .await?
@@ -336,6 +422,7 @@ pub(super) fn serialize_cursor(
         rollout_ordinal,
         include_anchor,
         scope,
+        boundary: None,
     })
     .map_err(super::thread_history_error)
 }

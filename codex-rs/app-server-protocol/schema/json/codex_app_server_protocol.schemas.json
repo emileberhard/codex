@@ -22195,6 +22195,50 @@
         "title": "ThreadNameUpdatedNotification",
         "type": "object"
       },
+      "ThreadObservationCheckpoint": {
+        "properties": {
+          "activeTurn": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/Turn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Listener-consumed active turn metadata; items are provided by bounded pages."
+          },
+          "historyUnavailable": {
+            "description": "Older ephemeral items were evicted from the bounded listener cache.",
+            "type": "boolean"
+          },
+          "itemsBackwardsCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "liveItems": {
+            "description": "Listener-consumed items unavailable from durable history, including unfinished text.",
+            "items": {
+              "$ref": "#/definitions/v2/ThreadItemEntry"
+            },
+            "type": "array"
+          },
+          "turnsBackwardsCursor": {
+            "description": "Native descending cursors retain this checkpoint's history versions.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "historyUnavailable",
+          "liveItems"
+        ],
+        "type": "object"
+      },
       "ThreadProjectUpdatedNotification": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {

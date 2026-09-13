@@ -135,6 +135,20 @@ impl LocalThreadStore {
                     "source rollout belongs to another thread",
                 ));
             }
+            if meta.meta.history_mode == ThreadHistoryMode::Legacy
+                && next_rollout_id.is_none()
+                && meta.meta.history_base.is_none()
+                && matches!(representation, LineageRepresentation::Existing)
+            {
+                return Ok(RolloutLineage {
+                    segments: vec![RolloutLineageSegment {
+                        rollout_id,
+                        rollout_path,
+                        start_ordinal: 1,
+                        end: None,
+                    }],
+                });
+            }
             if meta.meta.history_mode != ThreadHistoryMode::Paginated {
                 return Err(malformed_lineage(
                     requested_thread_id,

@@ -17,6 +17,7 @@ mod turn_lookup;
 
 pub(super) use read::list_items;
 pub(super) use read::list_turns;
+pub(super) use read::observation_cursors;
 pub(super) use realtime::list_timeline;
 pub(super) use search::search_thread_occurrences;
 pub(super) use turn_lookup::find_source_turn;
@@ -40,6 +41,7 @@ pub(super) struct ProjectedRolloutLine {
 /// prefix even when a complete rollout line cannot be projected.
 pub(super) enum RolloutProjectionStep {
     Line(Box<ProjectedRolloutLine>),
+    LegacyState(String),
     SkippedOrdinalRange {
         start_ordinal: u64,
         end_ordinal_exclusive: u64,
@@ -49,6 +51,7 @@ pub(super) enum RolloutProjectionStep {
 pub(super) struct RolloutProjectionState {
     pub next_byte_offset: u64,
     pub next_ordinal: u64,
+    pub legacy_state_json: Option<String>,
 }
 
 pub(super) async fn projection_state(
@@ -67,9 +70,9 @@ pub(super) async fn projection_state(
     }
 
     let pool = store.thread_history_db().await?;
-    let state = sqlx::query_as::<_, (i64, i64)>(
+    let state = sqlx::query_as::<_, (i64, i64, Option<String>)>(
         r#"
-SELECT next_rollout_byte_offset, next_rollout_ordinal
+SELECT next_rollout_byte_offset, next_rollout_ordinal, legacy_state_json
 FROM thread_history_projection_state
 WHERE thread_id = ?
         "#,
@@ -79,8 +82,9 @@ WHERE thread_id = ?
     .await
     .map_err(thread_history_error)?;
     state
-        .map(|(next_byte_offset, next_ordinal)| {
+        .map(|(next_byte_offset, next_ordinal, legacy_state_json)| {
             Ok(RolloutProjectionState {
+                legacy_state_json,
                 next_byte_offset: u64::try_from(next_byte_offset).map_err(|_| {
                     ThreadStoreError::Internal {
                         message: format!(
@@ -137,8 +141,10 @@ WHERE thread_id = ?
         });
     }
 
+    let mut legacy_state_json = None;
     for projection in projections {
         match projection {
+            RolloutProjectionStep::LegacyState(state) => legacy_state_json = Some(state),
             RolloutProjectionStep::Line(projection) => {
                 let ordinal = sqlite_integer(projection.ordinal, "rollout ordinal")?;
                 if ordinal != next_ordinal {
@@ -225,16 +231,19 @@ ON CONFLICT(thread_id, item_id) DO NOTHING
 INSERT INTO thread_history_projection_state (
     thread_id,
     next_rollout_byte_offset,
-    next_rollout_ordinal
-) VALUES (?, ?, ?)
+    next_rollout_ordinal,
+    legacy_state_json
+) VALUES (?, ?, ?, ?)
 ON CONFLICT(thread_id) DO UPDATE SET
     next_rollout_byte_offset = excluded.next_rollout_byte_offset,
-    next_rollout_ordinal = excluded.next_rollout_ordinal
+    next_rollout_ordinal = excluded.next_rollout_ordinal,
+    legacy_state_json = excluded.legacy_state_json
         "#,
     )
     .bind(thread_id.as_str())
     .bind(sqlite_integer(next_offset, "rollout byte offset")?)
     .bind(next_ordinal)
+    .bind(legacy_state_json)
     .execute(&mut *transaction)
     .await
     .map_err(thread_history_error)?;
@@ -324,8 +333,9 @@ INSERT INTO thread_turns (
     error_json,
     started_at,
     completed_at,
-    duration_ms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    duration_ms,
+    updated_at_ordinal
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(thread_id, turn_id) DO UPDATE SET
     rollout_end_ordinal = excluded.rollout_end_ordinal,
     rollout_end_byte_offset = excluded.rollout_end_byte_offset,
@@ -333,7 +343,8 @@ ON CONFLICT(thread_id, turn_id) DO UPDATE SET
     error_json = excluded.error_json,
     started_at = COALESCE(thread_turns.started_at, excluded.started_at),
     completed_at = excluded.completed_at,
-    duration_ms = excluded.duration_ms
+    duration_ms = excluded.duration_ms,
+    updated_at_ordinal = excluded.updated_at_ordinal
 WHERE (
     thread_turns.rollout_end_ordinal IS NULL
     AND thread_turns.status = 'inProgress'
@@ -355,6 +366,7 @@ OR (
         .bind(turn.started_at)
         .bind(turn.completed_at)
         .bind(turn.duration_ms)
+        .bind(rollout_ordinal)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;
@@ -365,6 +377,7 @@ OR (
             r#"
 UPDATE thread_turns
 SET
+    updated_at_ordinal = ?,
     first_user_item_id = COALESCE(
         first_user_item_id,
         (
@@ -419,6 +432,7 @@ WHERE thread_id = ?
   )
             "#,
         )
+        .bind(rollout_ordinal)
         .bind(thread_id)
         .bind(turn_id.as_str())
         .bind(thread_id)
@@ -507,7 +521,7 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
                 sqlx::query(
                     r#"
 UPDATE thread_turns
-SET first_user_item_id = COALESCE(first_user_item_id, ?)
+SET first_user_item_id = COALESCE(first_user_item_id, ?), updated_at_ordinal = ?
 WHERE thread_id = ?
   AND turn_id = ?
   AND rollout_end_ordinal IS NULL
@@ -515,6 +529,7 @@ WHERE thread_id = ?
                     "#,
                 )
                 .bind(item_id.as_str())
+                .bind(rollout_ordinal)
                 .bind(thread_id)
                 .bind(item.turn_id.as_str())
                 .execute(&mut **transaction)
@@ -528,7 +543,7 @@ WHERE thread_id = ?
                 sqlx::query(
                     r#"
 UPDATE thread_turns
-SET final_agent_item_id = ?
+SET final_agent_item_id = ?, updated_at_ordinal = ?
 WHERE thread_id = ?
   AND turn_id = ?
   AND rollout_end_ordinal IS NULL
@@ -536,6 +551,7 @@ WHERE thread_id = ?
                     "#,
                 )
                 .bind(item_id.as_str())
+                .bind(rollout_ordinal)
                 .bind(thread_id)
                 .bind(item.turn_id.as_str())
                 .execute(&mut **transaction)

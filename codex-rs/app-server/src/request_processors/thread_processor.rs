@@ -2815,7 +2815,7 @@ impl ThreadRequestProcessor {
     }
 
     /// Builds the API view for `thread/read` from persisted metadata plus optional live state.
-    async fn read_thread_view(
+    pub(super) async fn read_thread_view(
         &self,
         thread_id: ThreadId,
         include_turns: bool,
@@ -3053,7 +3053,12 @@ impl ThreadRequestProcessor {
             })
             .await
         {
-            Ok(thread) if thread.history_mode == ThreadHistoryMode::Paginated => {
+            Ok(thread)
+                if thread.history_mode == ThreadHistoryMode::Paginated
+                    || cursor
+                        .as_deref()
+                        .is_some_and(codex_thread_store::is_observation_cursor) =>
+            {
                 return self
                     .paginated_thread_turns_list_response(
                         thread_uuid,
@@ -3218,6 +3223,11 @@ impl ThreadRequestProcessor {
                 }
                 err => internal_error(format!("failed to list thread history: {err}")),
             })?;
+        if page.is_observation_snapshot && matches!(items_view, TurnItemsView::Full) {
+            return Err(invalid_request(
+                "observation checkpoints require summary or metadata turn pages; use thread/items/list for details",
+            ));
+        }
         let mut turns = Vec::with_capacity(page.turns.len());
         for turn in page.turns {
             let mut turn = stored_turn_to_api_turn(turn, items_view)?;
@@ -3233,13 +3243,15 @@ impl ThreadRequestProcessor {
             Some(thread) => matches!(thread.agent_status().await, AgentStatus::Running),
             None => false,
         };
-        normalize_thread_turns_status(
-            &mut turns,
-            self.thread_watch_manager
-                .loaded_status_for_thread(&thread_id.to_string())
-                .await,
-            has_live_running_thread,
-        );
+        if !page.is_observation_snapshot {
+            normalize_thread_turns_status(
+                &mut turns,
+                self.thread_watch_manager
+                    .loaded_status_for_thread(&thread_id.to_string())
+                    .await,
+                has_live_running_thread,
+            );
+        }
         Ok(ThreadTurnsListResponse {
             data: turns,
             next_cursor: page.next_cursor,
@@ -5751,14 +5763,14 @@ pub(super) fn normalize_thread_turns_status(
     }
 }
 
-enum ThreadReadViewError {
+pub(super) enum ThreadReadViewError {
     InvalidRequest(String),
     Unsupported(&'static str),
     Internal(String),
     JsonRpc(JSONRPCErrorError),
 }
 
-fn thread_read_view_error(err: ThreadReadViewError) -> JSONRPCErrorError {
+pub(super) fn thread_read_view_error(err: ThreadReadViewError) -> JSONRPCErrorError {
     match err {
         ThreadReadViewError::InvalidRequest(message) => invalid_request(message),
         ThreadReadViewError::Unsupported(operation) => {

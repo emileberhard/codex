@@ -2273,6 +2273,7 @@ async fn metadata_update_without_result_reads_only_when_the_caller_needs_the_thr
         .thread
         .append_rollout_items(&[RolloutItem::EventMsg(EventMsg::UserMessage(
             UserMessageEvent {
+                source_item: None,
                 message: "completion-only metadata".to_string(),
                 ..Default::default()
             },
@@ -2578,6 +2579,7 @@ fn multi_agent_v2_interrupted_marker_uses_developer_input_message() {
 fn completed_legacy_event_history_is_not_mid_turn() {
     let completed_history = InitialHistory::Forked(vec![
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "hello".to_string(),
             images: None,
@@ -2586,6 +2588,7 @@ fn completed_legacy_event_history_is_not_mid_turn() {
             ..Default::default()
         })),
         RolloutItem::EventMsg(EventMsg::AgentMessage(AgentMessageEvent {
+            source_item: None,
             message: "done".to_string(),
             phase: None,
             memory_citation: None,
@@ -2610,6 +2613,7 @@ fn mixed_response_and_legacy_user_event_history_is_mid_turn() {
     let mixed_history = InitialHistory::Forked(vec![
         RolloutItem::ResponseItem(user_msg("hello").into()),
         RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            source_item: None,
             client_id: None,
             message: "hello".to_string(),
             images: None,
