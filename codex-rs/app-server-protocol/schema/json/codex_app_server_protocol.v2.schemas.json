@@ -15466,6 +15466,22 @@
       "title": "SendAddCreditsNudgeEmailResponse",
       "type": "object"
     },
+    "ServerDiagnosticsFileDescriptorLimits": {
+      "description": "The soft and hard file-descriptor limits for the app-server process.",
+      "properties": {
+        "hard": {
+          "$ref": "#/definitions/ServerDiagnosticsResourceLimit"
+        },
+        "soft": {
+          "$ref": "#/definitions/ServerDiagnosticsResourceLimit"
+        }
+      },
+      "required": [
+        "hard",
+        "soft"
+      ],
+      "type": "object"
+    },
     "ServerDiagnosticsGauge": {
       "properties": {
         "name": {
@@ -15485,6 +15501,17 @@
     },
     "ServerDiagnosticsProcess": {
       "properties": {
+        "fileDescriptorLimits": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServerDiagnosticsFileDescriptorLimits"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The process's soft and hard RLIMIT_NOFILE values, when the host can report them.\n\nEach value explicitly distinguishes a finite limit, an unlimited limit, a failed operating-system query, and an unsupported platform. The field is optional so clients can continue to read responses from older app-server versions."
+        },
         "id": {
           "format": "uint32",
           "minimum": 0.0,
@@ -15511,6 +15538,83 @@
         "id"
       ],
       "type": "object"
+    },
+    "ServerDiagnosticsResourceLimit": {
+      "description": "One explicitly classified operating-system resource-limit value.",
+      "oneOf": [
+        {
+          "description": "A finite limit in the host's native unit, encoded as decimal text so clients do not lose precision when the host reports a value larger than JavaScript's safe integer range.",
+          "properties": {
+            "type": {
+              "enum": [
+                "finite"
+              ],
+              "title": "FiniteServerDiagnosticsResourceLimitType",
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "title": "FiniteServerDiagnosticsResourceLimit",
+          "type": "object"
+        },
+        {
+          "description": "The host reports no finite limit.",
+          "properties": {
+            "type": {
+              "enum": [
+                "unlimited"
+              ],
+              "title": "UnlimitedServerDiagnosticsResourceLimitType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnlimitedServerDiagnosticsResourceLimit",
+          "type": "object"
+        },
+        {
+          "description": "The operating-system query failed.",
+          "properties": {
+            "type": {
+              "enum": [
+                "unknown"
+              ],
+              "title": "UnknownServerDiagnosticsResourceLimitType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnknownServerDiagnosticsResourceLimit",
+          "type": "object"
+        },
+        {
+          "description": "The current platform does not expose this limit through the diagnostics API.",
+          "properties": {
+            "type": {
+              "enum": [
+                "unsupported"
+              ],
+              "title": "UnsupportedServerDiagnosticsResourceLimitType",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "title": "UnsupportedServerDiagnosticsResourceLimit",
+          "type": "object"
+        }
+      ]
     },
     "ServerNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",

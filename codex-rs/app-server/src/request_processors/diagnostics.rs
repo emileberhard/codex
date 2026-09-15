@@ -1,6 +1,10 @@
+use codex_app_server_protocol::ServerDiagnosticsFileDescriptorLimits;
 use codex_app_server_protocol::ServerDiagnosticsGauge;
 use codex_app_server_protocol::ServerDiagnosticsProcess;
+use codex_app_server_protocol::ServerDiagnosticsResourceLimit;
 use codex_app_server_protocol::ServerDiagnosticsResponse;
+use codex_diagnostics::FileDescriptorLimits;
+use codex_diagnostics::ResourceLimitValue;
 
 const NEW_WORK_ADMISSION_FENCED_GAUGE: &str = "app.work.new_admission_fenced";
 const NEW_WORK_ADMISSION_CLOSED_GAUGE: &str = "app.work.new_admission_closed";
@@ -33,7 +37,30 @@ pub(crate) fn read_server_diagnostics(
             id: diagnostics.process.id,
             resident_memory_bytes: diagnostics.process.resident_memory_bytes,
             physical_footprint_bytes: diagnostics.process.physical_footprint_bytes,
+            file_descriptor_limits: Some(map_file_descriptor_limits(
+                diagnostics.process.file_descriptor_limits,
+            )),
         },
         gauges,
+    }
+}
+
+fn map_file_descriptor_limits(
+    limits: FileDescriptorLimits,
+) -> ServerDiagnosticsFileDescriptorLimits {
+    ServerDiagnosticsFileDescriptorLimits {
+        soft: map_resource_limit(limits.soft),
+        hard: map_resource_limit(limits.hard),
+    }
+}
+
+fn map_resource_limit(value: ResourceLimitValue) -> ServerDiagnosticsResourceLimit {
+    match value {
+        ResourceLimitValue::Finite(value) => ServerDiagnosticsResourceLimit::Finite {
+            value: value.to_string(),
+        },
+        ResourceLimitValue::Unlimited => ServerDiagnosticsResourceLimit::Unlimited,
+        ResourceLimitValue::Unknown => ServerDiagnosticsResourceLimit::Unknown,
+        ResourceLimitValue::Unsupported => ServerDiagnosticsResourceLimit::Unsupported,
     }
 }

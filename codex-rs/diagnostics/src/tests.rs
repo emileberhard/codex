@@ -1,4 +1,6 @@
+use super::FileDescriptorLimits;
 use super::Gauge;
+use super::ResourceLimitValue;
 use super::snapshot;
 use pretty_assertions::assert_eq;
 
@@ -55,4 +57,20 @@ fn snapshot_includes_process_memory_and_registers_gauges_once() {
     );
     #[cfg(not(target_os = "macos"))]
     assert_eq!(diagnostics.process.physical_footprint_bytes, None);
+    #[cfg(unix)]
+    assert!(!matches!(
+        diagnostics.process.file_descriptor_limits,
+        FileDescriptorLimits {
+            soft: ResourceLimitValue::Unsupported,
+            hard: ResourceLimitValue::Unsupported,
+        }
+    ));
+    #[cfg(not(unix))]
+    assert_eq!(
+        diagnostics.process.file_descriptor_limits,
+        FileDescriptorLimits {
+            soft: ResourceLimitValue::Unsupported,
+            hard: ResourceLimitValue::Unsupported,
+        }
+    );
 }

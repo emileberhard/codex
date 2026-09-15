@@ -606,7 +606,11 @@ Enable `capabilities.experimentalApi` during initialization, then use `thread/li
     "process": {
         "id": 1234,
         "residentMemoryBytes": 4194304,
-        "physicalFootprintBytes": 5242880
+        "physicalFootprintBytes": 5242880,
+        "fileDescriptorLimits": {
+            "soft": { "type": "finite", "value": "8192" },
+            "hard": { "type": "unlimited" }
+        }
     },
     "gauges": [
         { "name": "app.requests.in_flight", "value": 1 },
@@ -615,7 +619,7 @@ Enable `capabilities.experimentalApi` during initialization, then use `thread/li
 } }
 ```
 
-Gauges register when first used. Depending on process activity, the snapshot can also include `app.requests.queued`, `app.server_requests.pending`, `core.mailbox.pending`, `core.turns.active`, and `mcp.connections.live`. The diagnostics request itself is included in `app.requests.in_flight`.
+`fileDescriptorLimits` reports the app-server process's `RLIMIT_NOFILE` soft and hard limits. Each value is explicitly classified as `finite`, `unlimited`, `unknown` (the operating-system query failed), or `unsupported` (the platform has no implementation). The field is optional so clients can read responses from older app-server versions. Gauges register when first used. Depending on process activity, the snapshot can also include `app.requests.queued`, `app.server_requests.pending`, `core.mailbox.pending`, `core.turns.active`, and `mcp.connections.live`. The diagnostics request itself is included in `app.requests.in_flight`.
 
 ### Example: Track thread status changes
 

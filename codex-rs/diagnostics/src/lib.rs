@@ -71,12 +71,33 @@ pub struct GaugeSnapshot {
     pub value: u64,
 }
 
+/// The observed value of an operating-system resource limit.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ResourceLimitValue {
+    /// A finite limit represented in the platform's native unit.
+    Finite(u64),
+    /// The operating system reports no finite limit.
+    Unlimited,
+    /// The operating-system query failed.
+    Unknown,
+    /// The current platform does not expose this limit through this API.
+    Unsupported,
+}
+
+/// The soft and hard file-descriptor limits for the current process.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FileDescriptorLimits {
+    pub soft: ResourceLimitValue,
+    pub hard: ResourceLimitValue,
+}
+
 /// Best-effort operating-system measurements for the current process.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProcessSnapshot {
     pub id: u32,
     pub resident_memory_bytes: Option<u64>,
     pub physical_footprint_bytes: Option<u64>,
+    pub file_descriptor_limits: FileDescriptorLimits,
 }
 
 /// Content-free diagnostic values contributed by this process.
@@ -125,6 +146,7 @@ fn process_snapshot() -> ProcessSnapshot {
         id: std::process::id(),
         resident_memory_bytes: Some(usage.ri_resident_size),
         physical_footprint_bytes: Some(usage.ri_phys_footprint),
+        file_descriptor_limits: file_descriptor_limits(),
     }
 }
 
@@ -144,6 +166,7 @@ fn process_snapshot() -> ProcessSnapshot {
             .zip(page_size)
             .map(|(pages, page_size)| pages.saturating_mul(page_size)),
         physical_footprint_bytes: None,
+        file_descriptor_limits: file_descriptor_limits(),
     }
 }
 
@@ -188,6 +211,7 @@ fn process_snapshot() -> ProcessSnapshot {
         id: std::process::id(),
         resident_memory_bytes: u64::try_from(counters.working_set_size).ok(),
         physical_footprint_bytes: None,
+        file_descriptor_limits: file_descriptor_limits(),
     }
 }
 
@@ -202,6 +226,44 @@ fn empty_process_snapshot() -> ProcessSnapshot {
         id: std::process::id(),
         resident_memory_bytes: None,
         physical_footprint_bytes: None,
+        file_descriptor_limits: file_descriptor_limits(),
+    }
+}
+
+#[cfg(unix)]
+fn file_descriptor_limits() -> FileDescriptorLimits {
+    let mut limit = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+    // SAFETY: getrlimit initializes the caller-provided rlimit on success.
+    let result = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limit.as_mut_ptr()) };
+    if result != 0 {
+        return FileDescriptorLimits {
+            soft: ResourceLimitValue::Unknown,
+            hard: ResourceLimitValue::Unknown,
+        };
+    }
+    // SAFETY: the successful getrlimit call initialized the value.
+    let limit = unsafe { limit.assume_init() };
+    FileDescriptorLimits {
+        soft: resource_limit_value(limit.rlim_cur),
+        hard: resource_limit_value(limit.rlim_max),
+    }
+}
+
+#[cfg(unix)]
+#[allow(clippy::useless_conversion)]
+fn resource_limit_value(value: libc::rlim_t) -> ResourceLimitValue {
+    if value == libc::RLIM_INFINITY {
+        ResourceLimitValue::Unlimited
+    } else {
+        u64::try_from(value).map_or(ResourceLimitValue::Unknown, ResourceLimitValue::Finite)
+    }
+}
+
+#[cfg(not(unix))]
+fn file_descriptor_limits() -> FileDescriptorLimits {
+    FileDescriptorLimits {
+        soft: ResourceLimitValue::Unsupported,
+        hard: ResourceLimitValue::Unsupported,
     }
 }
 

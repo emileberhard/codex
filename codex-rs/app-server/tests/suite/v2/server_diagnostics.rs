@@ -12,6 +12,7 @@ use codex_app_server_protocol::JSONRPCMessage;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerDiagnosticsGauge;
 use codex_app_server_protocol::ServerDiagnosticsParams;
+use codex_app_server_protocol::ServerDiagnosticsResourceLimit;
 use codex_app_server_protocol::ServerDiagnosticsResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use pretty_assertions::assert_eq;
@@ -47,6 +48,46 @@ async fn server_diagnostics_exposes_process_and_registered_thread_gauge() -> Res
     assert!(diagnostics.process.physical_footprint_bytes.is_some());
     #[cfg(not(target_os = "macos"))]
     assert_eq!(diagnostics.process.physical_footprint_bytes, None);
+    let file_descriptor_limits = diagnostics
+        .process
+        .file_descriptor_limits
+        .expect("diagnostics should report file-descriptor limit coverage");
+    #[cfg(unix)]
+    for (name, value) in [
+        ("soft", &file_descriptor_limits.soft),
+        ("hard", &file_descriptor_limits.hard),
+    ] {
+        match value {
+            ServerDiagnosticsResourceLimit::Finite { value } => {
+                let value = value
+                    .parse::<u64>()
+                    .expect("finite resource limit should be decimal text");
+                if name == "soft" {
+                    assert!(
+                        value >= 8_192,
+                        "app-server soft file-descriptor limit is too low: {value}"
+                    );
+                }
+            }
+            ServerDiagnosticsResourceLimit::Unlimited => {}
+            ServerDiagnosticsResourceLimit::Unknown => {
+                panic!("app-server {name} file-descriptor limit is unknown")
+            }
+            ServerDiagnosticsResourceLimit::Unsupported => {
+                panic!("app-server {name} file-descriptor limit is unsupported")
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    assert_eq!(
+        &file_descriptor_limits.soft,
+        &ServerDiagnosticsResourceLimit::Unsupported
+    );
+    #[cfg(not(unix))]
+    assert_eq!(
+        &file_descriptor_limits.hard,
+        &ServerDiagnosticsResourceLimit::Unsupported
+    );
     for expected_gauge in [
         ServerDiagnosticsGauge {
             name: "app.requests.in_flight".to_string(),
