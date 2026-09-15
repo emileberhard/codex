@@ -4,6 +4,7 @@ use codex_app_server::AppServerRuntimeOptions;
 use codex_app_server::AppServerTransport;
 use codex_app_server::AppServerWebsocketAuthArgs;
 use codex_app_server::PluginStartupTasks;
+use codex_app_server::ensure_nofile_floor;
 use codex_app_server::run_main_with_transport_options;
 use codex_arg0::Arg0DispatchPaths;
 use codex_arg0::arg0_dispatch_or_else;
@@ -99,6 +100,7 @@ fn main() -> anyhow::Result<()> {
                 (false, true) => codex_app_server::RemoteControlStartupMode::DisabledEphemeral,
                 (false, false) => codex_app_server::RemoteControlStartupMode::ResolvePersisted,
             };
+        ensure_nofile_floor()?;
         let (start_fenced, restart_recovery_grant) =
             codex_app_server::take_restart_recovery_startup_options()?;
         runtime_options.start_fenced = start_fenced;

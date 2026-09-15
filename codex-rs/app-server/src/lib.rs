@@ -136,6 +136,7 @@ mod outgoing_message;
 mod plugin_config_reload;
 mod request_processors;
 mod request_serialization;
+mod resources;
 mod restart_recovery;
 mod server_request_error;
 mod skills_watcher;
@@ -149,6 +150,7 @@ pub use crate::code_mode_host::AppServerCodeModeHostArgs;
 pub use crate::code_mode_host::CodeModeHostTransport;
 pub use crate::error_code::INPUT_TOO_LARGE_ERROR_CODE;
 pub use crate::error_code::INVALID_PARAMS_ERROR_CODE;
+pub use crate::resources::ensure_nofile_floor;
 pub use crate::restart_recovery::RestartRecoveryGrant;
 pub use crate::transport::AppServerTransport;
 pub use crate::transport::RemoteControlStartupMode;
@@ -679,6 +681,7 @@ pub async fn run_main_with_transport_options(
     auth: AppServerWebsocketAuthSettings,
     runtime_options: AppServerRuntimeOptions,
 ) -> IoResult<()> {
+    ensure_nofile_floor()?;
     let loader_overrides = loader_overrides_with_test_user_config_file(
         loader_overrides,
         test_user_config_file_from_env(),

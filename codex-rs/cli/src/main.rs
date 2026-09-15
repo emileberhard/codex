@@ -3,6 +3,7 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::Shell;
 use clap_complete::generate;
+use codex_app_server::ensure_nofile_floor;
 use codex_app_server_daemon::BootstrapOptions as AppServerBootstrapOptions;
 use codex_app_server_daemon::LifecycleCommand as AppServerLifecycleCommand;
 use codex_app_server_daemon::RemoteControlMode as AppServerRemoteControlMode;
@@ -1270,6 +1271,7 @@ async fn cli_main(
                         listen
                     };
                     let auth = auth.try_into_settings()?;
+                    ensure_nofile_floor()?;
                     let (start_fenced, restart_recovery_grant) =
                         codex_app_server::take_restart_recovery_startup_options()?;
                     let runtime_options = codex_app_server::AppServerRuntimeOptions {
