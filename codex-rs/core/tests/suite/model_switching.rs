@@ -234,7 +234,7 @@ async fn file_url_guidance_on_cold_resume_preserves_instruction_ownership_and_hi
         .with_model("gpt-5.2")
         .with_config(move |config| {
             config.base_instructions = Some(ORIGINAL.to_string());
-            config.base_instructions_provenance = Some(provenance.clone());
+            config.base_instructions_provenance = Some(provenance);
         });
     let test = builder.build_with_auto_env(&server).await?;
     submit_model_turn(&test.codex, "gpt-5.2", ThreadSettingsOverrides::default()).await?;

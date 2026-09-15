@@ -8,27 +8,28 @@ use std::process::Command;
 const CHILD_MODE_ENV: &str = "CODEX_APP_SERVER_NOFILE_TEST_MODE";
 
 #[test]
-fn nofile_floor_is_applied_in_a_fresh_process() {
+fn nofile_floor_is_applied_in_a_fresh_process() -> std::io::Result<()> {
     if current_nofile_limit().rlim_max < REQUIRED_NOFILE_SOFT_LIMIT {
-        return;
+        return Ok(());
     }
-    run_child("soft-256");
+    run_child("soft-256")
 }
 
 #[test]
-fn higher_nofile_soft_limit_and_hard_limit_are_preserved_in_a_fresh_process() {
+fn higher_nofile_soft_limit_and_hard_limit_are_preserved_in_a_fresh_process() -> std::io::Result<()>
+{
     if current_nofile_limit().rlim_max < 16_384 {
-        return;
+        return Ok(());
     }
-    run_child("soft-16384");
+    run_child("soft-16384")
 }
 
 #[test]
-fn an_insufficient_nofile_hard_limit_is_rejected_without_changing_limits() {
+fn an_insufficient_nofile_hard_limit_is_rejected_without_changing_limits() -> std::io::Result<()> {
     if current_nofile_limit().rlim_max < 4_096 {
-        return;
+        return Ok(());
     }
-    run_child("hard-4096");
+    run_child("hard-4096")
 }
 
 #[test]
@@ -66,17 +67,17 @@ fn nofile_floor_child() {
     }
 }
 
-fn run_child(mode: &str) {
-    let status = Command::new(std::env::current_exe().expect("test executable"))
+fn run_child(mode: &str) -> std::io::Result<()> {
+    let status = Command::new(std::env::current_exe()?)
         .args([
             "--exact",
             "resources::tests::nofile_floor_child",
             "--nocapture",
         ])
         .env(CHILD_MODE_ENV, mode)
-        .status()
-        .expect("spawn nofile limit child");
+        .status()?;
     assert!(status.success(), "nofile child failed for {mode}: {status}");
+    Ok(())
 }
 
 fn current_nofile_limit() -> libc::rlimit {

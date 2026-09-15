@@ -261,14 +261,14 @@ async fn app_server_fd_count(pid: i32) -> Result<usize> {
         if !output.status.success() {
             anyhow::bail!("lsof failed for app-server pid {pid}");
         }
-        return Ok(String::from_utf8(output.stdout)?
+        Ok(String::from_utf8(output.stdout)?
             .lines()
             .filter(|line| {
                 line.strip_prefix('f').is_some_and(|fd| {
                     !fd.is_empty() && fd.chars().all(|char| char.is_ascii_digit())
                 })
             })
-            .count());
+            .count())
     }
 
     #[cfg(target_os = "linux")]
