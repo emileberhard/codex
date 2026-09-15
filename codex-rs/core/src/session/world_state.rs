@@ -44,14 +44,18 @@ impl Session {
         let model_instructions = turn_context
             .model_info()
             .get_model_instructions(turn_context.personality());
-        let model_instructions = if !turn_context.config.update_plan_enabled
-            && turn_context.config.model_catalog.is_none()
+        let model_instructions = if turn_context.config.model_catalog.is_none()
             && (turn_context.config.base_instructions.is_none()
                 || matches!(
                     turn_context.config.base_instructions_provenance,
                     Some(BaseInstructionsProvenance::Model { .. })
                 )) {
-            crate::context::without_update_plan_instructions(&model_instructions)
+            let instructions = crate::context::with_file_url_references(&model_instructions);
+            if turn_context.config.update_plan_enabled {
+                instructions
+            } else {
+                crate::context::without_update_plan_instructions(&instructions)
+            }
         } else {
             model_instructions
         };

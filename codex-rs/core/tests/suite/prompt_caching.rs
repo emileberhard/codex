@@ -190,7 +190,9 @@ async fn prompt_tools_are_consistent_across_requests(
     let base_instructions = if custom_instructions {
         CUSTOM_BASE_INSTRUCTIONS.to_string()
     } else {
-        let original = model_info.get_model_instructions(config.personality);
+        let original = codex_core::context::with_file_url_references(
+            &model_info.get_model_instructions(config.personality),
+        );
         if expected_update_plan_enabled {
             original
         } else {

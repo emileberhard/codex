@@ -1,5 +1,6 @@
 use codex_config::types::Personality;
 use codex_core::TurnInputRequest;
+use codex_core::context::with_file_url_references;
 use codex_features::Feature;
 use codex_models_manager::bundled_models_response;
 use codex_models_manager::manager::RefreshStrategy;
@@ -587,7 +588,8 @@ async fn user_turn_personality_skips_if_feature_disabled() -> anyhow::Result<()>
     assert!(
         requests
             .iter()
-            .all(|request| request.instructions_text() == BASE_INSTRUCTIONS)
+            .all(|request| request.instructions_text()
+                == with_file_url_references(BASE_INSTRUCTIONS))
     );
     let request = requests
         .last()

@@ -1,6 +1,7 @@
 #![cfg(not(target_os = "windows"))]
 use anyhow::Result;
 use codex_core::TurnInputRequest;
+use codex_core::context::with_file_url_references;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::built_in_model_providers;
@@ -63,9 +64,9 @@ use wiremock::matchers::path;
 const REMOTE_MODEL_SLUG: &str = "codex-test";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn disabled_update_plan_preserves_custom_catalog_instructions() -> Result<()> {
+async fn request_adapters_preserve_custom_catalog_instructions() -> Result<()> {
     skip_if_no_network!(Ok(()));
-    const INSTRUCTIONS: &str = "## Plan tool\nNever deploy without explicit approval.\n";
+    const INSTRUCTIONS: &str = "## Plan tool\nNever deploy without explicit approval.\n\n- When referencing a real local file, prefer a clickable markdown link.\n  * Do not use URIs like file://, vscode://, or https:// for file links.\n";
     let server = start_mock_server().await;
     let response = mount_sse_once(
         &server,
@@ -117,7 +118,10 @@ async fn unknown_model_sends_builtin_instructions() -> Result<()> {
     test.submit_turn("use fallback model metadata").await?;
 
     let request = response.single_request();
-    assert_eq!(request.instructions_text(), BASE_INSTRUCTIONS);
+    assert_eq!(
+        request.instructions_text(),
+        with_file_url_references(BASE_INSTRUCTIONS)
+    );
     let body = request.body_json();
     let tools = body["tools"]
         .as_array()
@@ -1032,7 +1036,7 @@ async fn remote_models_apply_legacy_instructions() -> Result<()> {
     let request = requests.last().expect("expected second model request");
     assert_eq!(
         request.instructions_text(),
-        base_model_info.get_model_instructions(config.personality)
+        with_file_url_references(&base_model_info.get_model_instructions(config.personality))
     );
     assert!(
         request

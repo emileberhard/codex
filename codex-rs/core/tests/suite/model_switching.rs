@@ -4,6 +4,7 @@ use codex_core::CodexThread;
 use codex_core::ForkSnapshot;
 use codex_core::TurnInputRequest;
 use codex_core::config::Constrained;
+use codex_core::context::with_file_url_references;
 use codex_features::Feature;
 use codex_history::RolloutItem;
 use codex_history::RolloutLine;
@@ -195,11 +196,13 @@ async fn first_turn_model_change_appends_model_instructions_developer_message(
         .find(|model| model.slug == next_model)
         .expect("expected target model in bundled catalog")
         .get_model_instructions(personality.or(test.config.personality));
-    assert!(
-        developer_texts.iter().any(|text| {
-            text.contains("<model_switch>") && text.contains(&expected_instructions)
-        })
-    );
+    let model_switch = developer_texts
+        .iter()
+        .find(|text| text.contains("<model_switch>"))
+        .expect("selected model instructions");
+    assert!(model_switch.contains(&with_file_url_references(&expected_instructions)));
+    assert!(model_switch.contains("[app.py](file:///abs/path/app.py)"));
+    assert!(!model_switch.contains("Do not use URIs like file://"));
     assert!(
         developer_texts
             .iter()
@@ -207,6 +210,67 @@ async fn first_turn_model_change_appends_model_instructions_developer_message(
         "model instructions already include the selected personality"
     );
 
+    Ok(())
+}
+
+#[test_case(BaseInstructionsProvenance::Model { model: "gpt-5.2".to_string() }; "model-owned instructions")]
+#[test_case(BaseInstructionsProvenance::Custom; "custom instructions")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn file_url_guidance_on_cold_resume_preserves_instruction_ownership_and_history(
+    provenance: BaseInstructionsProvenance,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    const ORIGINAL: &str = "Vendor prefix.\n\n- When referencing a real local file, prefer a clickable markdown link.\n  * Clickable file links should look like [app.py](/abs/path/app.py:12).\n  * Do not use URIs like file://, vscode://, or https:// for file links.\n\nVendor suffix.\n";
+    let custom = matches!(provenance, BaseInstructionsProvenance::Custom);
+    let expected_provenance = provenance.clone();
+    let server = MockServer::start().await;
+    let response_mock = mount_sse_sequence(
+        &server,
+        vec![sse_completed("resp-before"), sse_completed("resp-resumed")],
+    )
+    .await;
+    let mut builder = test_codex()
+        .with_model("gpt-5.2")
+        .with_config(move |config| {
+            config.base_instructions = Some(ORIGINAL.to_string());
+            config.base_instructions_provenance = Some(provenance.clone());
+        });
+    let test = builder.build_with_auto_env(&server).await?;
+    submit_model_turn(&test.codex, "gpt-5.2", ThreadSettingsOverrides::default()).await?;
+    test.codex.flush_rollout().await?;
+    let rollout_path = test.codex.rollout_path().expect("persisted test thread");
+
+    let mut resume_builder = test_codex().with_model("gpt-5.2");
+    let resumed = resume_builder.restart(&server, &test).await?;
+    submit_model_turn(
+        &resumed.codex,
+        "gpt-5.2",
+        ThreadSettingsOverrides::default(),
+    )
+    .await?;
+    resumed.codex.flush_rollout().await?;
+
+    let requests = response_mock.requests();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        let instructions = request.instructions_text();
+        if custom {
+            assert_eq!(instructions, ORIGINAL);
+        } else {
+            assert!(instructions.contains("[app.py](file:///abs/path/app.py)"));
+            assert!(!instructions.contains("Do not use URIs like file://"));
+            assert!(instructions.starts_with("Vendor prefix.\n"));
+            assert!(instructions.ends_with("Vendor suffix.\n"));
+        }
+    }
+
+    let stored = codex_rollout::RolloutRecorder::get_rollout_history(&rollout_path)
+        .await?
+        .get_base_instructions()
+        .expect("saved base instructions");
+    assert_eq!(stored.text, ORIGINAL);
+    assert_eq!(stored.provenance, Some(expected_provenance));
     Ok(())
 }
 

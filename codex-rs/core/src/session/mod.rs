@@ -1370,15 +1370,19 @@ impl Session {
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
         let config = self.get_config().await;
         let instructions = self.get_base_instructions().await;
-        if !config.update_plan_enabled
-            && config.model_catalog.is_none()
+        if config.model_catalog.is_none()
             && matches!(
                 instructions.provenance,
                 Some(BaseInstructionsProvenance::Model { .. })
             )
         {
+            let text = crate::context::with_file_url_references(&instructions.text);
             BaseInstructions {
-                text: crate::context::without_update_plan_instructions(&instructions.text),
+                text: if config.update_plan_enabled {
+                    text
+                } else {
+                    crate::context::without_update_plan_instructions(&text)
+                },
                 ..instructions
             }
         } else {
