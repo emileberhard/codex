@@ -1368,6 +1368,145 @@ async fn pty_spawn_can_preserve_inherited_fds() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pty_cleanup_handles_sparse_high_inherited_fds() -> anyhow::Result<()> {
+    use std::os::fd::FromRawFd;
+
+    const CHILD_ENV: &str = "CODEX_PTY_HIGH_FD_REGRESSION_CHILD";
+    const PRESERVED_HIGH_TARGET: i32 = 6_000;
+    const LEAKED_HIGH_TARGET: i32 = 7_000;
+    const TARGET_SOFT_LIMIT: libc::rlim_t = 8_192;
+    const OPEN_DESCRIPTOR_COUNT: usize = 1_100;
+
+    if std::env::var_os(CHILD_ENV).is_none() {
+        let output = std::process::Command::new(std::env::current_exe()?)
+            .arg("pty_cleanup_handles_sparse_high_inherited_fds")
+            .arg("--nocapture")
+            .env(CHILD_ENV, "1")
+            .output()?;
+        assert!(
+            output.status.success(),
+            "isolated high-fd regression failed: status={} stdout={} stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        return Ok(());
+    }
+
+    // The child owns the descriptor-heavy setup so concurrent tests in the
+    // parent test process do not observe its resource-limit or fd changes.
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    assert_eq!(
+        unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) },
+        0,
+        "getrlimit failed: {}",
+        std::io::Error::last_os_error()
+    );
+    if limit.rlim_max != libc::RLIM_INFINITY && limit.rlim_max < TARGET_SOFT_LIMIT {
+        eprintln!(
+            "skipping sparse high-fd PTY cleanup regression: hard NOFILE limit is {}",
+            limit.rlim_max
+        );
+        return Ok(());
+    }
+    if limit.rlim_cur < TARGET_SOFT_LIMIT {
+        limit.rlim_cur = TARGET_SOFT_LIMIT;
+        assert_eq!(
+            unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raw const limit) },
+            0,
+            "setrlimit failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+
+    let clear_cloexec = |fd: i32| -> std::io::Result<()> {
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+        if flags == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(())
+    };
+
+    let mut descriptors = Vec::with_capacity(OPEN_DESCRIPTOR_COUNT);
+    for _ in 0..OPEN_DESCRIPTOR_COUNT {
+        let file = std::fs::File::open("/dev/null")?;
+        clear_cloexec(std::os::fd::AsRawFd::as_raw_fd(&file))?;
+        descriptors.push(file);
+    }
+    let preserved_low = std::os::fd::AsRawFd::as_raw_fd(&descriptors[0]);
+    let preserved_high_raw =
+        unsafe { libc::fcntl(preserved_low, libc::F_DUPFD, PRESERVED_HIGH_TARGET) };
+    if preserved_high_raw < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    clear_cloexec(preserved_high_raw)?;
+    let _preserved_high = unsafe { std::os::fd::OwnedFd::from_raw_fd(preserved_high_raw) };
+    let leaked_high_raw = unsafe { libc::fcntl(preserved_low, libc::F_DUPFD, LEAKED_HIGH_TARGET) };
+    if leaked_high_raw < 0 {
+        return Err(std::io::Error::last_os_error().into());
+    }
+    clear_cloexec(leaked_high_raw)?;
+    let _leaked_high = unsafe { std::os::fd::OwnedFd::from_raw_fd(leaked_high_raw) };
+
+    assert!(preserved_high_raw > 1_024);
+    assert!(leaked_high_raw > 1_024);
+    assert_ne!(preserved_high_raw, leaked_high_raw);
+
+    let mut env_map: HashMap<String, String> = std::env::vars().collect();
+    env_map.insert("PRESERVED_LOW_FD".to_string(), preserved_low.to_string());
+    env_map.insert(
+        "PRESERVED_HIGH_FD".to_string(),
+        preserved_high_raw.to_string(),
+    );
+    env_map.insert("LEAKED_HIGH_FD".to_string(), leaked_high_raw.to_string());
+    let script = "if test -e /dev/fd/$PRESERVED_LOW_FD && test -e /dev/fd/$PRESERVED_HIGH_FD && test ! -e /dev/fd/$LEAKED_HIGH_FD; then printf '__fd_cleanup_ok__\\n'; else printf '__fd_cleanup_failed__\\n'; exit 1; fi";
+    let spawned = spawn_pty_process(
+        "/bin/sh",
+        &["-c".to_string(), script.to_string()],
+        Path::new("."),
+        &env_map,
+        &None,
+        TerminalSize::default(),
+        &[preserved_low, preserved_high_raw],
+    )
+    .await?;
+    let (session, output_rx, exit_rx) = combine_spawned_output(spawned);
+    let (output, code) = collect_output_until_exit(output_rx, exit_rx, /*timeout_ms*/ 2_000).await;
+    drop(session);
+
+    assert_eq!(code, 0, "child fd cleanup command failed: {output:?}");
+    assert!(!output.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output).contains("__fd_cleanup_ok__"),
+        "child did not report preserved/closed fd state: {output:?}"
+    );
+    assert_ne!(
+        unsafe { libc::fcntl(preserved_low, libc::F_GETFD) },
+        -1,
+        "parent lost its preserved low descriptor"
+    );
+    assert_ne!(
+        unsafe { libc::fcntl(preserved_high_raw, libc::F_GETFD) },
+        -1,
+        "parent lost its preserved high descriptor"
+    );
+    assert_ne!(
+        unsafe { libc::fcntl(leaked_high_raw, libc::F_GETFD) },
+        -1,
+        "parent lost its leaked high descriptor while child was cleaned"
+    );
+
+    Ok(())
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn pty_preserving_inherited_fds_keeps_python_repl_running() -> anyhow::Result<()> {

@@ -36,6 +36,8 @@ mod experimental_feature_list;
 mod external_agent_config;
 mod external_agent_import_sync;
 mod feedback;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod file_descriptor_pressure;
 mod fs;
 mod git_attribution;
 mod guardian_v2;
