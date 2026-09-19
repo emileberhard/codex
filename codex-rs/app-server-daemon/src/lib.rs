@@ -5,6 +5,10 @@ mod remote_control_client;
 mod settings;
 mod stdio_proxy;
 
+#[cfg(all(test, unix))]
+#[path = "startup_tests.rs"]
+mod startup_tests;
+
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -301,7 +305,22 @@ impl Daemon {
                 .await);
         }
 
-        self.ensure_app_server_absent().await?;
+        // The transport owns stale-path removal under its startup lock. Permit
+        // that recovery only after a refused connection to an actual socket;
+        // failed protocol probes alone do not establish that nobody is listening.
+        let stale_socket = matches!(
+            tokio::time::timeout(
+                client::CONTROL_SOCKET_RESPONSE_TIMEOUT,
+                codex_uds::UnixStream::connect(&self.socket_path),
+            )
+            .await,
+            Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused
+        ) && codex_uds::is_stale_socket_path(&self.socket_path)
+            .await
+            .context("failed to inspect refused app-server socket")?;
+        if !stale_socket {
+            self.ensure_app_server_absent().await?;
+        }
         self.ensure_managed_codex_bin()?;
         let pid = self.start_managed_backend(&settings).await?;
         let expected_pid =
