@@ -168,6 +168,32 @@ pub(in crate::local) async fn observation_cursors(
     })
 }
 
+/// Latest terminal turn in the canonical visible lineage, without reading item JSON.
+pub(in crate::local) async fn latest_turn_completion(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+) -> ThreadStoreResult<Option<i64>> {
+    validate_thread_for_paginated_reads(
+        store,
+        thread_id,
+        true,
+        "thread/list.includeCompletionTimes",
+    )
+    .await?;
+    let lineage = store.resolve_rollout_lineage(thread_id).await?;
+    let page = page_turn_rows(
+        store.thread_history_db().await?,
+        thread_id,
+        &lineage,
+        None,
+        1,
+        crate::SortDirection::Desc,
+        super::segment_paging::TurnSelection::Terminal,
+    )
+    .await?;
+    Ok(page.rows.first().and_then(|turn| turn.completed_at))
+}
+
 pub(in crate::local) async fn list_turns(
     store: &LocalThreadStore,
     params: ListTurnsParams,
@@ -189,7 +215,7 @@ pub(in crate::local) async fn list_turns(
         params.cursor.as_deref(),
         params.page_size,
         params.sort_direction,
-        params.items_view,
+        super::segment_paging::TurnSelection::All(params.items_view),
     )
     .await?;
     let mut turns = Vec::with_capacity(page.rows.len());

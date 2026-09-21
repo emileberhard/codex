@@ -24,6 +24,7 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::PersistContext;
+use futures::StreamExt;
 
 pub(super) const THREAD_LIST_DEFAULT_LIMIT: usize = 25;
 pub(super) const THREAD_LIST_MAX_LIMIT: usize = 100;
@@ -2509,6 +2510,7 @@ impl ThreadRequestProcessor {
         params: ThreadListParams,
     ) -> Result<ThreadListResponse, JSONRPCErrorError> {
         let ThreadListParams {
+            include_completion_times,
             cursor,
             limit,
             sort_key,
@@ -2619,7 +2621,49 @@ impl ThreadRequestProcessor {
             |thread| thread,
         )
         .await;
+        let completion_times = if include_completion_times == Some(true) {
+            let mut completions = std::collections::BTreeMap::new();
+            let mut failures = 0;
+            let lookups: Vec<_> = data
+                .iter()
+                .map(|thread| {
+                    let thread_id = thread.id.clone();
+                    let store = Arc::clone(&self.thread_store);
+                    async move {
+                        let id = ThreadId::from_string(&thread_id).map_err(|err| {
+                            internal_error(format!("invalid stored thread id: {err}"))
+                        })?;
+                        Ok::<_, JSONRPCErrorError>((
+                            thread_id,
+                            store.latest_turn_completion(id).await,
+                        ))
+                    }
+                })
+                .collect();
+            let mut reads = futures::stream::iter(lookups).buffer_unordered(2);
+            while let Some(result) = reads.next().await {
+                let (id, result) = result?;
+                match result {
+                    Ok(timestamp) => {
+                        completions.insert(id, timestamp);
+                    }
+                    Err(_) => {
+                        failures += 1;
+                    }
+                }
+            }
+            if failures > 0 {
+                warn!(
+                    failures,
+                    "thread-list completion metadata unavailable; headers remain usable"
+                );
+            }
+            Some(completions)
+        } else {
+            None
+        };
         Ok(ThreadListResponse {
+            completion_times,
             data,
             next_cursor,
             backwards_cursor,

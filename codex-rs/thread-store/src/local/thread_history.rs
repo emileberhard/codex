@@ -15,6 +15,7 @@ mod search;
 mod segment_paging;
 mod turn_lookup;
 
+pub(super) use read::latest_turn_completion;
 pub(super) use read::list_items;
 pub(super) use read::list_turns;
 pub(super) use read::observation_cursors;

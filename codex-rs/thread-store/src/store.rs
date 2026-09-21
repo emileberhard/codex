@@ -198,6 +198,17 @@ pub trait ThreadStore: Any + Send + Sync {
     /// Lists stored threads matching the supplied filters.
     fn list_threads(&self, params: ListThreadsParams) -> ThreadStoreFuture<'_, ThreadPage>;
 
+    /// Completion time of the latest visible terminal turn. None means the read
+    /// succeeded without a known completion timestamp; errors remain unavailable.
+    /// This metadata read must not resume a thread or load message bodies.
+    fn latest_turn_completion(&self, _thread_id: ThreadId) -> ThreadStoreFuture<'_, Option<i64>> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "latest_turn_completion",
+            })
+        })
+    }
+
     /// Whether this store can discover and manage independently persisted thread sections.
     fn supports_thread_sections(&self) -> bool {
         false

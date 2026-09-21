@@ -1985,6 +1985,7 @@ fn thread_list_params(
     use_state_db_only: bool,
 ) -> ThreadListParams {
     ThreadListParams {
+        include_completion_times: None,
         cursor,
         limit: Some(PAGE_SIZE as u32),
         sort_key: Some(sort_key),

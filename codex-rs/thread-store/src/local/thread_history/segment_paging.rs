@@ -42,6 +42,11 @@ pub(super) fn validate_page_size(page_size: usize) -> ThreadStoreResult<()> {
     Ok(())
 }
 
+pub(super) enum TurnSelection {
+    All(StoredTurnItemsView),
+    Terminal,
+}
+
 pub(super) async fn page_turn_rows(
     pool: &sqlx::SqlitePool,
     requested_thread_id: ThreadId,
@@ -49,8 +54,12 @@ pub(super) async fn page_turn_rows(
     cursor: Option<&str>,
     page_size: usize,
     direction: SortDirection,
-    items_view: StoredTurnItemsView,
+    selection: TurnSelection,
 ) -> ThreadStoreResult<SegmentPage<StoredTurnRow>> {
+    let items_view = match selection {
+        TurnSelection::All(view) => view,
+        TurnSelection::Terminal => StoredTurnItemsView::NotLoaded,
+    };
     let cursor = parse_cursor(cursor, requested_thread_id, CursorScope::Turns)?;
     let bounded = bounded_lineage(lineage, cursor.as_ref())?;
     let lineage = &bounded;
@@ -124,6 +133,9 @@ WHERE thread_id =
                     .push_bind(sqlite_integer(end_ordinal)?);
             }
             query.push(")");
+        }
+        if matches!(selection, TurnSelection::Terminal) {
+            query.push(" AND status != 'inProgress'");
         }
         push_cursor_clause(&mut query, direction, segment_cursor)?;
         push_order_and_limit(&mut query, direction, remaining);

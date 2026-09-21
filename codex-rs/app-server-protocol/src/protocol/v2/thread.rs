@@ -1469,6 +1469,10 @@ pub struct ThreadSectionDeleteResponse {}
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadListParams {
+    /// Return canonical terminal-turn timestamps beside headers, without message bodies.
+    #[experimental("thread/list.includeCompletionTimes")]
+    #[ts(optional = nullable)]
+    pub include_completion_times: Option<bool>,
     /// Opaque pagination cursor returned by a previous call.
     #[ts(optional = nullable)]
     pub cursor: Option<String>,
@@ -1628,6 +1632,11 @@ pub enum SortDirection {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadListResponse {
+    /// Null unless requested. Missing thread keys mean unavailable evidence;
+    /// null values mean a successful read without a known terminal timestamp.
+    #[serde(default)]
+    #[ts(type = "{ [threadId: string]: number | null } | null")]
+    pub completion_times: Option<std::collections::BTreeMap<String, Option<i64>>>,
     pub data: Vec<Thread>,
     /// Opaque cursor to pass to the next call to continue after the last item.
     /// if None, there are no more items to return.

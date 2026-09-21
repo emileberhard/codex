@@ -85,6 +85,7 @@ async fn thread_section_move_pins_before_first_turn() -> Result<()> {
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(move_id)).await??;
 
     let list_params = ThreadListParams {
+        include_completion_times: None,
         cursor: None,
         limit: Some(100),
         sort_key: None,
@@ -103,6 +104,7 @@ async fn thread_section_move_pins_before_first_turn() -> Result<()> {
     for sort_key in [ThreadSortKey::SectionPosition, ThreadSortKey::RecencyAt] {
         let list_id = mcp
             .send_thread_list_request(ThreadListParams {
+                include_completion_times: None,
                 sort_key: Some(sort_key),
                 ..list_params.clone()
             })
@@ -130,6 +132,7 @@ async fn thread_section_move_pins_before_first_turn() -> Result<()> {
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(move_id)).await??;
     let list_id = mcp
         .send_thread_list_request(ThreadListParams {
+            include_completion_times: None,
             section_id: None,
             ..list_params
         })
@@ -261,6 +264,7 @@ async fn thread_section_move_pins_and_unpins_with_filtered_recency_pagination() 
     }
 
     let list_params = ThreadListParams {
+        include_completion_times: None,
         cursor: None,
         limit: Some(1),
         sort_key: Some(ThreadSortKey::RecencyAt),
@@ -289,6 +293,7 @@ async fn thread_section_move_pins_and_unpins_with_filtered_recency_pagination() 
 
     let request_id = mcp
         .send_thread_list_request(ThreadListParams {
+            include_completion_times: None,
             cursor: first_page.next_cursor,
             ..list_params.clone()
         })
@@ -334,6 +339,7 @@ async fn thread_section_move_pins_and_unpins_with_filtered_recency_pagination() 
 
     let request_id = mcp
         .send_thread_list_request(ThreadListParams {
+            include_completion_times: None,
             limit: Some(10),
             section_id: Some(None),
             ..list_params
@@ -452,6 +458,7 @@ async fn thread_sections_preserve_server_owned_manual_order_across_moves_and_res
     }
 
     let list_params = ThreadListParams {
+        include_completion_times: None,
         cursor: None,
         limit: Some(10),
         sort_key: Some(ThreadSortKey::SectionPosition),

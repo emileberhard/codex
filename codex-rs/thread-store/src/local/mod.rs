@@ -526,6 +526,10 @@ impl ThreadStore for LocalThreadStore {
         Box::pin(async move { list_threads::list_threads(self, params).await })
     }
 
+    fn latest_turn_completion(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, Option<i64>> {
+        Box::pin(thread_history::latest_turn_completion(self, thread_id))
+    }
+
     fn supports_thread_sections(&self) -> bool {
         self.state_db.is_some()
     }

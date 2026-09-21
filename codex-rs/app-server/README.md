@@ -2971,3 +2971,18 @@ new legacy mirrors preserve canonical source item IDs. Observation never persist
 a fresh or ephemeral thread. Ephemeral checkpoints retain at most 200 items and
 4 MiB, and `historyUnavailable` reports eviction of older completed items. An
 unfinished prefix that exceeds capacity fails the subscription explicitly.
+
+### Completion metadata for lightweight history lists
+
+Experimental clients may request `thread/list` with `includeCompletionTimes: true`.
+The response adds `completionTimes`, a map from returned thread IDs to the latest
+visible terminal turn's Unix-seconds timestamp. A null value means a successful
+metadata read without a known timestamp; a missing key means unavailable evidence.
+An omitted request leaves this field null and performs no completion lookups.
+
+The local store reads its canonical, incrementally maintained history projection,
+respecting fork cutoffs, shadowed turns, interrupted/failed turns, and reverts. It
+never loads item bodies or resumes/subscribes to a thread. At most two metadata
+reads run concurrently. This timestamp is not `updatedAt` or `recencyAt`: those
+can advance while a turn is still running. Clients should retain last-good order
+when a key is unavailable and must not infer a completion from a timestamp cache.

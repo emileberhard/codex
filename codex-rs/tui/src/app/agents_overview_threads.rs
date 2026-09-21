@@ -171,6 +171,7 @@ impl App {
                                 .request_typed::<ThreadListResponse>(ClientRequest::ThreadList {
                                     request_id: RequestId::String(Uuid::new_v4().to_string()),
                                     params: ThreadListParams {
+                                        include_completion_times: None,
                                         cursor,
                                         limit: Some(20),
                                         sort_key: Some(sort_key),

@@ -1772,3 +1772,106 @@ fn item_ids(page: &ItemPage) -> Vec<&str> {
         .map(|item| item.item_id.as_str())
         .collect()
 }
+
+#[tokio::test]
+async fn latest_turn_completion_ignores_running_turns_and_never_decodes_items() {
+    let (home, store, thread_id) = store_with_mode(ThreadHistoryMode::Paginated).await;
+    write_rollout_with_end(&rollout_path(home.path(), thread_id), thread_id, None, 50);
+    let db = history_db(&store).await;
+    assert_eq!(
+        latest_turn_completion(&store, thread_id).await.unwrap(),
+        None
+    );
+    insert_turn(
+        db,
+        thread_id,
+        "finished",
+        10,
+        "completed",
+        None,
+        Some("broken"),
+        None,
+    )
+    .await;
+    insert_item(db, thread_id, "finished", "broken", 11).await;
+    sqlx::query("UPDATE thread_items SET item_json = 'not-json' WHERE thread_id = ?")
+        .bind(thread_id.to_string())
+        .execute(db)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE thread_turns SET completed_at = 100 WHERE thread_id = ?")
+        .bind(thread_id.to_string())
+        .execute(db)
+        .await
+        .unwrap();
+    insert_turn(db, thread_id, "running", 20, "inProgress", None, None, None).await;
+    assert_eq!(
+        latest_turn_completion(&store, thread_id).await.unwrap(),
+        Some(100)
+    );
+    // The metadata read must observe completion even when the header timestamp is unchanged.
+    sqlx::query("UPDATE thread_turns SET status = 'completed', completed_at = 101 WHERE thread_id = ? AND turn_id = 'running'")
+        .bind(thread_id.to_string()).execute(db).await.unwrap();
+    assert_eq!(
+        latest_turn_completion(&store, thread_id).await.unwrap(),
+        Some(101)
+    );
+    // Reverting the canonical projection removes the latest completion, not a monotonic cache.
+    sqlx::query("DELETE FROM thread_turns WHERE thread_id = ? AND turn_id = 'running'")
+        .bind(thread_id.to_string())
+        .execute(db)
+        .await
+        .unwrap();
+    assert_eq!(
+        latest_turn_completion(&store, thread_id).await.unwrap(),
+        Some(100)
+    );
+    assert!(
+        latest_turn_completion(&store, ThreadId::default())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn latest_turn_completion_respects_fork_cutoff_and_shadowed_turns() {
+    let (home, store, child_id) = store_with_mode(ThreadHistoryMode::Paginated).await;
+    let parent_id = ThreadId::default();
+    let parent_path = rollout_path(home.path(), parent_id);
+    write_rollout_with_end(&parent_path, parent_id, None, 5);
+    write_rollout_with_end(
+        &rollout_path(home.path(), child_id),
+        child_id,
+        Some(history_position(&parent_path, parent_id, 4)),
+        2,
+    );
+    let db = history_db(&store).await;
+    insert_turn(db, parent_id, "before", 1, "completed", None, None, None).await;
+    insert_turn(db, parent_id, "shared", 2, "completed", None, None, None).await;
+    insert_turn(db, parent_id, "after", 4, "completed", None, None, None).await;
+    sqlx::query("UPDATE thread_turns SET completed_at = rollout_ordinal * 100 WHERE thread_id = ?")
+        .bind(parent_id.to_string())
+        .execute(db)
+        .await
+        .unwrap();
+    assert_eq!(
+        latest_turn_completion(&store, child_id).await.unwrap(),
+        Some(200)
+    );
+    insert_turn(db, child_id, "shared", 5, "inProgress", None, None, None).await;
+    assert_eq!(
+        latest_turn_completion(&store, child_id).await.unwrap(),
+        Some(100)
+    );
+    sqlx::query(
+        "UPDATE thread_turns SET status = 'interrupted', completed_at = 500 WHERE thread_id = ?",
+    )
+    .bind(child_id.to_string())
+    .execute(db)
+    .await
+    .unwrap();
+    assert_eq!(
+        latest_turn_completion(&store, child_id).await.unwrap(),
+        Some(500)
+    );
+}

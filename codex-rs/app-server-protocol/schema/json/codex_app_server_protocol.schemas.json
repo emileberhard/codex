@@ -22143,6 +22143,21 @@
               "null"
             ]
           },
+          "completionTimes": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "default": null,
+            "description": "Null unless requested. Missing thread keys mean unavailable evidence; null values mean a successful read without a known terminal timestamp.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "data": {
             "items": {
               "$ref": "#/definitions/v2/Thread"

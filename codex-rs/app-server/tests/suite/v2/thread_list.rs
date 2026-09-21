@@ -103,6 +103,7 @@ async fn list_threads_with_sort(
     mcp.request(|request_id| ClientRequest::ThreadList {
         request_id,
         params: codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor,
             limit,
             sort_key,
@@ -142,6 +143,7 @@ async fn list_threads_for_relation(
     mcp.request(|request_id| ClientRequest::ThreadList {
         request_id,
         params: codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor,
             limit: Some(limit),
             sort_key: None,
@@ -332,6 +334,65 @@ async fn thread_list_reports_system_error_idle_flag_after_failed_turn() -> Resul
         .expect("expected started thread to be listed");
     assert_eq!(listed.status, ThreadStatus::SystemError,);
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_list_completion_metadata_reads_native_terminal_evidence() -> Result<()> {
+    let server =
+        create_mock_responses_server_sequence(vec![create_final_assistant_message_sse_response(
+            "completed",
+        )?])
+        .await;
+    let codex_home = TempDir::new()?;
+    create_runtime_config(codex_home.path(), &server.uri())?;
+    let mut mcp = init_mcp(codex_home.path()).await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let request = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "Complete a fixture turn".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    let _: TurnStartResponse = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request)).await??;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let listed: ThreadListResponse = mcp
+        .request(|request_id| ClientRequest::ThreadList {
+            request_id,
+            params: serde_json::from_value(json!({
+                "includeCompletionTimes": true,
+                "sourceKinds": ["appServer", "cli", "vscode"]
+            }))
+            .expect("valid thread-list fixture"),
+        })
+        .await?;
+    assert_eq!(
+        listed.data.len(),
+        1,
+        "fixture thread must be listed before checking completion evidence"
+    );
+    let completions = listed
+        .completion_times
+        .expect("requested completion metadata");
+    assert_eq!(completions.len(), 1);
+    assert!(completions[&thread.id].is_some_and(|timestamp| timestamp > 0));
+    assert_eq!(listed.data.len(), 1);
+    assert_eq!(listed.data[0].id, thread.id);
+    assert!(listed.data[0].turns.is_empty());
     Ok(())
 }
 
@@ -547,6 +608,7 @@ async fn thread_list_respects_cwd_filters() -> Result<()> {
     let mut mcp = init_mcp(codex_home.path()).await?;
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: None,
             limit: Some(10),
             sort_key: None,
@@ -660,6 +722,7 @@ sqlite = true
     let mut mcp = init_mcp(codex_home.path()).await?;
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: None,
             limit: Some(10),
             sort_key: None,
@@ -947,6 +1010,7 @@ sqlite = true
 
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: None,
             limit: Some(10),
             sort_key: None,
@@ -983,6 +1047,7 @@ sqlite = true
 
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: None,
             limit: Some(10),
             sort_key: None,
@@ -1012,6 +1077,7 @@ sqlite = true
 
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: None,
             limit: Some(10),
             sort_key: None,
@@ -1197,6 +1263,7 @@ async fn thread_list_relation_filters_reject_invalid_requests() -> Result<()> {
     let mut mcp = init_mcp(codex_home.path()).await?;
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: None,
             limit: Some(10),
             sort_key: None,
@@ -1223,6 +1290,7 @@ async fn thread_list_relation_filters_reject_invalid_requests() -> Result<()> {
     let thread_id = ThreadId::new().to_string();
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: None,
             limit: Some(10),
             sort_key: None,
@@ -1509,6 +1577,7 @@ async fn thread_list_reports_loaded_subagent_direct_input_capability() -> Result
         .request(|request_id| ClientRequest::ThreadList {
             request_id,
             params: codex_app_server_protocol::ThreadListParams {
+                include_completion_times: None,
                 cursor: None,
                 limit: Some(10),
                 sort_key: None,
@@ -2330,6 +2399,7 @@ async fn thread_list_backwards_cursor_can_seed_forward_delta_sync() -> Result<()
     } = {
         let request_id = mcp
             .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+                include_completion_times: None,
                 cursor: None,
                 limit: Some(1),
                 sort_key: Some(ThreadSortKey::UpdatedAt),
@@ -2371,6 +2441,7 @@ async fn thread_list_backwards_cursor_can_seed_forward_delta_sync() -> Result<()
     } = {
         let request_id = mcp
             .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+                include_completion_times: None,
                 cursor: Some(backwards_cursor),
                 limit: Some(10),
                 sort_key: Some(ThreadSortKey::UpdatedAt),
@@ -2608,6 +2679,7 @@ async fn thread_list_invalid_cursor_returns_error() -> Result<()> {
 
     let request_id = mcp
         .send_thread_list_request(codex_app_server_protocol::ThreadListParams {
+            include_completion_times: None,
             cursor: Some("not-a-cursor".to_string()),
             limit: Some(2),
             sort_key: None,
