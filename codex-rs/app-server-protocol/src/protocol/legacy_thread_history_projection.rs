@@ -124,6 +124,7 @@ mod tests {
     fn start(id: &str) -> RolloutItem {
         RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
             turn_id: id.into(),
+            root_turn_id: None,
             trace_id: None,
             started_at: Some(1),
             model_context_window: None,

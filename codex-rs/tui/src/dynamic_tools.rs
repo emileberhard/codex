@@ -12,6 +12,7 @@ use codex_app_server_protocol::DynamicToolFunctionSpec;
 use codex_app_server_protocol::DynamicToolNamespaceSpec;
 use codex_app_server_protocol::DynamicToolNamespaceTool;
 use codex_app_server_protocol::DynamicToolSpec;
+use codex_app_server_protocol::ImageReference;
 use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::SandboxMode;
 use codex_app_server_protocol::SandboxPolicy;
@@ -439,6 +440,7 @@ async fn execute_inner(
                         request_id,
                         params: ThreadListParams {
                             include_completion_times: None,
+                            originators: None,
                             cursor: arguments.cursor.clone(),
                             limit: Some(limit),
                             sort_key: Some(ThreadSortKey::UpdatedAt),
@@ -1344,7 +1346,14 @@ fn turn_summary(turn: &Turn, include_outputs: bool, output_chars: usize) -> Valu
                         }
                         input
                     }
-                    UserInput::Image { url, .. } => json!({"type": "image", "url": url}),
+                    UserInput::Image {
+                        image: ImageReference::Inline { url },
+                        ..
+                    } => json!({"type": "image", "url": url}),
+                    UserInput::Image {
+                        image: ImageReference::File { file_id },
+                        ..
+                    } => json!({"type": "image", "fileId": file_id}),
                     UserInput::LocalImage { path, .. } => json!({"type": "localImage", "path": path}),
                     UserInput::Audio { url } => json!({"type": "audio", "url": url}),
                     UserInput::LocalAudio { path } => json!({"type": "localAudio", "path": path}),

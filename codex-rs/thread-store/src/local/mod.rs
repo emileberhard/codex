@@ -17,14 +17,20 @@ mod rollout_migration;
 #[allow(dead_code)]
 mod rollout_lineage;
 mod search_threads;
+mod thread_attachments;
 mod thread_history;
 mod thread_history_materialization;
 mod thread_rollout_resolver;
 mod thread_sections;
 mod unarchive_thread;
 mod update_thread_metadata;
-mod writer_lock;
 
+#[cfg(test)]
+#[path = "compression_writer_tests.rs"]
+mod compression_writer_tests;
+#[cfg(test)]
+#[path = "daybreak_metadata_tests.rs"]
+mod daybreak_metadata_tests;
 #[cfg(test)]
 #[path = "pending_thread_metadata_tests.rs"]
 mod pending_thread_metadata_tests;
@@ -35,6 +41,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::StateDbHandle;
+use codex_rollout::WriterLockCoordinator;
 use codex_state::SqliteConfig;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -47,6 +54,8 @@ use tokio::sync::OwnedRwLockReadGuard;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 
+use crate::AddThreadAttachmentOutcome;
+use crate::AddThreadAttachmentParams;
 use crate::AppendThreadItemsParams;
 use crate::ArchiveThreadParams;
 use crate::ArchiveThreadsParams;
@@ -61,6 +70,7 @@ use crate::DeletedProject;
 use crate::ItemPage;
 use crate::ListItemsParams;
 use crate::ListProjectsParams;
+use crate::ListThreadAttachmentsParams;
 use crate::ListThreadSectionsParams;
 use crate::ListThreadsParams;
 use crate::ListTimelineParams;
@@ -74,6 +84,8 @@ use crate::PreparedFork;
 use crate::ProjectMoveOutcome;
 use crate::ReadThreadByRolloutPathParams;
 use crate::ReadThreadParams;
+use crate::RemoveThreadAttachmentOutcome;
+use crate::RemoveThreadAttachmentParams;
 use crate::RenameThreadSectionParams;
 use crate::ResumeThreadParams;
 use crate::RevertThreadParams;
@@ -86,6 +98,7 @@ use crate::StoredThread;
 use crate::StoredThreadHistory;
 use crate::StoredThreadSection;
 use crate::StoredThreadSectionsPage;
+use crate::ThreadAttachmentPage;
 use crate::ThreadMetadataPatch;
 use crate::ThreadOccurrenceSearchPage;
 use crate::ThreadPage;
@@ -99,8 +112,6 @@ use crate::TurnPage;
 use crate::UpdateProjectParams;
 use crate::UpdateThreadMetadataParams;
 use crate::UpdatedProject;
-use crate::local::writer_lock::WriterLockCoordinator;
-use crate::local::writer_lock::WriterLockGuard;
 
 pub use rollout_migration::RolloutMigrationFailureReason;
 pub use rollout_migration::RolloutMigrationMode;
@@ -133,6 +144,8 @@ pub struct LocalThreadStore {
     state_db: Option<StateDbHandle>,
     thread_history_db: Arc<OnceCell<sqlx::SqlitePool>>,
 }
+
+type WriterLockGuard = Arc<codex_rollout::WriterLockGuard>;
 
 struct LiveRecorderEntry {
     recorder: RolloutRecorder,
@@ -302,6 +315,23 @@ impl LocalThreadStore {
         Ok(())
     }
 
+    fn acquire_writer_lock(&self, thread_id: ThreadId) -> ThreadStoreResult<WriterLockGuard> {
+        self.writer_lock_coordinator
+            .acquire(thread_id)
+            .map(Arc::new)
+            .map_err(|err| {
+                if err.kind() == std::io::ErrorKind::WouldBlock {
+                    ThreadStoreError::Conflict {
+                        message: err.to_string(),
+                    }
+                } else {
+                    ThreadStoreError::Internal {
+                        message: err.to_string(),
+                    }
+                }
+            })
+    }
+
     async fn acquire_writer_locks(
         &self,
         thread_ids: &[ThreadId],
@@ -311,7 +341,7 @@ impl LocalThreadStore {
             if self.live_recorders.lock().await.contains_key(&thread_id) {
                 continue;
             }
-            writer_locks.push(self.writer_lock_coordinator.acquire(thread_id)?);
+            writer_locks.push(self.acquire_writer_lock(thread_id)?);
         }
         Ok(writer_locks)
     }
@@ -452,6 +482,19 @@ impl ThreadStore for LocalThreadStore {
         })
     }
 
+    fn read_pending_thread_metadata(
+        &self,
+        thread_id: ThreadId,
+    ) -> ThreadStoreFuture<'_, Option<ThreadMetadataPatch>> {
+        Box::pin(async move {
+            Ok(self
+                .pending_thread_metadata
+                .lock(thread_id)
+                .await
+                .and_then(|metadata| metadata.clone()))
+        })
+    }
+
     fn remove_pending_thread_metadata(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move {
             self.pending_thread_metadata.remove(thread_id).await;
@@ -560,6 +603,46 @@ impl ThreadStore for LocalThreadStore {
         params: DeleteThreadSectionParams,
     ) -> ThreadStoreFuture<'_, bool> {
         Box::pin(async move { thread_sections::delete_thread_section(self, params).await })
+    }
+
+    fn supports_thread_attachments(&self) -> bool {
+        self.state_db.is_some()
+    }
+
+    fn copy_thread_attachments(
+        &self,
+        source_thread_id: ThreadId,
+        destination_thread_id: ThreadId,
+    ) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(async move {
+            thread_attachments::copy_thread_attachments(
+                self,
+                source_thread_id,
+                destination_thread_id,
+            )
+            .await
+        })
+    }
+
+    fn add_thread_attachment(
+        &self,
+        params: AddThreadAttachmentParams,
+    ) -> ThreadStoreFuture<'_, AddThreadAttachmentOutcome> {
+        Box::pin(async move { thread_attachments::add_thread_attachment(self, params).await })
+    }
+
+    fn list_thread_attachments(
+        &self,
+        params: ListThreadAttachmentsParams,
+    ) -> ThreadStoreFuture<'_, ThreadAttachmentPage> {
+        Box::pin(async move { thread_attachments::list_thread_attachments(self, params).await })
+    }
+
+    fn remove_thread_attachment(
+        &self,
+        params: RemoveThreadAttachmentParams,
+    ) -> ThreadStoreFuture<'_, RemoveThreadAttachmentOutcome> {
+        Box::pin(async move { thread_attachments::remove_thread_attachment(self, params).await })
     }
 
     fn supports_projects(&self) -> bool {
@@ -690,6 +773,8 @@ impl ThreadStore for LocalThreadStore {
 
 #[cfg(test)]
 mod tests {
+    #[path = "acquisition_tests.rs"]
+    mod acquisition_tests;
     use std::sync::Arc;
 
     use codex_protocol::ThreadId;
@@ -946,6 +1031,7 @@ mod tests {
             RolloutItem::TurnContext(TurnContextItem {
                 turn_id: Some("turn-1".to_string()),
                 root_turn_id: None,
+                disabled_plugin_ids: None,
                 cwd: serde_json::from_value(serde_json::json!(cwd)).expect("absolute cwd"),
                 workspace_roots: None,
                 current_date: None,
@@ -970,13 +1056,16 @@ mod tests {
             })
         };
 
+        let mut guard = crate::LiveThreadInitGuard::default();
         let live_thread = LiveThread::create_with_inherited_model_context(
             store,
             params,
             &[turn_context("parent-model", AskForApproval::Never)],
+            &mut guard,
         )
         .await
         .expect("create live thread with inherited context");
+        guard.commit();
         live_thread
             .persist(PersistContext::Standard)
             .await
@@ -1032,6 +1121,7 @@ mod tests {
             .append_items(&[RolloutItem::EventMsg(EventMsg::TurnStarted(
                 TurnStartedEvent {
                     turn_id: "turn-1".to_string(),
+                    root_turn_id: None,
                     trace_id: None,
                     started_at: None,
                     model_context_window: None,
@@ -1376,6 +1466,20 @@ mod tests {
                 .live_rollout_path(thread_id)
                 .await
                 .expect("load rollout path");
+            {
+                let recorder = store
+                    .live_recorders
+                    .lock()
+                    .await
+                    .get(&thread_id)
+                    .expect("live recorder")
+                    .recorder
+                    .clone();
+                recorder
+                    .record_canonical_items(&[user_message_item("deferred item to discard")])
+                    .await
+                    .expect("queue deferred item without materializing it");
+            }
             assert!(!rollout_path.exists());
 
             let lock_path = home
@@ -1973,6 +2077,7 @@ mod tests {
             history_base: None,
             subagent_history_start_ordinal: None,
             initial_window_id: uuid::Uuid::now_v7().to_string(),
+            runtime_workspace_roots: None,
             metadata: thread_metadata(),
         }
     }

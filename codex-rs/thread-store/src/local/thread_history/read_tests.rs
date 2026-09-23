@@ -1009,25 +1009,8 @@ async fn list_items_update_ordinals_use_selected_rollout_id() {
 }
 
 #[tokio::test]
-async fn list_history_keeps_legacy_threads_unsupported() {
-    let (_home, store, thread_id) = store_with_mode(ThreadHistoryMode::Legacy).await;
-
-    let error = store
-        .list_turns(turn_params(
-            thread_id,
-            /*cursor*/ None,
-            /*page_size*/ 1,
-            SortDirection::Asc,
-            StoredTurnItemsView::Summary,
-        ))
-        .await
-        .expect_err("legacy turns remain unsupported");
-    assert!(matches!(
-        error,
-        ThreadStoreError::Unsupported {
-            operation: "list_turns"
-        }
-    ));
+async fn list_history_keeps_unindexed_threads_unsupported() {
+    let (_home, store, _thread_id) = store_with_mode(ThreadHistoryMode::Legacy).await;
 
     let error = store
         .list_turns(turn_params(
@@ -1591,7 +1574,7 @@ fn rollout_end_byte_offset(path: &std::path::Path, end_ordinal_exclusive: u64) -
     let end_byte_offset = bytes
         .split_inclusive(|byte| *byte == b'\n')
         .take_while(|line| {
-            serde_json::from_slice::<RolloutLine>(line)
+            codex_rollout::parse_rollout_line_bytes(line)
                 .expect("parse rollout fixture")
                 .ordinal
                 .expect("paginated rollout ordinal")

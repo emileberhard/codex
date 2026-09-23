@@ -44,9 +44,7 @@ async fn public_connector_uses_factory_and_exposes_stream_and_sink() {
         .into_client_request()
         .expect("websocket request should build");
     let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
-    let connector = WebSocketConnector::new_async(&factory)
-        .await
-        .expect("connector should build");
+    let connector = WebSocketConnector::new(&factory).expect("connector should build");
 
     let (mut websocket, _) = connector
         .connect(request, WebSocketConfig::default())
@@ -75,8 +73,7 @@ async fn public_connector_enables_tcp_nodelay_when_requested() {
         .into_client_request()
         .expect("websocket request should build");
     let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
-    let connector = WebSocketConnector::new_async(&factory)
-        .await
+    let connector = WebSocketConnector::new(&factory)
         .expect("connector should build")
         .with_tcp_nodelay();
 
@@ -100,22 +97,6 @@ async fn public_connector_enables_tcp_nodelay_when_requested() {
     );
 
     target_task.await.expect("target task should finish");
-}
-
-#[tokio::test]
-async fn async_connectors_share_one_tls_config() {
-    let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
-    let first = WebSocketConnector::new_async(&factory)
-        .await
-        .expect("first connector should build");
-    let second = WebSocketConnector::new_async(&factory)
-        .await
-        .expect("second connector should build");
-
-    assert!(Arc::ptr_eq(
-        first.tls_config.as_ref().expect("first TLS config"),
-        second.tls_config.as_ref().expect("second TLS config"),
-    ));
 }
 
 #[tokio::test]
@@ -213,6 +194,7 @@ async fn direct_route_connects_secure_websocket() {
         Some(tls_config),
         OutboundProxyRoute::Direct,
         TcpNodelay::Enabled,
+        /*loopback_direct*/ false,
     )
     .await
     .expect("direct websocket handshake should succeed");
@@ -300,6 +282,7 @@ async fn no_proxy_subprocess_probe() {
             no_proxy: Some(no_proxy),
         },
         TcpNodelay::Enabled,
+        /*loopback_direct*/ false,
     )
     .await
     .expect("websocket handshake should succeed");
@@ -374,6 +357,32 @@ async fn happy_eyeballs_does_not_wait_for_stalled_preferred_family() {
     .expect("alternate family should connect");
 
     assert_eq!(connected, reachable);
+}
+
+#[test]
+fn loopback_direct_drops_non_loopback_resolved_addresses() {
+    let loopback = "127.0.0.1:8080"
+        .parse::<SocketAddr>()
+        .expect("loopback address should parse");
+    let remote = "192.0.2.1:8080"
+        .parse::<SocketAddr>()
+        .expect("remote address should parse");
+
+    assert_eq!(
+        loopback_addresses(vec![remote, loopback]).expect("loopback result should remain"),
+        vec![loopback]
+    );
+}
+
+#[test]
+fn loopback_direct_rejects_localhost_resolution_without_loopback_addresses() {
+    let remote = "192.0.2.1:8080"
+        .parse::<SocketAddr>()
+        .expect("remote address should parse");
+
+    let error = loopback_addresses(vec![remote])
+        .expect_err("localhost resolution without loopback addresses must fail");
+    assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
 }
 
 #[tokio::test]
@@ -632,6 +641,7 @@ async fn assert_proxy_tunnels_secure_websocket(proxy_tls: bool) {
             no_proxy: None,
         },
         TcpNodelay::Enabled,
+        /*loopback_direct*/ false,
     )
     .await
     .expect("proxied websocket handshake should succeed");

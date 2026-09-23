@@ -70,38 +70,41 @@ async fn gate(listener: &TcpListener, expected: &str) -> Result<TcpStream> {
 }
 
 #[derive(Clone, Copy)]
-enum CompletionTiming {
-    AfterSubscribe,
-    BeforeSubscribe,
-    NextTurnBeforeSubscribe,
+enum CompletionRelativeToSubscribe {
+    After,
+    Before,
+    NextTurnBefore,
 }
 
 #[tokio::test]
 async fn subscription_seeds_partial_text_before_subsequent_deltas() -> Result<()> {
-    exercise_checkpoint(CompletionTiming::AfterSubscribe, "paginated").await
+    exercise_checkpoint(CompletionRelativeToSubscribe::After, "paginated").await
 }
 
 #[tokio::test]
 async fn subscription_covers_persisted_completion_queued_behind_listener() -> Result<()> {
-    exercise_checkpoint(CompletionTiming::BeforeSubscribe, "paginated").await
+    exercise_checkpoint(CompletionRelativeToSubscribe::Before, "paginated").await
 }
 
 #[tokio::test]
 async fn subscription_covers_next_turn_persisted_ahead_of_listener() -> Result<()> {
-    exercise_checkpoint(CompletionTiming::NextTurnBeforeSubscribe, "paginated").await
+    exercise_checkpoint(CompletionRelativeToSubscribe::NextTurnBefore, "paginated").await
 }
 
 #[tokio::test]
 async fn legacy_subscription_seeds_partial_text() -> Result<()> {
-    exercise_checkpoint(CompletionTiming::AfterSubscribe, "legacy").await
+    exercise_checkpoint(CompletionRelativeToSubscribe::After, "legacy").await
 }
 
 #[tokio::test]
 async fn legacy_subscription_covers_completed_canonical_identity() -> Result<()> {
-    exercise_checkpoint(CompletionTiming::BeforeSubscribe, "legacy").await
+    exercise_checkpoint(CompletionRelativeToSubscribe::Before, "legacy").await
 }
 
-async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Result<()> {
+async fn exercise_checkpoint(
+    timing: CompletionRelativeToSubscribe,
+    history_mode: &str,
+) -> Result<()> {
     let barrier = TcpListener::bind("127.0.0.1:0").await?;
     let barrier_address = barrier.local_addr()?.to_string();
     let (finish, finish_gate) = oneshot::channel();
@@ -171,7 +174,7 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
         .to_owned();
     let mut listener_gate = gate(&barrier, &format!("listener:{}", thread.id)).await?;
     let mut finish = Some(finish);
-    if !matches!(timing, CompletionTiming::AfterSubscribe) {
+    if !matches!(timing, CompletionRelativeToSubscribe::After) {
         finish
             .take()
             .context("response completion gate")?
@@ -203,7 +206,7 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
             .await??;
         }
     }
-    if matches!(timing, CompletionTiming::NextTurnBeforeSubscribe) {
+    if matches!(timing, CompletionRelativeToSubscribe::NextTurnBefore) {
         send_request(
             &mut interactive,
             "turn/start",
@@ -244,7 +247,7 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
     let mut deltas = String::new();
     let mut completions = Vec::new();
     let mut page = None;
-    let expect_terminal_count = if matches!(timing, CompletionTiming::NextTurnBeforeSubscribe) {
+    let expect_terminal_count = if matches!(timing, CompletionRelativeToSubscribe::NextTurnBefore) {
         2
     } else {
         1
@@ -286,7 +289,7 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
     })
     .await??;
     let page = page.context("checkpoint items")?;
-    if history_mode == "legacy" && matches!(timing, CompletionTiming::AfterSubscribe) {
+    if history_mode == "legacy" && matches!(timing, CompletionRelativeToSubscribe::After) {
         assert!(
             !page
                 .data
@@ -304,7 +307,7 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
     let ThreadItem::AgentMessage { text: durable, .. } = &message.item else {
         bail!("wrong checkpoint item")
     };
-    if matches!(timing, CompletionTiming::AfterSubscribe) {
+    if matches!(timing, CompletionRelativeToSubscribe::After) {
         assert_eq!(message.is_complete, Some(false));
         assert_eq!(format!("{prefix}{deltas}"), "before after");
     } else {
@@ -313,7 +316,7 @@ async fn exercise_checkpoint(timing: CompletionTiming, history_mode: &str) -> Re
         assert_eq!(deltas, "after");
     }
     assert!(message.started_at_ordinal.is_some());
-    if matches!(timing, CompletionTiming::NextTurnBeforeSubscribe) {
+    if matches!(timing, CompletionRelativeToSubscribe::NextTurnBefore) {
         assert!(
             page.data
                 .iter()

@@ -4,6 +4,8 @@
 //! configuration and app-server initialization remain responsive to safe local editing.
 
 use super::*;
+use codex_terminal_detection::Multiplexer;
+use codex_terminal_detection::TerminalName;
 
 pub(super) async fn run_main_inner(
     mut cli: Cli,
@@ -11,7 +13,24 @@ pub(super) async fn run_main_inner(
     loader_overrides: LoaderOverrides,
     explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
 ) -> std::io::Result<AppExitInfo> {
+    if cli.no_daemon && explicit_remote_endpoint.is_some() {
+        return Err(std::io::Error::other(
+            "--no-daemon cannot be used with --remote.",
+        ));
+    }
     let strict_config = cli.strict_config;
+    if cli.shared.worktree {
+        if explicit_remote_endpoint.is_some() {
+            return Err(std::io::Error::other(
+                "`--worktree` is only supported for local sessions",
+            ));
+        }
+        if cli.fork_picker || cli.fork_last {
+            return Err(std::io::Error::other(
+                "`codex fork --worktree` requires an explicit session ID",
+            ));
+        }
+    }
     let (sandbox_mode, approval_policy) = if cli.dangerously_bypass_approvals_and_sandbox {
         (
             Some(SandboxMode::DangerFullAccess),
@@ -73,6 +92,7 @@ pub(super) async fn run_main_inner(
             /*default_daemon_socket*/ None,
             /*can_reuse_implicit_local_daemon*/ false,
             workload_identity_selected,
+            std::env::var_os(codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR).as_deref(),
         )?;
         let validation_environment_manager =
             if should_load_configured_environments(&loader_overrides, &validation_target) {
@@ -135,14 +155,14 @@ pub(super) async fn run_main_inner(
         .await;
     }
 
-    let reuse_implicit_local_daemon = !workload_identity_selected
-        && (cli.agents_overview
-            || can_reuse_implicit_local_daemon(
-                &cli_kv_overrides,
-                &launch_loader_overrides,
-                strict_config,
-                cli.bypass_hook_trust,
-            ));
+    let daemon_exclusion = daemon_startup::exclusion(
+        &cli,
+        &cli_kv_overrides,
+        &launch_loader_overrides,
+        workload_identity_selected,
+        std::env::var_os(codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR).as_deref(),
+    );
+    let reuse_implicit_local_daemon = daemon_exclusion.is_none();
     let search_only_config_override = !workload_identity_selected
         && cli.web_search
         && startup_preflight::has_only_search_config_override(&cli_kv_overrides)
@@ -187,6 +207,7 @@ pub(super) async fn run_main_inner(
         default_daemon,
         reuse_implicit_local_daemon,
         workload_identity_selected,
+        std::env::var_os(codex_exec_server::CODEX_EXEC_SERVER_URL_ENV_VAR).as_deref(),
     )?;
     let remote_cwd_override = cli
         .cwd
@@ -208,6 +229,14 @@ pub(super) async fn run_main_inner(
                 .await?
         }
         .map_err(std::io::Error::other)?;
+    if cli.shared.worktree
+        && (app_server_target.uses_remote_workspace()
+            || prepared_environment_manager.default_environment_is_remote())
+    {
+        return Err(std::io::Error::other(
+            "`--worktree` is only supported for local sessions",
+        ));
+    }
     let cwd = cli.cwd.clone();
     let config_cwd = config_cwd_for_app_server_target(
         cwd.as_deref(),
@@ -232,7 +261,15 @@ pub(super) async fn run_main_inner(
             CloudConfigBundleLoader::default(),
         ))
         .await?;
-    let bootstrap_config_toml = &bootstrap_config.config_toml;
+    let screen_reader_result = if !loader_overrides.ignore_user_config {
+        startup_draft
+            .run_until(screen_reader::initialize(
+                &bootstrap_config.config_layer_stack,
+            ))
+            .await?
+    } else {
+        Ok(())
+    };
     let cloud_config_bundle = startup_draft
         .run_until(cloud_config_bundle_for_app_server_target(
             &app_server_target,
@@ -240,6 +277,7 @@ pub(super) async fn run_main_inner(
             &codex_home,
         ))
         .await??;
+    let bootstrap_config_toml = &bootstrap_config.config_toml;
 
     let cwd_override = if app_server_target.uses_remote_workspace() {
         None
@@ -322,7 +360,7 @@ pub(super) async fn run_main_inner(
 
     let additional_dirs = cli.add_dir.clone();
 
-    let overrides = ConfigOverrides {
+    let mut overrides = ConfigOverrides {
         model,
         approval_policy,
         sandbox_mode,
@@ -337,7 +375,7 @@ pub(super) async fn run_main_inner(
         ..Default::default()
     };
 
-    let config = startup_draft
+    let mut config = startup_draft
         .run_until(load_config_or_exit(
             cli_kv_overrides.clone(),
             overrides.clone(),
@@ -348,7 +386,7 @@ pub(super) async fn run_main_inner(
         .await?;
     startup_draft.apply_config(&config);
 
-    let cloud_config_bundle = if workload_identity_selected {
+    let mut cloud_config_bundle = if workload_identity_selected {
         cloud_config_bundle
     } else {
         startup_draft
@@ -358,6 +396,32 @@ pub(super) async fn run_main_inner(
             ))
             .await??
     };
+    let managed_worktree = if cli.shared.worktree {
+        let (destination, bundle, worktree) = startup_draft
+            .run_until(worktree_startup::prepare(
+                &mut cli,
+                config.clone(),
+                &mut overrides,
+                cli_kv_overrides.clone(),
+                loader_overrides.clone(),
+                strict_config,
+                &app_server_target,
+                &arg0_paths,
+                cloud_config_bundle.clone(),
+            ))
+            .await?
+            .map_err(|err| std::io::Error::other(err.to_string()))?;
+        config = destination;
+        cloud_config_bundle = bundle;
+        startup_draft.apply_config(&config);
+        Some(worktree)
+    } else {
+        None
+    };
+    #[cfg(target_os = "macos")]
+    let local_runtime_paths = local_runtime_paths.with_allowed_symlinked_codex_home(
+        codex_config::allowed_symlinked_codex_home(&config.config_layer_stack, &config.codex_home),
+    );
     let environment_manager = Arc::new(
         prepared_environment_manager
             .build(Some(local_runtime_paths), config.http_client_factory())
@@ -406,10 +470,37 @@ pub(super) async fn run_main_inner(
             AppServerTarget::LocalDaemon { .. } => "local_daemon",
             AppServerTarget::Remote { .. } => "remote",
         };
+        // Use a fixed category, not the versioned or user-provided terminal identifier.
+        let terminal_info = codex_terminal_detection::terminal_info();
+        let terminal_name = match terminal_info.name {
+            TerminalName::AppleTerminal => "apple_terminal",
+            TerminalName::Ghostty => "ghostty",
+            TerminalName::Iterm2 => "iterm2",
+            TerminalName::WarpTerminal => "warp",
+            TerminalName::VsCode => "vscode",
+            TerminalName::WezTerm => "wezterm",
+            TerminalName::Kitty => "kitty",
+            TerminalName::Alacritty => "alacritty",
+            TerminalName::Konsole => "konsole",
+            TerminalName::GnomeTerminal => "gnome_terminal",
+            TerminalName::Vte => "vte",
+            TerminalName::WindowsTerminal => "windows_terminal",
+            TerminalName::Dumb => "dumb",
+            TerminalName::Unknown => "unknown",
+        };
+        let multiplexer = match terminal_info.multiplexer {
+            Some(Multiplexer::Tmux { .. }) => "tmux",
+            Some(Multiplexer::Zellij { .. }) => "zellij",
+            None => "none",
+        };
         let _ = metrics.counter(
             "codex.tui.start",
             /*inc*/ 1,
-            &[("app_server_mode", app_server_mode)],
+            &[
+                ("app_server_mode", app_server_mode),
+                ("terminal_name", terminal_name),
+                ("multiplexer", multiplexer),
+            ],
         );
         let telemetry =
             codex_rollout::sqlite_telemetry_recorder(metrics.clone(), otel_originator.as_str());
@@ -443,6 +534,9 @@ pub(super) async fn run_main_inner(
         {
             restore_terminal_before_fatal_exit();
             eprintln!("Error adding directories: {warning}");
+            if let Some(worktree) = managed_worktree.as_ref() {
+                worktree.report_startup_failure();
+            }
             std::process::exit(1);
         }
     }
@@ -455,6 +549,9 @@ pub(super) async fn run_main_inner(
         {
             restore_terminal_before_fatal_exit();
             eprintln!("{err}");
+            if let Some(worktree) = managed_worktree.as_ref() {
+                worktree.report_startup_failure();
+            }
             std::process::exit(1);
         }
     }
@@ -477,7 +574,9 @@ pub(super) async fn run_main_inner(
         let log_file = log_file_opts.open(log_dir.join(TUI_LOG_FILE_NAME))?;
         let (non_blocking, guard) = non_blocking(log_file);
         let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-            EnvFilter::new("codex_core=info,codex_tui=info,codex_rmcp_client=info")
+            EnvFilter::new(
+                "codex_core=info,codex_tui=info,codex_rmcp_client=info,codex_realtime_webrtc=warn",
+            )
         });
         let file_layer = tracing_subscriber::fmt::layer()
             .with_writer(non_blocking)
@@ -539,6 +638,10 @@ pub(super) async fn run_main_inner(
         .with(otel_tracing_layer)
         .try_init();
 
+    if let Err(err) = screen_reader_result {
+        tracing::warn!("Could not save screen-reader detection: {err}");
+    }
+
     let app_result = run_ratatui_app(
         cli,
         arg0_paths,
@@ -555,6 +658,7 @@ pub(super) async fn run_main_inner(
         log_db,
         state_db,
         environment_manager,
+        managed_worktree.clone(),
         startup_draft,
     )
     .await
@@ -562,6 +666,10 @@ pub(super) async fn run_main_inner(
         err.downcast::<std::io::Error>()
             .unwrap_or_else(|err| std::io::Error::other(err.to_string()))
     });
+
+    if let Some(worktree) = managed_worktree.as_ref() {
+        worktree.report_startup_failure();
+    }
 
     if let Some(otel) = otel
         && let Err(err) = otel

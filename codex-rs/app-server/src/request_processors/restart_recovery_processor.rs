@@ -1,4 +1,4 @@
-use super::persisted_resume_settings::latest_persisted_resume_settings;
+use super::restart_recovery_settings::latest_restart_recovery_settings;
 use super::*;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::ThreadSettingsOverrides;
@@ -6,6 +6,13 @@ use codex_protocol::turn_input::CyberAccessProgram;
 
 impl ThreadRequestProcessor {
     pub(crate) async fn thread_restart_suspend(
+        &self,
+        params: ThreadRestartSuspendParams,
+    ) -> Result<ThreadRestartSuspendResponse, JSONRPCErrorError> {
+        Box::pin(self.thread_restart_suspend_inner(params)).await
+    }
+
+    async fn thread_restart_suspend_inner(
         &self,
         params: ThreadRestartSuspendParams,
     ) -> Result<ThreadRestartSuspendResponse, JSONRPCErrorError> {
@@ -63,6 +70,26 @@ impl ThreadRequestProcessor {
 
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn thread_restart_recover(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadRestartRecoverParams,
+        generation_id: String,
+        app_server_client_name: Option<String>,
+        app_server_client_version: Option<String>,
+        client_mcp_extensions: ClientMcpExtensions,
+    ) -> Result<ThreadRestartRecoverResponse, JSONRPCErrorError> {
+        Box::pin(self.thread_restart_recover_inner(
+            request_id,
+            params,
+            generation_id,
+            app_server_client_name,
+            app_server_client_version,
+            client_mcp_extensions,
+        ))
+        .await
+    }
+
+    async fn thread_restart_recover_inner(
         &self,
         request_id: ConnectionRequestId,
         params: ThreadRestartRecoverParams,
@@ -187,7 +214,7 @@ impl ThreadRequestProcessor {
                     .load_resume_initial_history_from_stored_thread(stored_thread)
                     .await?;
                 let persisted_settings =
-                    latest_persisted_resume_settings(thread_history.get_rollout_items());
+                    latest_restart_recovery_settings(thread_history.get_rollout_items());
                 let thread_settings = persisted_settings
                     .as_ref()
                     .map(|settings| settings.thread_settings.clone())

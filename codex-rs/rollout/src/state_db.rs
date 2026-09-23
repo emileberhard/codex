@@ -452,20 +452,10 @@ pub async fn list_threads_db(
         num_scanned_rows = num_scanned_rows.saturating_add(page.num_scanned_rows);
         next_anchor = page.next_anchor;
 
-        let page_items = page.items;
-        let rollout_paths = page_items
-            .iter()
-            .map(|item| item.rollout_path.clone())
-            .collect();
-        let existing_paths = match crate::compression::existing_rollout_paths(rollout_paths).await {
-            Ok(paths) => paths,
-            Err(err) => {
-                warn!("state db rollout path batch failed: {err}");
-                return None;
-            }
-        };
-        for (item, existing_path) in page_items.into_iter().zip(existing_paths) {
-            if let Some(existing_path) = existing_path {
+        for item in page.items {
+            if let Some(existing_path) =
+                crate::compression::existing_rollout_path(item.rollout_path.as_path()).await
+            {
                 let mut item = item;
                 item.rollout_path = existing_path;
                 items.push(item);

@@ -57,40 +57,6 @@ fn malformed_content_kinds_do_not_prevent_loading_response_item() -> Result<()> 
     Ok(())
 }
 
-#[test]
-fn clearing_content_kinds_preserves_accepted_metadata() -> Result<()> {
-    let mut item = response_item(InternalChatMessageMetadataPassthrough {
-        turn_id: Some("turn-1".to_string()),
-        content_item_kinds: Some(vec![ContentItemKind("user.text".to_string())]),
-        ..Default::default()
-    });
-
-    item.clear_content_item_kinds();
-
-    assert_eq!(
-        serde_json::to_value(item)?,
-        response_item_json(json!({"turn_id": "turn-1"}))
-    );
-    Ok(())
-}
-
-#[test]
-fn clearing_the_only_content_metadata_removes_the_empty_wrapper() -> Result<()> {
-    let mut item = response_item(InternalChatMessageMetadataPassthrough {
-        content_item_kinds: Some(vec![ContentItemKind("user.text".to_string())]),
-        ..Default::default()
-    });
-
-    item.clear_content_item_kinds();
-
-    let serialized = serde_json::to_value(item)?;
-    assert_eq!(
-        serialized.get("internal_chat_message_metadata_passthrough"),
-        None
-    );
-    Ok(())
-}
-
 fn response_item(metadata: InternalChatMessageMetadataPassthrough) -> ResponseItem {
     ResponseItem::Message {
         id: None,

@@ -5,11 +5,9 @@ use super::*;
 use crate::app_server_session::ForkGoalContinuation;
 use crate::app_server_session::HISTORY_ITEM_PAGE_LIMIT;
 use crate::app_server_session::turn_permissions_overrides;
-use crate::chatwidget::InterruptedTurnNoticeMode;
 use crate::chatwidget::ThreadInputState;
 use crate::chatwidget::ThreadInputStateRestoreMode;
 use crate::chatwidget::UserMessage;
-use codex_app_server_client::AppServerEvent;
 use codex_app_server_protocol::ThreadHistoryMode;
 use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::UserInput;
@@ -43,14 +41,20 @@ impl App {
             return;
         }
         if !self.chat_widget.can_retry_safety_buffered_turn(&turn_id) {
-            self.app_event_tx.send(AppEvent::UpdateModel(model));
-            self.app_event_tx.send(AppEvent::UpdateReasoningEffort(Some(
-                ReasoningEffortConfig::Low,
-            )));
             return;
         }
 
         let retry_config = self.chat_widget.config_ref().clone();
+        let input_state = self.chat_widget.capture_thread_input_state();
+        if self.pending_server_profiles.contains_key(&thread_id) {
+            self.fail_safety_buffered_branch(
+                input_state,
+                prompt,
+                color_eyre::eyre::eyre!("Wait for permissions to update before forking."),
+            );
+            return;
+        }
+
         let AppCommand::UserTurn {
             items,
             cwd,
@@ -94,43 +98,6 @@ impl App {
             return;
         }
 
-        // The interrupt RPC acknowledges the request before the listener necessarily
-        // delivers earlier committed steers. Capture input only after its terminal
-        // event, or a committed steer can be restored and submitted again on the fork.
-        self.chat_widget
-            .set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Suppress);
-        let settled = tokio::time::timeout(Duration::from_secs(10), async {
-            while let Some(event) = app_server.next_event().await {
-                let terminal = matches!(&event,
-                    AppServerEvent::ServerNotification(note)
-                        if matches!(note.as_ref(), ServerNotification::TurnCompleted(note)
-                            if note.thread_id == thread_id.to_string() && note.turn.id == turn_id));
-                self.handle_app_server_event(app_server, event).await;
-                while self
-                    .active_thread_rx
-                    .as_ref()
-                    .is_some_and(|rx| !rx.is_empty())
-                {
-                    self.drain_active_thread_events(tui).await?;
-                }
-                if terminal {
-                    return Ok::<_, color_eyre::Report>(());
-                }
-            }
-            color_eyre::eyre::bail!("app-server disconnected before the interrupted turn completed")
-        })
-        .await;
-        self.chat_widget
-            .set_interrupted_turn_notice_mode(InterruptedTurnNoticeMode::Default);
-        if !matches!(settled, Ok(Ok(()))) {
-            self.chat_widget.add_error_message(
-                "Cannot safely retry before the interrupted turn's input acknowledgements arrive."
-                    .to_string(),
-            );
-            return;
-        }
-        let input_state = self.chat_widget.capture_thread_input_state();
-
         let thread = match async {
             let mut thread = app_server
                 .thread_read(thread_id, /*include_turns*/ false)
@@ -142,6 +109,7 @@ impl App {
                         /*turn_cursor*/ None,
                         /*item_cursor*/ None,
                         /*config*/ None,
+                        /*local_settings*/ None,
                         crate::app_server_session::HistoryHydrationScope::Initial,
                     )
                     .await?;
@@ -211,13 +179,16 @@ impl App {
         let retry_display = ChatWidget::user_message_display_from_inputs(items);
 
         self.config = retry_config.clone();
+        let selected_profile = self.confirmed_server_profile(thread_id);
         let started = app_server
             .fork_thread_at(
+                &self.local_settings,
                 retry_config,
                 thread_id,
                 /*last_turn_id*/ None,
                 /*before_turn_id*/ Some(turn_id),
                 ForkGoalContinuation::DeferUntilNextTurn,
+                selected_profile.as_ref(),
             )
             .await;
         let started = match started {

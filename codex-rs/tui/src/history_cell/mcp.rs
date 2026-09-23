@@ -1,4 +1,6 @@
 //! MCP tool-call, inventory, and output history cells.
+//! Code-mode output previews share a rendered-row budget across all result blocks;
+//! the expanded transcript retains the full text.
 
 use super::*;
 
@@ -6,6 +8,10 @@ use codex_protocol::mcp::is_node_repl_backed_server;
 
 #[path = "mcp_result.rs"]
 mod result;
+
+#[path = "computer_activity.rs"]
+mod computer_activity;
+pub(crate) use computer_activity::ComputerActivityCell;
 
 use crate::style::StatusTone;
 use crate::style::accent_style;
@@ -54,6 +60,12 @@ pub(crate) struct McpInvocation {
     pub(crate) server: String,
     pub(crate) tool: String,
     pub(crate) arguments: Option<serde_json::Value>,
+}
+
+impl McpInvocation {
+    pub(crate) fn is_computer_activity(&self) -> bool {
+        self.server == "cua_repl"
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -120,8 +132,14 @@ impl McpToolCallCell {
         self.result = Some(Err("interrupted".to_string()));
     }
 
+    pub(crate) fn freeze_snapshot(&mut self) {
+        self.animations_enabled = false;
+    }
+
     fn result_kind(&self) -> McpResultKind {
-        if is_node_repl_backed_server(&self.invocation.server) && self.invocation.tool == "js" {
+        if self.invocation.is_computer_activity()
+            || (is_node_repl_backed_server(&self.invocation.server) && self.invocation.tool == "js")
+        {
             McpResultKind::NodeRepl
         } else {
             McpResultKind::Standard
@@ -257,6 +275,22 @@ impl McpToolCallCell {
                     );
                     detail_lines.extend(wrapped.iter().map(line_to_static));
                 }
+            }
+        }
+
+        if compact {
+            // Adaptive wrapping keeps URLs intact; split overlong preview rows before counting
+            // them so a URL cannot exceed the budget. The transcript keeps the original URL.
+            detail_lines = crate::wrapping::word_wrap_lines(detail_lines, detail_wrap_width);
+            if detail_lines.len() > TOOL_CALL_MAX_LINES {
+                // Retain the tail so stdout cannot crowd out a trailing failure diagnostic.
+                let tail = detail_lines.split_off(detail_lines.len() - TOOL_CALL_MAX_LINES / 2);
+                detail_lines.truncate((TOOL_CALL_MAX_LINES - 1) / 2);
+                detail_lines.push(crate::line_truncation::truncate_line_to_width(
+                    "… more · ctrl+t".dim().into(),
+                    detail_wrap_width,
+                ));
+                detail_lines.extend(tail);
             }
         }
 

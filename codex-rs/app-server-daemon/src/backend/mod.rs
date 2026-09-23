@@ -1,4 +1,6 @@
 mod pid;
+#[cfg(windows)]
+pub(crate) mod windows;
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -17,6 +19,7 @@ pub enum BackendKind {
 pub(crate) struct BackendPaths {
     pub(crate) codex_bin: PathBuf,
     pub(crate) pid_file: PathBuf,
+    pub(crate) update_pid_file: PathBuf,
     pub(crate) remote_control_enabled: bool,
 }
 
@@ -25,6 +28,14 @@ pub(crate) fn pid_backend(paths: BackendPaths) -> PidBackend {
         paths.codex_bin,
         paths.pid_file,
         paths.remote_control_enabled,
+    )
+}
+
+pub(crate) fn pid_update_loop_backend(paths: BackendPaths) -> PidBackend {
+    PidBackend::new_update_loop(
+        paths.codex_bin,
+        paths.update_pid_file,
+        /*restore_release*/ None,
     )
 }
 

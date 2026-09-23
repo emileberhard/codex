@@ -336,38 +336,22 @@ pub(super) async fn validate_thread_for_paginated_reads(
         }
         return Ok(());
     }
-    let projection_state = super::projection_state(store, resolved.rollout_id).await?;
-    let projection_result = super::super::thread_history_materialization::materialize_to_sqlite(
-        store,
-        resolved.rollout_id,
-        resolved.path.as_path(),
-    )
-    .await;
-    let Err(projection_error) = projection_result else {
-        return Ok(());
-    };
-    let Some(projection_state) = projection_state else {
-        return Err(projection_error);
-    };
-    if super::super::thread_history_materialization::projection_checkpoint_is_aligned(
-        resolved.path.as_path(),
-        resolved.rollout_id,
-        &projection_state,
-    )
-    .await?
+    if let Some(projection_state) = super::projection_state(store, resolved.rollout_id).await?
+        && !super::super::thread_history_materialization::projection_checkpoint_is_line_boundary(
+            resolved.path.as_path(),
+            projection_state.next_byte_offset,
+        )
+        .await?
     {
-        return Err(projection_error);
+        error!(
+            thread_id = %resolved.rollout_id,
+            rollout_path = %resolved.path.display(),
+            checkpoint_byte_offset = projection_state.next_byte_offset,
+            checkpoint_ordinal = projection_state.next_ordinal,
+            "rebuilding a misaligned paginated history projection from canonical JSONL"
+        );
+        super::delete_thread(store, resolved.rollout_id).await?;
     }
-
-    error!(
-        thread_id = %resolved.rollout_id,
-        rollout_path = %resolved.path.display(),
-        checkpoint_byte_offset = projection_state.next_byte_offset,
-        checkpoint_ordinal = projection_state.next_ordinal,
-        error = %projection_error,
-        "rebuilding a misaligned paginated history projection from canonical JSONL"
-    );
-    super::delete_thread(store, resolved.rollout_id).await?;
     super::super::thread_history_materialization::materialize_to_sqlite(
         store,
         resolved.rollout_id,

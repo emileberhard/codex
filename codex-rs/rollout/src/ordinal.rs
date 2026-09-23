@@ -10,8 +10,6 @@ use codex_protocol::protocol::HistoryPosition;
 use codex_protocol::protocol::ThreadHistoryMode;
 
 use crate::RolloutItem;
-use crate::RolloutLine;
-use crate::decode_rollout_line;
 use crate::reverse_jsonl_scanner::ReverseJsonlScanner;
 use crate::reverse_jsonl_scanner::ScanOutcome;
 
@@ -68,11 +66,8 @@ pub(crate) fn ordinal_state_for_rollout(
 
     let mut scanner = ReverseJsonlScanner::new(file)?;
     let record = loop {
-        match scanner.scan_next::<serde_json::Value>()? {
-            Some(ScanOutcome::Parsed(value)) => match decode_rollout_line(value) {
-                Ok(record) => break record,
-                Err(_) => continue,
-            },
+        match scanner.scan_next_rollout_line()? {
+            Some(ScanOutcome::Parsed(record)) => break record,
             Some(ScanOutcome::Rejected(_)) => continue,
             None => {
                 return Err(io::Error::other(format!(
@@ -115,7 +110,7 @@ fn read_history_metadata(
         if line.trim().is_empty() {
             continue;
         }
-        let record: RolloutLine = serde_json::from_str(line.as_str()).map_err(|error| {
+        let record = crate::parse_rollout_line(line.as_str()).map_err(|error| {
             io::Error::other(format!(
                 "failed to parse first rollout record at {}: {error}",
                 path.display()
@@ -133,59 +128,4 @@ fn read_history_metadata(
         )));
     }
     Ok(None)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use codex_protocol::ThreadId;
-    use codex_protocol::protocol::SessionMeta;
-    use codex_protocol::protocol::SessionMetaLine;
-    use codex_protocol::protocol::SessionSource;
-    use std::io::Write;
-    use tempfile::tempdir;
-
-    #[test]
-    fn float_bearing_final_record_advances_paginated_ordinal() {
-        let directory = tempdir().expect("temporary rollout directory");
-        let path = directory.path().join("rollout.jsonl");
-        let thread_id = ThreadId::new();
-        let session_meta = RolloutLine {
-            timestamp: "2026-08-27T00:00:00Z".to_string(),
-            ordinal: Some(0),
-            item: RolloutItem::SessionMeta(SessionMetaLine {
-                meta: SessionMeta {
-                    session_id: thread_id.into(),
-                    id: thread_id,
-                    timestamp: "2026-08-27T00:00:00Z".to_string(),
-                    cwd: directory.path().to_path_buf(),
-                    originator: "test".to_string(),
-                    cli_version: "test".to_string(),
-                    source: SessionSource::Exec,
-                    history_mode: ThreadHistoryMode::Paginated,
-                    ..SessionMeta::default()
-                },
-                git: None,
-            }),
-        };
-        let mut writer = File::create(&path).expect("create rollout");
-        writeln!(
-            writer,
-            "{}",
-            serde_json::to_string(&session_meta).expect("serialize session metadata")
-        )
-        .expect("write session metadata");
-        writeln!(
-            writer,
-            r#"{{"timestamp":"2026-08-27T00:00:01Z","ordinal":1,"type":"event_msg","payload":{{"type":"token_count","info":null,"rate_limits":{{"limit_id":null,"limit_name":null,"primary":{{"used_percent":46.0,"window_minutes":null,"resets_at":null}},"secondary":null,"credits":null,"individual_limit":null,"spend_control_reached":null,"plan_type":null,"rate_limit_reached_type":null}}}}}}"#
-        )
-        .expect("write float-bearing token count");
-        drop(writer);
-
-        let mut file = File::open(&path).expect("open rollout");
-        assert_eq!(
-            ordinal_state_for_rollout(&mut file, &path).expect("read ordinal state"),
-            RolloutOrdinalState::Paginated { next: Some(2) }
-        );
-    }
 }

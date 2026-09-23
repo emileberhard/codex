@@ -7,6 +7,7 @@ pub use codex_file_system::WalkOptions;
 pub use codex_file_system::WalkOutcome;
 use codex_network_proxy::ManagedNetworkSandboxContext;
 use codex_network_proxy::RemoteNetworkProxyLaunchConfig;
+use codex_protocol::ThreadId;
 use codex_protocol::capabilities::SelectedCapabilityRoot;
 use codex_protocol::config_types::ShellEnvironmentPolicyInherit;
 use codex_shell_command::shell_detect::DetectedShell;
@@ -94,6 +95,16 @@ pub struct InitializeResponse {
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentInfo {
     pub shell: ShellInfo,
+    /// Executor release version for version-based compatibility decisions.
+    /// `0.0.0` when unknown, including responses from legacy executors.
+    #[serde(default = "unknown_executor_version")]
+    pub executor_version: String,
+    /// Opaque executor build identity for looking up behavioral verification.
+    /// Derived from the compiled commit and target for standard builds;
+    /// absent for legacy or unstamped builds. This is not an artifact checksum
+    /// or a security attestation, and evidence must not be shared across build variants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     /// Working directory inherited by the exec-server process.
     #[serde(default)]
     pub cwd: Option<PathUri>,
@@ -113,6 +124,10 @@ pub struct EnvironmentInfo {
     /// Optional executor features that clients must gate before sending newer request fields.
     #[serde(default)]
     pub capabilities: EnvironmentCapabilities,
+}
+
+fn unknown_executor_version() -> String {
+    "0.0.0".to_string()
 }
 
 /// Features supported by the selected exec-server environment.
@@ -137,6 +152,9 @@ pub struct EnvironmentCapabilities {
     /// Whether shell state can be cached and restored entirely inside the executor.
     #[serde(default)]
     pub shell_snapshot_v2: bool,
+    /// Whether requests may explicitly select the MXC Windows sandbox backend.
+    #[serde(default)]
+    pub windows_mxc: bool,
 }
 
 /// Status returned by an initialized exec-server connection.
@@ -199,6 +217,10 @@ impl EnvironmentInfo {
 
     /// Returns information about the current local exec-server process.
     pub fn local() -> Self {
+        #[cfg(windows)]
+        let windows_mxc = codex_mxc_sandbox::is_available();
+        #[cfg(not(windows))]
+        let windows_mxc = false;
         let cwd = std::env::current_dir().ok();
         let temporary_directories = Self::local_temporary_directories_with_cwd(cwd.as_deref());
         let normalize_temp_path = |path: std::ffi::OsString| {
@@ -214,6 +236,8 @@ impl EnvironmentInfo {
 
         Self {
             shell: codex_shell_command::shell_detect::default_user_shell().into(),
+            executor_version: unknown_executor_version(),
+            provider_id: None,
             cwd: cwd.and_then(|cwd| PathUri::from_host_native_path(cwd).ok()),
             user_home_dir: PathUri::from_host_native_path("~").ok(),
             platform_os: Some(std::env::consts::OS.to_string()),
@@ -226,6 +250,7 @@ impl EnvironmentInfo {
                 http_header_env_vars: true,
                 sandboxed_file_streaming: true,
                 shell_snapshot_v2: cfg!(unix),
+                windows_mxc,
             },
         }
     }
@@ -251,12 +276,25 @@ impl From<DetectedShell> for ShellInfo {
     }
 }
 
+/// Optional tool attribution for executor telemetry, not authorization.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_id: Option<ThreadId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecParams {
     /// Client-chosen logical process handle scoped to this connection/session.
     /// This is a protocol key, not an OS pid.
     pub process_id: ProcessId,
+    /// Optional attribution; older clients omit it and older executors ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<ExecMetadata>,
     pub argv: Vec<String>,
     /// Working directory URI, interpreted using the exec-server host's path rules at launch time.
     pub cwd: PathUri,
@@ -328,6 +366,7 @@ pub enum ProcessSandboxType {
     MacosSeatbelt,
     LinuxSeccomp,
     WindowsRestrictedToken,
+    WindowsMxc,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -872,6 +911,7 @@ mod tests {
     use super::EnvironmentCapabilities;
     use super::EnvironmentInfo;
     use super::ExecExitedNotification;
+    use super::ExecMetadata;
     use super::ExecParams;
     use super::ExecResponse;
     use super::FsReadFileParams;
@@ -880,6 +920,7 @@ mod tests {
     use super::ProcessSandboxType;
     use super::ShellInfo;
     use codex_file_system::FileSystemSandboxContext;
+    use codex_file_system::WindowsSandboxSelection;
     use codex_network_proxy::ManagedNetworkSandboxContext;
     use codex_network_proxy::NetworkProxyAuditMetadata;
     use codex_network_proxy::NetworkProxyConfig;
@@ -905,6 +946,10 @@ mod tests {
                 .expect("cwd URI");
         let params = ExecParams {
             process_id: ProcessId::from("managed-network"),
+            metadata: Some(ExecMetadata {
+                thread_id: Some(codex_protocol::ThreadId::new()),
+                tool_call_id: Some("call-1".to_string()),
+            }),
             argv: vec!["true".to_string()],
             cwd,
             env_policy: None,
@@ -918,6 +963,8 @@ mod tests {
             managed_network: Some(ManagedNetworkSandboxContext {
                 loopback_ports: vec![43123, 48081],
                 allow_local_binding: false,
+                allow_unix_sockets: vec!["/tmp/allowed.sock".to_string()],
+                dangerously_allow_all_unix_sockets: true,
             }),
             network_proxy: Some(
                 RemoteNetworkProxyLaunchConfig::new(
@@ -934,10 +981,20 @@ mod tests {
 
         let mut serialized = serde_json::to_value(&params).expect("serialize exec params");
         assert_eq!(
+            (
+                serialized.get("threadId").cloned(),
+                serialized.get("toolCallId").cloned(),
+                serialized.get("metadata").cloned(),
+            ),
+            (None, None, Some(serde_json::json!(params.metadata)),)
+        );
+        assert_eq!(
             serialized["managedNetwork"],
             serde_json::json!({
                 "loopbackPorts": [43123, 48081],
                 "allowLocalBinding": false,
+                "allowUnixSockets": ["/tmp/allowed.sock"],
+                "dangerouslyAllowAllUnixSockets": true,
             })
         );
         assert_eq!(
@@ -956,14 +1013,65 @@ mod tests {
             .as_object_mut()
             .expect("exec params object")
             .remove("networkProxy");
+        serialized.as_object_mut().unwrap().remove("metadata");
         let legacy: ExecParams =
             serde_json::from_value(serialized).expect("deserialize legacy exec params");
         assert!(legacy.enforce_managed_network);
         assert_eq!(legacy.managed_network, None);
         assert_eq!(legacy.network_proxy, None);
+        assert_eq!(legacy.metadata, None);
         let legacy_serialized =
             serde_json::to_value(&legacy).expect("serialize exec params without proxy launch");
         assert!(legacy_serialized.get("networkProxy").is_none());
+        assert!(legacy_serialized.get("threadId").is_none());
+        assert!(legacy_serialized.get("toolCallId").is_none());
+        assert!(legacy_serialized.get("metadata").is_none());
+    }
+
+    #[test]
+    fn exec_params_defaults_legacy_managed_network_unix_socket_policy() {
+        let cwd =
+            PathUri::from_host_native_path(std::env::current_dir().expect("current directory"))
+                .expect("cwd URI");
+        let legacy: ExecParams = serde_json::from_value(serde_json::json!({
+            "processId": "legacy-managed-network",
+            "argv": ["true"],
+            "cwd": cwd,
+            "env": {},
+            "tty": false,
+            "arg0": null,
+            "enforceManagedNetwork": true,
+            "managedNetwork": {
+                "loopbackPorts": [43123],
+                "allowLocalBinding": true,
+            },
+        }))
+        .expect("deserialize legacy managed network context");
+
+        assert_eq!(
+            legacy,
+            ExecParams {
+                process_id: ProcessId::from("legacy-managed-network"),
+                metadata: None,
+                argv: vec!["true".to_string()],
+                cwd,
+                env_policy: None,
+                shell_snapshot: None,
+                env: HashMap::new(),
+                tty: false,
+                pipe_stdin: false,
+                arg0: None,
+                sandbox: None,
+                enforce_managed_network: true,
+                managed_network: Some(ManagedNetworkSandboxContext {
+                    loopback_ports: vec![43123],
+                    allow_local_binding: true,
+                    allow_unix_sockets: Vec::new(),
+                    dangerously_allow_all_unix_sockets: false,
+                }),
+                network_proxy: None,
+            }
+        );
     }
 
     #[test]
@@ -980,6 +1088,8 @@ mod tests {
                     name: "zsh".to_string(),
                     path: "/bin/zsh".to_string(),
                 },
+                executor_version: "0.0.0".to_string(),
+                provider_id: None,
                 cwd: None,
                 user_home_dir: None,
                 platform_os: None,
@@ -1007,14 +1117,17 @@ mod tests {
                 http_header_env_vars: false,
                 sandboxed_file_streaming: false,
                 shell_snapshot_v2: false,
+                windows_mxc: false,
             }
         );
     }
 
     #[test]
-    fn environment_info_preserves_executor_temporary_directories() {
+    fn environment_info_preserves_executor_metadata() {
         let expected = serde_json::json!({
             "shell": { "name": "powershell", "path": "powershell.exe" },
+            "executorVersion": "1.2.3-alpha.4",
+            "providerId": "sha256:e0a0cebe63ab8189ffe3eed378ccf6aa89ef15bc75e39dbbf1fc55951ec6888b",
             "cwd": null,
             "userHomeDir": "file:///C:/Users/remote",
             "platformOs": "windows",
@@ -1026,10 +1139,11 @@ mod tests {
                 "httpHeaderEnvVars": false,
                 "sandboxedFileStreaming": false,
                 "shellSnapshotV2": false,
+                "windowsMxc": false,
             },
         });
         let info: EnvironmentInfo = serde_json::from_value(expected.clone())
-            .expect("environment info with executor temporary directories should deserialize");
+            .expect("environment info with executor metadata should deserialize");
 
         assert_eq!(
             serde_json::to_value(info).expect("environment info should serialize"),
@@ -1161,9 +1275,11 @@ mod tests {
         let mut sandbox =
             FileSystemSandboxContext::from_permission_profile_with_cwd(permissions, cwd.clone());
         sandbox.user_home_dir = Some(cwd.clone());
+        sandbox.windows_sandbox_selection = WindowsSandboxSelection::Mxc;
 
         let serialized = serde_json::to_value(&sandbox).expect("serialize sandbox");
 
+        assert_eq!(serialized["windowsSandboxLevel"], "mxc");
         assert_eq!(
             serialized["userHomeDir"],
             serde_json::json!(cwd.to_string())

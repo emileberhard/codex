@@ -88,11 +88,16 @@ async fn server_diagnostics_exposes_process_and_registered_thread_gauge() -> Res
         &file_descriptor_limits.hard,
         &ServerDiagnosticsResourceLimit::Unsupported
     );
+    // Startup may still be finishing after its response was queued.
+    assert!(matches!(
+        diagnostics
+            .gauges
+            .iter()
+            .find(|gauge| gauge.name == "app.requests.in_flight")
+            .map(|gauge| gauge.value),
+        Some(1 | 2)
+    ));
     for expected_gauge in [
-        ServerDiagnosticsGauge {
-            name: "app.requests.in_flight".to_string(),
-            value: 1,
-        },
         ServerDiagnosticsGauge {
             name: "core.threads.live".to_string(),
             value: 1,

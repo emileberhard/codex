@@ -91,6 +91,7 @@ pub(crate) fn spawn_search(
                     )),
                     params: ThreadListParams {
                         include_completion_times: None,
+                        originators: None,
                         cursor: None,
                         limit: Some(MAX_SEARCH_RESULTS),
                         sort_key: Some(ThreadSortKey::UpdatedAt),

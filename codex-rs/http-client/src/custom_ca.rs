@@ -46,8 +46,6 @@ use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::OnceLock;
 
 use codex_utils_rustls_provider::ensure_rustls_crypto_provider;
 use rustls::ClientConfig;
@@ -144,34 +142,6 @@ pub enum BuildCustomCaTransportError {
         certificate_index: usize,
         source: rustls::Error,
     },
-
-    /// Native root discovery returned errors, so its partial result is unsafe to cache.
-    #[error(
-        "Failed to load a complete native TLS root store ({error_count} errors; first: {first_error}). {hint}",
-        hint = CA_CERT_HINT
-    )]
-    IncompleteNativeRootDiscovery {
-        error_count: usize,
-        first_error: String,
-    },
-
-    /// Rustls rejected certificates returned by native root discovery.
-    #[error(
-        "Failed to build a complete native TLS root store because rustls rejected {rejected_count} certificates. {hint}",
-        hint = CA_CERT_HINT
-    )]
-    RejectedNativeRootCertificates { rejected_count: usize },
-
-    /// Native/custom root discovery completed without one usable trust anchor.
-    #[error(
-        "Failed to build TLS configuration because no usable root certificates were found. {hint}",
-        hint = CA_CERT_HINT
-    )]
-    NoUsableRootCertificates,
-
-    /// The blocking task used to isolate native trust-store discovery failed.
-    #[error("Failed to load TLS root certificates on a blocking worker: {0}")]
-    LoadRustlsRootsTask(#[source] tokio::task::JoinError),
 }
 
 impl From<BuildCustomCaTransportError> for io::Error {
@@ -182,21 +152,14 @@ impl From<BuildCustomCaTransportError> for io::Error {
             }
             BuildCustomCaTransportError::InvalidCaFile { .. }
             | BuildCustomCaTransportError::RegisterCertificate { .. }
-            | BuildCustomCaTransportError::RegisterRustlsCertificate { .. }
-            | BuildCustomCaTransportError::IncompleteNativeRootDiscovery { .. }
-            | BuildCustomCaTransportError::RejectedNativeRootCertificates { .. }
-            | BuildCustomCaTransportError::NoUsableRootCertificates => {
+            | BuildCustomCaTransportError::RegisterRustlsCertificate { .. } => {
                 io::Error::new(io::ErrorKind::InvalidData, error)
             }
             BuildCustomCaTransportError::BuildClientWithCustomCa { .. }
-            | BuildCustomCaTransportError::BuildClientWithSystemRoots(_)
-            | BuildCustomCaTransportError::LoadRustlsRootsTask(_) => io::Error::other(error),
+            | BuildCustomCaTransportError::BuildClientWithSystemRoots(_) => io::Error::other(error),
         }
     }
 }
-
-static SHARED_RUSTLS_CLIENT_CONFIG: OnceLock<Arc<ClientConfig>> = OnceLock::new();
-static SHARED_RUSTLS_CLIENT_CONFIG_INIT: Mutex<()> = Mutex::new(());
 
 /// Builds a reqwest client that honors Codex custom CA environment variables.
 ///
@@ -219,43 +182,30 @@ pub fn build_reqwest_client_with_custom_ca(
     build_reqwest_client_with_env(&ProcessEnv, builder)
 }
 
-/// Builds a rustls client config using native roots and any configured Codex custom CA bundle.
+/// Builds a rustls client config when a Codex custom CA bundle is configured.
 ///
-/// This synchronous form is for callers that are already outside an async runtime. Async callers
-/// must use [`load_rustls_client_config_with_custom_ca`] so native trust discovery cannot block a
-/// Tokio worker.
-pub fn build_rustls_client_config_with_custom_ca()
--> Result<Arc<ClientConfig>, BuildCustomCaTransportError> {
-    build_rustls_client_config_with_env(&ProcessEnv, false)
+/// This is the websocket-facing sibling of [`build_reqwest_client_with_custom_ca`]. When
+/// `CODEX_CA_CERTIFICATE` or `SSL_CERT_FILE` selects a CA bundle, the returned config starts from
+/// the platform native roots and then adds the configured custom CA certificates. When no custom
+/// CA env var is set, this returns `Ok(None)` so websocket callers can keep using their ordinary
+/// default connector path.
+///
+/// Callers that let tungstenite build its default TLS connector directly bypass this policy
+/// entirely. That bug only shows up in environments where secure websocket traffic needs the same
+/// enterprise root CA bundle as HTTPS traffic.
+pub fn maybe_build_rustls_client_config_with_custom_ca()
+-> Result<Option<Arc<ClientConfig>>, BuildCustomCaTransportError> {
+    maybe_build_rustls_client_config_with_env(&ProcessEnv)
 }
 
-/// Loads and caches the process-wide websocket TLS configuration without blocking Tokio workers.
+/// Builds a rustls client config using native roots and any configured Codex custom CA bundle.
 ///
-/// Native root discovery may call synchronous platform trust APIs. The blocking closure owns the
-/// cache write so a cancelled async caller cannot discard a successfully completed load. Failed
-/// or partial root discovery is never cached and may be retried by a later connection attempt. The
-/// initialization mutex also prevents concurrent first callers from piling up platform trust work.
-pub async fn load_rustls_client_config_with_custom_ca()
+/// Unlike [`maybe_build_rustls_client_config_with_custom_ca`], this always returns a config. Use
+/// this when the caller must perform TLS itself instead of delegating default configuration to a
+/// transport library.
+pub fn build_rustls_client_config_with_custom_ca()
 -> Result<Arc<ClientConfig>, BuildCustomCaTransportError> {
-    if let Some(config) = SHARED_RUSTLS_CLIENT_CONFIG.get() {
-        return Ok(Arc::clone(config));
-    }
-
-    tokio::task::spawn_blocking(|| {
-        let _initialization = SHARED_RUSTLS_CLIENT_CONFIG_INIT
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(config) = SHARED_RUSTLS_CLIENT_CONFIG.get() {
-            return Ok(Arc::clone(config));
-        }
-
-        let config = build_rustls_client_config_with_env(&ProcessEnv, true)?;
-        Ok(Arc::clone(
-            SHARED_RUSTLS_CLIENT_CONFIG.get_or_init(|| config),
-        ))
-    })
-    .await
-    .map_err(BuildCustomCaTransportError::LoadRustlsRootsTask)?
+    build_rustls_client_config_with_env(&ProcessEnv)
 }
 
 /// Builds a reqwest client for spawned subprocess tests that exercise CA behavior.
@@ -272,22 +222,25 @@ pub fn build_reqwest_client_for_subprocess_tests(
     build_reqwest_client_with_env(&ProcessEnv, builder.no_proxy())
 }
 
+fn maybe_build_rustls_client_config_with_env(
+    env_source: &dyn EnvSource,
+) -> Result<Option<Arc<ClientConfig>>, BuildCustomCaTransportError> {
+    let Some(bundle) = env_source.configured_ca_bundle() else {
+        return Ok(None);
+    };
+
+    build_rustls_client_config(Some(&bundle)).map(Some)
+}
+
 fn build_rustls_client_config_with_env(
     env_source: &dyn EnvSource,
-    require_complete_native_roots: bool,
 ) -> Result<Arc<ClientConfig>, BuildCustomCaTransportError> {
     let bundle = env_source.configured_ca_bundle();
-    build_rustls_client_config(
-        bundle.as_ref(),
-        require_complete_native_roots,
-        env_source.is_process_environment(),
-    )
+    build_rustls_client_config(bundle.as_ref())
 }
 
 fn build_rustls_client_config(
     bundle: Option<&ConfiguredCaBundle>,
-    require_complete_native_roots: bool,
-    native_loader_uses_process_environment: bool,
 ) -> Result<Arc<ClientConfig>, BuildCustomCaTransportError> {
     ensure_rustls_crypto_provider();
 
@@ -297,25 +250,15 @@ fn build_rustls_client_config(
     let mut root_store = RootCertStore::empty();
     let rustls_native_certs::CertificateResult { certs, errors, .. } =
         rustls_native_certs::load_native_certs();
-    if require_complete_native_roots && let Some(first_error) = errors.first() {
-        return Err(BuildCustomCaTransportError::IncompleteNativeRootDiscovery {
-            error_count: errors.len(),
-            first_error: first_error.to_string(),
-        });
-    } else if !errors.is_empty() {
+    if !errors.is_empty() {
         warn!(
             native_root_error_count = errors.len(),
             "encountered errors while loading native root certificates"
         );
     }
-    let (_, rejected_count) = root_store.add_parsable_certificates(certs);
-    if require_complete_native_roots && rejected_count > 0 {
-        return Err(BuildCustomCaTransportError::RejectedNativeRootCertificates { rejected_count });
-    }
+    let _ = root_store.add_parsable_certificates(certs);
 
-    let native_loader_already_used_bundle = native_loader_uses_process_environment
-        && bundle.is_some_and(|bundle| bundle.source_env == SSL_CERT_FILE_ENV);
-    if let Some(bundle) = bundle.filter(|_| !native_loader_already_used_bundle) {
+    if let Some(bundle) = bundle {
         let certificates = bundle.load_certificates()?;
         for (idx, cert) in certificates.into_iter().enumerate() {
             if let Err(source) = root_store.add(cert) {
@@ -334,16 +277,6 @@ fn build_rustls_client_config(
                 });
             }
         }
-    }
-
-    build_client_config(root_store)
-}
-
-fn build_client_config(
-    root_store: RootCertStore,
-) -> Result<Arc<ClientConfig>, BuildCustomCaTransportError> {
-    if root_store.is_empty() {
-        return Err(BuildCustomCaTransportError::NoUsableRootCertificates);
     }
 
     Ok(Arc::new(
@@ -445,11 +378,6 @@ trait EnvSource {
     /// method, so implementations should not trim or normalize the returned string.
     fn var(&self, key: &str) -> Option<String>;
 
-    /// Whether native root discovery reads the same process environment as this source.
-    fn is_process_environment(&self) -> bool {
-        false
-    }
-
     /// Returns a non-empty environment variable value interpreted as a filesystem path.
     ///
     /// Empty strings are treated as unset because presence here acts as a boolean "custom CA
@@ -493,10 +421,6 @@ struct ProcessEnv;
 impl EnvSource for ProcessEnv {
     fn var(&self, key: &str) -> Option<String> {
         env::var(key).ok()
-    }
-
-    fn is_process_environment(&self) -> bool {
-        true
     }
 }
 
@@ -800,9 +724,7 @@ mod tests {
     use super::CODEX_CA_CERT_ENV;
     use super::EnvSource;
     use super::SSL_CERT_FILE_ENV;
-    use super::build_client_config;
-    use super::build_rustls_client_config_with_env;
-    use rustls::RootCertStore;
+    use super::maybe_build_rustls_client_config_with_env;
 
     const TEST_CERT: &str = include_str!("../tests/fixtures/test-ca.pem");
 
@@ -875,7 +797,9 @@ mod tests {
         let cert_path = write_cert_file(&temp_dir, "ca.pem", TEST_CERT);
         let env = map_env(&[(CODEX_CA_CERT_ENV, cert_path.to_string_lossy().as_ref())]);
 
-        let config = build_rustls_client_config_with_env(&env, false).expect("rustls config");
+        let config = maybe_build_rustls_client_config_with_env(&env)
+            .expect("rustls config")
+            .expect("custom CA config should be present");
 
         assert!(config.enable_sni);
     }
@@ -886,21 +810,15 @@ mod tests {
         let cert_path = write_cert_file(&temp_dir, "empty.pem", "");
         let env = map_env(&[(CODEX_CA_CERT_ENV, cert_path.to_string_lossy().as_ref())]);
 
-        let error = build_rustls_client_config_with_env(&env, false).expect_err("invalid CA");
+        let error = maybe_build_rustls_client_config_with_env(&env).expect_err("invalid CA");
 
         assert!(matches!(
             error,
             BuildCustomCaTransportError::InvalidCaFile { .. }
         ));
     }
-
-    #[test]
-    fn rustls_config_rejects_an_empty_root_store() {
-        let error = build_client_config(RootCertStore::empty()).expect_err("empty roots");
-
-        assert!(matches!(
-            error,
-            BuildCustomCaTransportError::NoUsableRootCertificates
-        ));
-    }
 }
+
+#[cfg(test)]
+#[path = "custom_ca_tls_tests.rs"]
+mod tls_tests;

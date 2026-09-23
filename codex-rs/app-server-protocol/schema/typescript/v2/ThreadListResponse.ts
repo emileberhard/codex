@@ -5,10 +5,10 @@ import type { Thread } from "./Thread";
 
 export type ThreadListResponse = {
 /**
- * Null unless requested. Missing thread keys mean unavailable evidence;
+ * Absent unless requested. Missing thread keys mean unavailable evidence;
  * null values mean a successful read without a known terminal timestamp.
  */
-completionTimes: { [threadId: string]: number | null } | null, data: Array<Thread>,
+completionTimes?: { [threadId: string]: number | null } | null, data: Array<Thread>,
 /**
  * Opaque cursor to pass to the next call to continue after the last item.
  * if None, there are no more items to return.

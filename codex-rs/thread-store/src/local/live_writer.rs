@@ -8,7 +8,6 @@ use codex_rollout::RolloutItem;
 use codex_rollout::RolloutRecorder;
 use codex_rollout::RolloutRecorderParams;
 use codex_rollout::is_persisted_rollout_item;
-use tracing::error;
 use tracing::warn;
 
 use super::LocalThreadStore;
@@ -31,8 +30,8 @@ pub(super) async fn create_thread(
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
     let history_mode = params.history_mode;
     store.ensure_live_recorder_absent(thread_id).await?;
-    let writer_lock = store.writer_lock_coordinator.acquire(thread_id)?;
-    let recorder = create_thread::create_thread(store, params).await?;
+    let writer_lock = store.acquire_writer_lock(thread_id)?;
+    let recorder = create_thread::create_thread(store, params, writer_lock.clone()).await?;
     store
         .insert_live_recorder(thread_id, recorder, thread_id, history_mode, writer_lock)
         .await
@@ -44,7 +43,7 @@ pub(super) async fn resume_thread(
 ) -> ThreadStoreResult<()> {
     let _live_writer_guard = store.live_writer_locks.lock(params.thread_id).await;
     store.ensure_live_recorder_absent(params.thread_id).await?;
-    let writer_lock = store.writer_lock_coordinator.acquire(params.thread_id)?;
+    let writer_lock = store.acquire_writer_lock(params.thread_id)?;
     let history_mode = if let Some(history) = params.history.as_deref() {
         canonical_history_mode_from_rollout_items(history)
     } else if let Some(rollout_path) = params.rollout_path.as_ref() {
@@ -106,11 +105,15 @@ pub(super) async fn resume_thread(
         params.thread_id,
         history_mode,
     )?;
-    let recorder = RolloutRecorder::new(&config, RolloutRecorderParams::resume(rollout_path))
-        .await
-        .map_err(|err| ThreadStoreError::Internal {
-            message: format!("failed to resume local thread recorder: {err}"),
-        })?;
+    let recorder = RolloutRecorder::new_with_writer_lock(
+        &config,
+        RolloutRecorderParams::resume(rollout_path),
+        writer_lock.clone(),
+    )
+    .await
+    .map_err(|err| ThreadStoreError::Internal {
+        message: format!("failed to resume local thread recorder: {err}"),
+    })?;
     store
         .insert_live_recorder(
             params.thread_id,
@@ -172,13 +175,7 @@ pub(super) async fn shutdown_thread(
         )
         .await
         {
-            error!(
-                thread_id = %thread_id,
-                rollout_id = %rollout_id,
-                rollout_path = %rollout_path.display(),
-                error = %err,
-                "durable rollout history projection failed during shutdown"
-            );
+            warn!("failed to project durable rollout during shutdown for {thread_id}: {err}");
         }
     }
     sync_materialized_rollout_path(store, thread_id, rollout_path.as_path()).await?;
@@ -214,13 +211,17 @@ pub(super) async fn discard_thread(
     if pending_metadata.take().is_some() {
         store.pending_thread_metadata.remove(thread_id).await;
     }
-    store
+    let entry = store
         .live_recorders
         .lock()
         .await
         .remove(&thread_id)
-        .map(|_| ())
-        .ok_or(ThreadStoreError::ThreadNotFound { thread_id })
+        .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
+    entry
+        .recorder
+        .discard()
+        .await
+        .map_err(thread_store_io_error)
 }
 
 pub(super) async fn rollout_path(
@@ -335,11 +336,13 @@ async fn write_and_project(
         RolloutWriteOp::Persist => RolloutWriteOp::Persist,
         RolloutWriteOp::Flush => RolloutWriteOp::Flush,
     };
-    durable_write(&recorder, write_op).await?;
-    if !matches!(history_mode, ThreadHistoryMode::Legacy) {
+    if matches!(history_mode, ThreadHistoryMode::Legacy) {
+        durable_write(&recorder, write_op).await?;
+    } else {
         let rollout_path = recorder.rollout_path();
         // SQLite is a rebuildable view. The flush barrier must win before projection starts so it
         // can lag JSONL after failure, but can never get ahead of canonical history.
+        durable_write(&recorder, write_op).await?;
         if let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
             store,
             rollout_id,
@@ -347,13 +350,7 @@ async fn write_and_project(
         )
         .await
         {
-            error!(
-                thread_id = %thread_id,
-                rollout_id = %rollout_id,
-                rollout_path = %rollout_path.display(),
-                error = %err,
-                "durable rollout history projection failed"
-            );
+            warn!("failed to project durable rollout for {thread_id}: {err}");
         }
     }
     if sync_rollout_path {

@@ -110,6 +110,7 @@ pub(super) async fn suspend_turn_and_shutdown(
     run_hooks_and_record_inputs(
         session,
         &task.turn_context,
+        &task.turn_context.capture_current_model_info(),
         &pending_input,
         PersistContext::Standard,
     )
@@ -128,9 +129,8 @@ pub(super) async fn suspend_turn_and_shutdown(
         .shutdown()
         .await
         .map_err(|error| CodexErr::Fatal(format!("close suspended turn writer failed: {error}")))?;
-    // Announce thread shutdown only after its writer closes so a replacement worker
-    // cannot write the same thread concurrently.
-    handlers::emit_thread_stop_lifecycle(session.as_ref()).await;
+    // Announce completion only after extension cleanup and writer closure so a
+    // replacement worker cannot write the same thread concurrently.
     session
         .deliver_event_raw(Event {
             id: submission_id,

@@ -1,3 +1,4 @@
+use crate::config_manager::ConfigManager;
 use std::sync::Arc;
 
 use crate::error_code::internal_error;
@@ -38,6 +39,7 @@ use codex_thread_store::ThreadStore;
 use codex_thread_store::ThreadStoreError;
 
 use super::TurnRequestProcessor;
+use super::config_load_error;
 use super::thread_input::DIRECT_INPUT_TO_MULTI_AGENT_V2_SUBAGENT_ERROR;
 use super::thread_input::can_accept_direct_input;
 use super::thread_processor::THREAD_LIST_DEFAULT_LIMIT;
@@ -51,6 +53,7 @@ pub(crate) struct ThreadQueueRequestProcessor {
     thread_manager: Arc<ThreadManager>,
     thread_store: Arc<dyn ThreadStore>,
     outgoing: Arc<OutgoingMessageSender>,
+    config_manager: ConfigManager,
     service: Option<Arc<QueuedItemService>>,
 }
 
@@ -59,12 +62,14 @@ impl ThreadQueueRequestProcessor {
         thread_manager: Arc<ThreadManager>,
         thread_store: Arc<dyn ThreadStore>,
         outgoing: Arc<OutgoingMessageSender>,
+        config_manager: ConfigManager,
         service: Option<Arc<QueuedItemService>>,
     ) -> Self {
         Self {
             thread_manager,
             thread_store,
             outgoing,
+            config_manager,
             service,
         }
     }
@@ -76,7 +81,6 @@ impl ThreadQueueRequestProcessor {
         let _admission = self
             .thread_manager
             .acquire_new_work_admission()
-            .await
             .map_err(|error| invalid_request(error.to_string()))?;
         validate_user_input_image_urls(&params.input)?;
         let (thread_id, loaded_thread, source) = self.require_thread(&params.thread_id).await?;
@@ -192,6 +196,10 @@ impl ThreadQueueRequestProcessor {
         ensure_direct_input_allowed(loaded_thread.as_deref(), &source)?;
         let thread = loaded_thread
             .ok_or_else(|| invalid_request("resume the thread before starting a queued message"))?;
+        self.config_manager
+            .check_thread_model_provider(thread.config().await.as_ref())
+            .await
+            .map_err(|error| config_load_error(&error))?;
         let submission = self
             .service()?
             .start(
@@ -203,6 +211,9 @@ impl ThreadQueueRequestProcessor {
             .map_err(queue_error)?;
         let turn_id = match submission {
             StartIfIdleSubmission::Started { turn_id } => turn_id,
+            StartIfIdleSubmission::NotSubmitted {
+                reason: NotSubmittedReason::ServerDraining,
+            } => return Err(crate::error_code::server_draining_error()),
             StartIfIdleSubmission::NotSubmitted {
                 reason: NotSubmittedReason::NotIdle | NotSubmittedReason::PendingTriggerTurn,
             } => {

@@ -30,6 +30,14 @@ impl ThreadRequestProcessor {
         request_id: ConnectionRequestId,
         params: ThreadSubscribeParams,
     ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        Box::pin(self.thread_subscribe_inner(request_id, params)).await
+    }
+
+    async fn thread_subscribe_inner(
+        &self,
+        request_id: ConnectionRequestId,
+        params: ThreadSubscribeParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
         let thread_id = ThreadId::from_string(&params.thread_id)
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
         let Ok(conversation) = self.thread_manager.get_thread(thread_id).await else {
@@ -40,6 +48,7 @@ impl ThreadRequestProcessor {
             .await
             .map_err(thread_read_view_error)?;
         let state = self.thread_state_manager.thread_state(thread_id).await;
+        let (completion_tx, completion_rx) = tokio::sync::oneshot::channel();
         {
             let state = state.lock().await;
             if !state.listener_matches(&conversation) {
@@ -51,11 +60,13 @@ impl ThreadRequestProcessor {
                     request_id,
                     thread: Box::new(thread),
                     store: Arc::clone(&self.thread_store),
+                    completion_tx,
                 })
                 .map_err(|_| closing_error())?;
         }
         #[cfg(debug_assertions)]
         crate::thread_observation::test_barrier("subscribe", thread_id).await;
+        let _ = completion_rx.await;
         Ok(None)
     }
 
@@ -79,6 +90,7 @@ fn closing_error() -> JSONRPCErrorError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[expect(
     clippy::await_holding_invalid_type,
     reason = "Unload and listener fences must cover membership replacement and its acknowledgement atomically."
@@ -187,8 +199,8 @@ pub(super) async fn send_subscribe_response(
                 request_id.clone(),
                 ThreadSubscribeResponse::Subscribed {
                     subscription_id,
-                    thread,
-                    checkpoint,
+                    thread: Box::new(thread),
+                    checkpoint: Box::new(checkpoint),
                 },
             )
             .await;

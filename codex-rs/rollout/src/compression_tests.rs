@@ -17,6 +17,7 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 use uuid::Uuid;
 
+use super::RolloutCompressionTrigger::Startup;
 use super::*;
 use crate::InitialHistory;
 use crate::RolloutConfig;
@@ -27,33 +28,6 @@ use crate::RolloutRecorderParams;
 use crate::append_rollout_item_to_path;
 use crate::read_session_meta_line;
 use crate::search_rollout_matches;
-
-#[tokio::test]
-async fn existing_rollout_paths_resolves_batch_in_input_order() -> anyhow::Result<()> {
-    let home = TempDir::new()?;
-    let plain_path = home.path().join("rollout-plain.jsonl");
-    let plain_compressed_path = compressed_rollout_path(&plain_path);
-    fs::write(&plain_path, "plain")?;
-    fs::write(&plain_compressed_path, "stale compressed sibling")?;
-
-    let compressed_only_path = home.path().join("rollout-compressed.jsonl");
-    let compressed_path = compressed_rollout_path(&compressed_only_path);
-    fs::write(&compressed_path, "compressed")?;
-
-    let missing_path = home.path().join("rollout-missing.jsonl");
-    let resolved = existing_rollout_paths(vec![
-        plain_compressed_path,
-        missing_path,
-        compressed_only_path,
-    ])
-    .await?;
-
-    assert_eq!(
-        resolved,
-        vec![Some(plain_path), None, Some(compressed_path)]
-    );
-    Ok(())
-}
 
 #[tokio::test]
 async fn load_rollout_items_reads_compressed_rollout() -> anyhow::Result<()> {
@@ -317,7 +291,7 @@ async fn worker_compresses_old_active_and_archived_rollouts() -> anyhow::Result<
     let fresh_temp = active_path.with_file_name("rollout-fresh.jsonl.zst.tmp");
     fs::write(&fresh_temp, "fresh temp")?;
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
 
     assert!(!active_path.exists());
     assert!(compressed_rollout_path(&active_path).exists());
@@ -347,12 +321,12 @@ async fn worker_waits_for_rollout_maintenance_before_compressing() -> anyhow::Re
     let guard = crate::try_acquire_rollout_maintenance_lock(home.path())?
         .expect("claim rollout maintenance lock");
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
     assert!(path.exists());
     assert!(!compressed_rollout_path(&path).exists());
 
     drop(guard);
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
     assert!(!path.exists());
     assert!(compressed_rollout_path(&path).exists());
     Ok(())
@@ -383,7 +357,7 @@ async fn worker_compresses_archived_fork_chain() -> anyhow::Result<()> {
     let original_source = fs::read(&source_path)?;
     let original_child = fs::read(&child_path)?;
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
 
     for (path, original) in [
         (&source_path, original_source),
@@ -410,7 +384,7 @@ async fn worker_skips_unreadable_metadata_without_blocking_other_compression() -
     let unreadable_path = rollout_path(home.path(), "2025-01-03T12-00-01", Uuid::from_u128(21));
     fs::write(unreadable_path.as_path(), "{not json}\n")?;
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
 
     assert!(!source_path.exists());
     assert!(compressed_rollout_path(&source_path).exists());
@@ -485,7 +459,7 @@ async fn compression_preserves_rollout_permissions() -> anyhow::Result<()> {
     fs::set_permissions(&rollout_path, fs::Permissions::from_mode(0o600))?;
     set_old_mtime(&rollout_path)?;
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
 
     let compressed_path = compressed_rollout_path(&rollout_path);
     assert!(!rollout_path.exists());
@@ -568,7 +542,7 @@ async fn compression_preserves_read_only_rollout_permissions() -> anyhow::Result
     fs::set_permissions(&rollout_path, fs::Permissions::from_mode(0o400))?;
     let source_modified = fs::metadata(&rollout_path)?.modified()?;
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
 
     let compressed_path = compressed_rollout_path(&rollout_path);
     let compressed_metadata = fs::metadata(&compressed_path)?;
@@ -589,7 +563,7 @@ async fn worker_skips_existing_compressed_archived_rollouts() -> anyhow::Result<
     let compressed_path = compressed_rollout_path(&rollout_path);
     set_old_mtime(&compressed_path)?;
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
 
     assert!(!rollout_path.exists());
     assert!(compressed_path.exists());
@@ -613,7 +587,7 @@ async fn worker_skips_when_fresh_run_marker_exists() -> anyhow::Result<()> {
     fs::create_dir_all(marker_dir.as_path())?;
     fs::write(marker_dir.join("rollout-compression.lock"), "recent run")?;
 
-    worker::run(home.path().to_path_buf()).await?;
+    worker::run(home.path().to_path_buf(), Startup).await?;
 
     assert!(rollout_path.exists());
     assert!(!compressed_rollout_path(&rollout_path).exists());
@@ -711,6 +685,7 @@ fn write_rollout(path: &std::path::Path, thread_id: ThreadId, message: &str) -> 
             parent_thread_id: None,
             timestamp: "2025-01-03T12:00:00Z".to_string(),
             cwd: parent.to_path_buf(),
+            runtime_workspace_roots: None,
             originator: "test".to_string(),
             cli_version: "test".to_string(),
             source: SessionSource::Cli,
@@ -792,5 +767,30 @@ fn set_old_mtime(path: &std::path::Path) -> anyhow::Result<()> {
         .write(true)
         .open(path)?
         .set_times(times)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn worker_compresses_parallel_cold_candidates_without_skipping_other_publications()
+-> anyhow::Result<()> {
+    let home = TempDir::new()?;
+    let mut paths = Vec::new();
+    for index in 0..32 {
+        let id = Uuid::from_u128(2000 + index);
+        let path = rollout_path(home.path(), "2025-01-03T12-00-00", id);
+        write_rollout(
+            &path,
+            ThreadId::from_string(&id.to_string()).unwrap(),
+            "cold candidate",
+        )?;
+        set_old_mtime(&path)?;
+        paths.push(path);
+    }
+    worker::run(home.path().to_path_buf(), Startup).await?;
+    let representations = paths
+        .iter()
+        .map(|path| (path.exists(), compressed_rollout_path(path).exists()))
+        .collect::<Vec<_>>();
+    assert_eq!(representations, vec![(false, true); paths.len()]);
     Ok(())
 }

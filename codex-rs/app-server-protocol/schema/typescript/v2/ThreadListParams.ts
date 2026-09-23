@@ -26,6 +26,11 @@ modelProviders?: Array<string> | null, /**
  * are returned. When omitted or empty, defaults to interactive sources.
  */
 sourceKinds?: Array<ThreadSourceKind> | null, /**
+ * Optional originator allowlist, matching any supplied value exactly.
+ * Supported by hosted backends only; the local app-server rejects a nonempty list.
+ * Omitted or empty lists leave originators unrestricted.
+ */
+originators?: Array<string> | null, /**
  * Optional archived filter; when set to true, only archived threads are returned.
  * If false or null, only non-archived threads are returned.
  */
@@ -38,9 +43,9 @@ sectionId?: string | null, /**
  * exactly matches one of these paths are returned.
  */
 cwd?: string | Array<string> | null, /**
- * Return from the state DB without scanning JSONL rollouts to repair
- * thread metadata. Omitted defaults to false; latency-sensitive clients
- * can opt into the state-DB-only path explicitly.
+ * If true, return from the state DB without scanning JSONL rollouts to
+ * repair thread metadata. Omitted or false preserves scan-and-repair
+ * behavior.
  */
 useStateDbOnly?: boolean, /**
  * Optional substring filter for the extracted thread title.

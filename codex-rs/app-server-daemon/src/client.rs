@@ -34,11 +34,10 @@ const NEW_WORK_ADMISSION_CLOSED_GAUGE: &str = "app.work.new_admission_closed";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProbeInfo {
     pub(crate) app_server_version: String,
-    pub(crate) process_id: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct WorkAdmissionProbe {
+pub(crate) struct ProcessProbe {
     pub(crate) app_server_version: String,
     pub(crate) process_id: u32,
     pub(crate) closed: bool,
@@ -59,7 +58,7 @@ pub(crate) async fn probe(socket_path: &Path) -> Result<ProbeInfo> {
 async fn probe_inner(socket_path: &Path) -> Result<ProbeInfo> {
     let mut websocket = connect(socket_path).await?;
 
-    let initialize_response = initialize(&mut websocket, /*experimental_api*/ true).await?;
+    let initialize_response = initialize(&mut websocket, /*experimental_api*/ false).await?;
     let initialized = JSONRPCMessage::Notification(JSONRPCNotification {
         method: "initialized".to_string(),
         params: None,
@@ -67,32 +66,28 @@ async fn probe_inner(socket_path: &Path) -> Result<ProbeInfo> {
     send_message(&mut websocket, &initialized)
         .await
         .context("failed to send initialized notification")?;
-    let diagnostics = request_diagnostics(&mut websocket).await?;
     websocket.close(None).await.ok();
 
     Ok(ProbeInfo {
         app_server_version: parse_version_from_user_agent(&initialize_response.user_agent)?,
-        process_id: diagnostics.process.id,
     })
 }
 
-pub(crate) async fn probe_new_work_admission_fenced(
-    socket_path: &Path,
-) -> Result<WorkAdmissionProbe> {
+pub(crate) async fn probe_process(socket_path: &Path) -> Result<ProcessProbe> {
     timeout(
         CONTROL_SOCKET_RESPONSE_TIMEOUT,
-        probe_new_work_admission_fenced_inner(socket_path),
+        probe_process_inner(socket_path),
     )
     .await
     .with_context(|| {
         format!(
-            "timed out probing restart admission fence on {}",
+            "timed out probing app-server process on {}",
             socket_path.display()
         )
     })?
 }
 
-async fn probe_new_work_admission_fenced_inner(socket_path: &Path) -> Result<WorkAdmissionProbe> {
+async fn probe_process_inner(socket_path: &Path) -> Result<ProcessProbe> {
     let mut websocket = connect(socket_path).await?;
     let initialize_response = initialize(&mut websocket, /*experimental_api*/ true).await?;
     send_message(
@@ -128,7 +123,7 @@ async fn probe_new_work_admission_fenced_inner(socket_path: &Path) -> Result<Wor
         ));
     }
 
-    Ok(WorkAdmissionProbe {
+    Ok(ProcessProbe {
         app_server_version: parse_version_from_user_agent(&initialize_response.user_agent)?,
         process_id: diagnostics.process.id,
         closed,
@@ -172,13 +167,39 @@ where
 }
 
 pub(crate) async fn connect(socket_path: &Path) -> Result<WebSocketStream<UnixStream>> {
+    connect_at(socket_path, "ws://localhost/").await
+}
+
+async fn connect_at(socket_path: &Path, url: &str) -> Result<WebSocketStream<UnixStream>> {
     let stream = UnixStream::connect(socket_path)
         .await
         .with_context(|| format!("failed to connect to {}", socket_path.display()))?;
-    let (websocket, _response) = client_async("ws://localhost/", stream)
+    let (websocket, _response) = client_async(url, stream)
         .await
         .with_context(|| format!("failed to upgrade {}", socket_path.display()))?;
     Ok(websocket)
+}
+
+#[cfg(windows)]
+pub(crate) async fn request_shutdown(socket_path: &Path, pid: u32) -> Result<()> {
+    timeout(CONTROL_SOCKET_RESPONSE_TIMEOUT, async {
+        let mut websocket = connect_at(socket_path, "ws://localhost/daemon/shutdown").await?;
+        websocket
+            .send(Message::Text(pid.to_string().into()))
+            .await?;
+        let reply = websocket
+            .next()
+            .await
+            .context("shutdown socket closed without acknowledgment")??;
+        anyhow::ensure!(
+            matches!(reply, Message::Text(ack) if ack == pid.to_string()),
+            "shutdown acknowledgment did not match the managed process {pid}"
+        );
+        websocket.close(None).await?;
+        Ok(())
+    })
+    .await
+    .context("timed out waiting for managed app-server shutdown acknowledgment")?
 }
 
 pub(crate) async fn initialize<S>(

@@ -99,6 +99,8 @@ use codex_config::skill_config_rules_from_stack;
 use codex_config::types::PluginConfig;
 use codex_config::types::ToolSuggestDisabledTool;
 use codex_config::types::ToolSuggestDiscoverableType;
+use codex_connectors::ConnectorSnapshot;
+use codex_connectors::PluginConnectorSource;
 use codex_hooks::plugin_hook_declarations;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
@@ -564,9 +566,26 @@ struct LoadedPluginsCache {
 }
 
 impl LoadedPluginsCache {
-    fn get(&mut self, key: &PluginLoadCacheKey) -> Option<&LoadedPluginsCacheEntry> {
+    fn get(
+        &mut self,
+        key: &PluginLoadCacheKey,
+        store: &PluginStore,
+    ) -> Option<&LoadedPluginsCacheEntry> {
         let index = self.entries.iter().position(|entry| &entry.key == key)?;
         let entry = self.entries.remove(index)?;
+        // Another process can replace installed versions without invalidating this manager.
+        // Keep the parsed skills paired with the installation whose paths they advertise.
+        if entry.plugins.iter().any(|plugin| {
+            let Ok(plugin_id) = PluginId::parse(&plugin.config_name) else {
+                return false;
+            };
+            let installed_root = store
+                .active_plugin_root(&plugin_id)
+                .unwrap_or_else(|| store.plugin_base_root(&plugin_id));
+            installed_root != plugin.root
+        }) {
+            return None;
+        }
         self.entries.push_front(entry);
         self.entries.front()
     }
@@ -745,7 +764,7 @@ impl PluginsManager {
         self.loaded_plugins_cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&key)
+            .get(&key, &self.store)
             .map(|cached| cached.plugin_skill_snapshots.clone())
     }
 
@@ -968,7 +987,7 @@ impl PluginsManager {
         self.loaded_plugins_cache
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(key)
+            .get(key, &self.store)
             .map(|cached| cached.plugins.clone())
     }
 
@@ -1005,6 +1024,40 @@ impl PluginsManager {
         if evicted {
             loaded_cache_metrics::record_event("capacity_eviction");
         }
+    }
+
+    /// Applies plugin exclusions and canonical ownership from the current account's installed cache.
+    /// A canonical owner's bundle need not be installed on this host.
+    pub fn connector_snapshot(
+        &self,
+        sources: impl IntoIterator<Item = PluginConnectorSource>,
+        disabled_plugin_ids: &[String],
+    ) -> ConnectorSnapshot {
+        let mut canonical_app_ids = HashSet::new();
+        if !disabled_plugin_ids.is_empty() {
+            let cache = match self.remote_installed_plugins_cache.read() {
+                Ok(cache) => cache,
+                Err(err) => err.into_inner(),
+            };
+            if self.remote_installed_plugins_cache_matches_current_auth(&cache) {
+                canonical_app_ids = cache
+                    .plugins
+                    .as_deref()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|plugin| {
+                        let app_id = plugin.canonical_app_id.as_ref()?;
+                        let plugin_id =
+                            PluginId::new(plugin.name.clone(), plugin.marketplace_name.clone())
+                                .ok()?;
+                        disabled_plugin_ids
+                            .contains(&plugin_id.as_key())
+                            .then(|| app_id.clone())
+                    })
+                    .collect();
+            }
+        }
+        ConnectorSnapshot::from_plugin_sources(sources, disabled_plugin_ids, canonical_app_ids)
     }
 
     fn remote_installed_plugin_configs(&self) -> HashMap<String, PluginConfig> {

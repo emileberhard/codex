@@ -6,7 +6,6 @@ use codex_protocol::protocol::ConversationTextRole;
 use codex_protocol::protocol::RealtimeAudioFrame as CoreRealtimeAudioFrame;
 use codex_protocol::protocol::RealtimeConversationVersion;
 use codex_protocol::protocol::RealtimeOutputModality;
-use codex_protocol::protocol::RealtimeTranscriptEntry;
 use codex_protocol::protocol::RealtimeVoice;
 use codex_protocol::protocol::RealtimeVoicesList;
 use codex_protocol::realtime::BemItemPresentation as CoreBemItemPresentation;
@@ -436,17 +435,6 @@ pub struct ThreadRealtimeStartedNotification {
 pub struct ThreadRealtimeItemAddedNotification {
     pub thread_id: String,
     pub item: JsonValue,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export_to = "v2/")]
-pub struct ThreadRealtimeHandoffRequestedNotification {
-    pub thread_id: String,
-    pub handoff_id: String,
-    pub item_id: String,
-    pub input_transcript: String,
-    pub active_transcript: Vec<RealtimeTranscriptEntry>,
 }
 
 /// EXPERIMENTAL - a realtime timeline item started before its content streams.
