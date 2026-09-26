@@ -631,6 +631,9 @@ pub(crate) fn apply_live_thread_settings(
 ) {
     thread.model = Some(config_snapshot.model.clone());
     thread.reasoning_effort = config_snapshot.reasoning_effort.clone();
+    thread.extra = Some(codex_app_server_protocol::ThreadExtra {
+        service_tier: config_snapshot.service_tier.clone(),
+    });
     thread.environments = Some(
         config_snapshot
             .environment_selections()

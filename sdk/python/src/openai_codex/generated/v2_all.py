@@ -5241,10 +5241,10 @@ class ThreadEnvironment(BaseModel):
 
 
 class ThreadExtra(BaseModel):
-    pass
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
 
 
 class ThreadGoalClearParams(BaseModel):

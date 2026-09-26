@@ -164,7 +164,9 @@ impl From<ThreadSource> for CoreThreadSource {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(rename_all = "camelCase", export_to = "v2/")]
-pub struct ThreadExtra {}
+pub struct ThreadExtra {
+    pub service_tier: Option<String>,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]

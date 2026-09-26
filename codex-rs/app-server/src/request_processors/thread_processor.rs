@@ -6323,7 +6323,9 @@ fn build_thread_from_snapshot(
                 .map(Into::into)
                 .collect(),
         ),
-        extra: None,
+        extra: Some(codex_app_server_protocol::ThreadExtra {
+            service_tier: config_snapshot.service_tier.clone(),
+        }),
         session_id,
         forked_from_id: None,
         parent_thread_id: config_snapshot.parent_thread_id.map(|id| id.to_string()),

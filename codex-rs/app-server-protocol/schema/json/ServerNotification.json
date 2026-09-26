@@ -4470,6 +4470,14 @@
     },
     "ThreadExtra": {
       "description": "Extra app-server data for a thread.",
+      "properties": {
+        "serviceTier": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ThreadGoal": {

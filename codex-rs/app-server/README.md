@@ -379,3 +379,13 @@ app-server process's `RLIMIT_NOFILE` soft and hard limits. Each value is
 explicitly classified as `finite`, `unlimited`, `unknown` (the operating-system
 query failed), or `unsupported` (the platform has no implementation). The field
 is optional so clients can read responses from older app-server versions.
+
+# Loaded thread service tier (experimental)
+
+With the existing `thread.extra` opt-in, loaded thread responses include
+`extra.serviceTier` from the same live configuration snapshot as model and effort.
+`priority` and `fast` both mean Fast mode; `default` means explicit standard
+routing. An absent/null `extra` is unavailable readback, including unloaded
+threads, and must not be interpreted as Fast off. Reading does not resume a
+thread or materialize its history. This private field can be removed when
+upstream thread reads expose authoritative service-tier state.

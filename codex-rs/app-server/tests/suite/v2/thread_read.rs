@@ -155,6 +155,7 @@ async fn thread_read_returns_summary_without_turns() -> Result<()> {
     assert_eq!(thread.git_info, None);
     assert_eq!(thread.turns.len(), 0);
     assert_eq!(thread.status, ThreadStatus::NotLoaded);
+    assert_eq!(thread.extra, None);
 
     let list_id = mcp.send_raw_request("thread/list", Some(json!({}))).await?;
     let response: Value = timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(list_id)).await??;
@@ -167,6 +168,45 @@ async fn thread_read_returns_summary_without_turns() -> Result<()> {
     assert_eq!(listed.get("model"), Some(&Value::Null));
     assert_eq!(listed.get("reasoningEffort"), Some(&Value::Null));
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_read_reports_loaded_service_tier_without_materializing_history() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+
+    for tier in [Some("fast".to_string()), Some("priority".to_string()), None] {
+        let start_id = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                service_tier: Some(tier.clone()),
+                ..Default::default()
+            })
+            .await?;
+        let started: ThreadStartResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+        let read_id = mcp
+            .send_thread_read_request(ThreadReadParams {
+                thread_id: started.thread.id.clone(),
+                include_turns: false,
+            })
+            .await?;
+        let read: ThreadReadResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(read_id)).await??;
+        assert_eq!(
+            read.thread.extra,
+            Some(codex_app_server_protocol::ThreadExtra {
+                service_tier: tier.map(|_| "priority".to_string()),
+            })
+        );
+        assert!(read.thread.turns.is_empty());
+        assert!(!started.thread.path.expect("thread path").exists());
+    }
     Ok(())
 }
 
