@@ -1,5 +1,7 @@
 use super::PersistedResumeSettings;
 use super::latest_persisted_resume_settings;
+use super::latest_persisted_service_tier;
+use codex_protocol::ThreadId;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::config_types::CollaborationMode;
 use codex_protocol::config_types::ModeKind;
@@ -161,5 +163,45 @@ fn older_reviewer_is_used_when_latest_turn_context_omits_it() {
             approvals_reviewer: Some(ApprovalsReviewer::AutoReview),
             active_permission_profile: None,
         })
+    );
+}
+
+#[test]
+fn service_tier_distinguishes_owned_off_from_missing_owned_snapshot() {
+    let source_id = ThreadId::from_u128(1);
+    let other_id = ThreadId::from_u128(2);
+    let mut priority = settings_item(
+        AskForApproval::OnRequest,
+        ApprovalsReviewer::User,
+        /*active_permission_profile*/ None,
+    );
+    if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = &mut priority {
+        event.thread_id = Some(source_id);
+        event.thread_settings.service_tier = Some("priority".to_string());
+    }
+    let mut unknown = settings_item(
+        AskForApproval::OnRequest,
+        ApprovalsReviewer::User,
+        /*active_permission_profile*/ None,
+    );
+    if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = &mut unknown {
+        event.thread_id = Some(source_id);
+    }
+    let mut foreign = priority.clone();
+    if let RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)) = &mut foreign {
+        event.thread_id = Some(other_id);
+    }
+
+    assert_eq!(
+        latest_persisted_service_tier(&[foreign.clone()], source_id),
+        None
+    );
+    assert_eq!(
+        latest_persisted_service_tier(&[priority.clone(), foreign], source_id),
+        Some(Some("priority".to_string()))
+    );
+    assert_eq!(
+        latest_persisted_service_tier(&[priority, unknown], source_id),
+        Some(None)
     );
 }

@@ -1,3 +1,4 @@
+use codex_protocol::ThreadId;
 use codex_protocol::config_types::ApprovalsReviewer;
 use codex_protocol::models::ActivePermissionProfile;
 use codex_protocol::protocol::AskForApproval;
@@ -44,6 +45,20 @@ pub(super) fn latest_persisted_resume_settings(
             }
             _ => None,
         })
+}
+
+pub(super) fn latest_persisted_service_tier(
+    history: &[RolloutItem],
+    thread_id: ThreadId,
+) -> Option<Option<String>> {
+    history.iter().rev().find_map(|item| match item {
+        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
+            if event.thread_id == Some(thread_id) =>
+        {
+            Some(event.thread_settings.service_tier.clone())
+        }
+        _ => None,
+    })
 }
 
 #[cfg(test)]

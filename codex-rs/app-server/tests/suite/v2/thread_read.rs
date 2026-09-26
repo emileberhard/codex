@@ -175,7 +175,9 @@ async fn thread_read_returns_summary_without_turns() -> Result<()> {
 async fn thread_read_reports_loaded_service_tier_without_materializing_history() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
-    MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
+    MockResponsesConfig::new(&server.uri())
+        .with_model("gpt-5.4")
+        .write(codex_home.path())?;
     let mut mcp = TestAppServer::builder()
         .with_codex_home(codex_home.path())
         .build_initialized()
@@ -184,6 +186,7 @@ async fn thread_read_reports_loaded_service_tier_without_materializing_history()
     for tier in [Some("fast".to_string()), Some("priority".to_string()), None] {
         let start_id = mcp
             .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("gpt-5.4".to_string()),
                 service_tier: Some(tier.clone()),
                 ..Default::default()
             })
@@ -201,7 +204,7 @@ async fn thread_read_reports_loaded_service_tier_without_materializing_history()
         assert_eq!(
             read.thread.extra,
             Some(codex_app_server_protocol::ThreadExtra {
-                service_tier: tier.map(|_| "priority".to_string()),
+                service_tier: Some(tier.as_ref().map_or("default", |_| "priority").to_string()),
             })
         );
         assert!(read.thread.turns.is_empty());

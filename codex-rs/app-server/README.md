@@ -389,3 +389,11 @@ routing. An absent/null `extra` is unavailable readback, including unloaded
 threads, and must not be interpreted as Fast off. Reading does not resume a
 thread or materialize its history. This private field can be removed when
 upstream thread reads expose authoritative service-tier state.
+
+When `serviceTier` is omitted, a cold resume restores the latest settings snapshot
+owned by that thread. A fork inherits its source's current loaded settings, or
+the latest source-owned persisted snapshot when unloaded. An explicit override,
+including `null` for standard routing, takes precedence. Histories without an
+owned settings snapshot retain configured behavior. This private inheritance
+patch can be removed when upstream preserves the same thread-owned tier on
+resume and fork.

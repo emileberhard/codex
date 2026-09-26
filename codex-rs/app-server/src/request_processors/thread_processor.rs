@@ -6,6 +6,7 @@ mod daemon_snapshot;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
+use super::persisted_resume_settings::latest_persisted_service_tier;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
 use super::thread_input::can_accept_direct_input;
@@ -4273,6 +4274,16 @@ impl ThreadRequestProcessor {
                     .map(|profile| profile.id);
             }
         }
+        if typesafe_overrides.service_tier.is_none()
+            && !request_overrides
+                .as_ref()
+                .is_some_and(|overrides| overrides.contains_key("service_tier"))
+        {
+            typesafe_overrides.service_tier = latest_persisted_service_tier(
+                &resumed_history.history,
+                resumed_history.conversation_id,
+            );
+        }
         let state_db_ctx = self.state_db.clone()?;
         let persisted_metadata = state_db_ctx
             .get_thread(resumed_history.conversation_id)
@@ -5045,25 +5056,37 @@ impl ThreadRequestProcessor {
                 .is_some_and(|overrides| overrides.contains_key("approvals_reviewer"));
         let restore_permission_profile =
             !has_permission_override(request_overrides.as_ref(), &typesafe_overrides);
+        let restore_service_tier = typesafe_overrides.service_tier.is_none()
+            && !request_overrides
+                .as_ref()
+                .is_some_and(|overrides| overrides.contains_key("service_tier"));
         let needs_latest_settings =
             restore_approval_policy || restore_approvals_reviewer || restore_permission_profile;
         let loaded_parent = self.thread_manager.get_thread(source_thread_id).await.ok();
+        let loaded_parent_snapshot = if (restore_service_tier
+            || (paginated_source && needs_latest_settings))
+            && let Some(parent) = loaded_parent.as_ref()
+        {
+            Some(parent.thread_settings_snapshot().await)
+        } else {
+            None
+        };
+        if restore_service_tier {
+            typesafe_overrides.service_tier = loaded_parent_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.service_tier.clone());
+        }
         let loaded_parent_settings = if paginated_source && needs_latest_settings {
-            if let Some(parent) = loaded_parent.as_ref() {
-                let snapshot = parent.thread_settings_snapshot().await;
-                Some(PersistedResumeSettings {
-                    approval_policy: snapshot.approval_policy,
-                    approvals_reviewer: Some(snapshot.approvals_reviewer),
-                    active_permission_profile: snapshot.active_permission_profile,
-                })
-            } else {
-                None
-            }
+            loaded_parent_snapshot.map(|snapshot| PersistedResumeSettings {
+                approval_policy: snapshot.approval_policy,
+                approvals_reviewer: Some(snapshot.approvals_reviewer),
+                active_permission_profile: snapshot.active_permission_profile,
+            })
         } else {
             None
         };
         let latest_context = if paginated_source
-            && needs_latest_settings
+            && (needs_latest_settings || restore_service_tier)
             && loaded_parent.is_none()
             && (last_turn_id.is_some() || before_turn_id.is_some())
         {
@@ -5100,6 +5123,14 @@ impl ThreadRequestProcessor {
                     .unwrap_or_else(|| source_history_items.as_ref()),
             )
         });
+        if restore_service_tier && loaded_parent.is_none() {
+            typesafe_overrides.service_tier = latest_persisted_service_tier(
+                latest_context
+                    .as_deref()
+                    .unwrap_or_else(|| source_history_items.as_ref()),
+                source_thread_id,
+            );
+        }
         if let Some(persisted_settings) = persisted_settings {
             if restore_approval_policy {
                 typesafe_overrides.approval_policy = Some(persisted_settings.approval_policy);
