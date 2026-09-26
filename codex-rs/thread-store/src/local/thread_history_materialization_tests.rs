@@ -1273,6 +1273,145 @@ async fn paginated_fork_reads_compressed_shared_lineage_without_materializing() 
 }
 
 #[tokio::test]
+async fn paginated_reads_project_imported_nested_and_reverted_ancestors() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let root_id = ThreadId::default();
+    create_paginated_thread(&store, root_id).await;
+    store
+        .persist_thread(root_id, PersistContext::Standard)
+        .await
+        .expect("persist root metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id: root_id,
+            items: vec![turn_started("root-turn"), turn_completed("root-turn")],
+        })
+        .await
+        .expect("append root turn");
+    let root_base = prepare_paginated_fork(&store, root_id, ForkBoundary::Latest)
+        .await
+        .history_base
+        .expect("root boundary");
+
+    let middle_id = ThreadId::default();
+    create_paginated_subagent_thread(
+        &store,
+        middle_id,
+        Some(root_base),
+        /*subagent_history_start_ordinal*/ None,
+    )
+    .await;
+    store
+        .persist_thread(middle_id, PersistContext::Standard)
+        .await
+        .expect("persist middle metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id: middle_id,
+            items: vec![turn_started("middle-turn"), turn_completed("middle-turn")],
+        })
+        .await
+        .expect("append middle turn");
+    let middle_base = prepare_paginated_fork(&store, middle_id, ForkBoundary::Latest)
+        .await
+        .history_base
+        .expect("middle boundary");
+    let middle_path = store
+        .live_rollout_path(middle_id)
+        .await
+        .expect("middle path");
+    store
+        .shutdown_thread(middle_id)
+        .await
+        .expect("shutdown middle");
+
+    // The stable logical thread ID and immutable rollout ID can differ after revert.
+    let reverted_rollout_id = ThreadId::default();
+    let archived_dir = home.path().join("archived_sessions");
+    fs::create_dir_all(&archived_dir).expect("archive directory");
+    let stem = middle_path
+        .file_stem()
+        .expect("middle filename")
+        .to_string_lossy();
+    let reverted_path = archived_dir.join(format!("{stem}_{reverted_rollout_id}.jsonl"));
+    fs::rename(&middle_path, &reverted_path).expect("import reverted middle rollout");
+    compress_rollout(reverted_path.as_path());
+
+    let child_id = ThreadId::default();
+    create_paginated_subagent_thread(
+        &store,
+        child_id,
+        Some(HistoryPosition {
+            thread_id: reverted_rollout_id,
+            ..middle_base
+        }),
+        /*subagent_history_start_ordinal*/ None,
+    )
+    .await;
+    store
+        .persist_thread(child_id, PersistContext::Standard)
+        .await
+        .expect("persist child metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id: child_id,
+            items: vec![turn_started("child-turn"), turn_completed("child-turn")],
+        })
+        .await
+        .expect("append child turn");
+
+    let root_path = store.live_rollout_path(root_id).await.expect("root path");
+    store.shutdown_thread(root_id).await.expect("shutdown root");
+    fs::rename(
+        &root_path,
+        archived_dir.join(root_path.file_name().expect("root filename")),
+    )
+    .expect("import root rollout");
+
+    // Imported JSONL is authoritative, but its target home's SQLite has no ancestor rows.
+    for ancestor_id in [root_id, middle_id, reverted_rollout_id] {
+        super::super::thread_history::delete_thread(&store, ancestor_id)
+            .await
+            .expect("clear ancestor projection");
+    }
+    for ancestor_id in [root_id, reverted_rollout_id] {
+        assert!(
+            super::super::thread_history::projection_state(&store, ancestor_id)
+                .await
+                .expect("read ancestor projection")
+                .is_none()
+        );
+    }
+    let page = store
+        .list_turns(ListTurnsParams {
+            thread_id: child_id,
+            include_archived: false,
+            cursor: None,
+            page_size: 10,
+            sort_direction: SortDirection::Asc,
+            items_view: StoredTurnItemsView::NotLoaded,
+        })
+        .await
+        .expect("page imported lineage");
+    assert_eq!(
+        page.turns
+            .iter()
+            .map(|turn| turn.turn_id.as_str())
+            .collect::<Vec<_>>(),
+        ["root-turn", "middle-turn", "child-turn"]
+    );
+    for ancestor_id in [root_id, reverted_rollout_id] {
+        assert!(
+            super::super::thread_history::projection_state(&store, ancestor_id)
+                .await
+                .expect("read projected ancestor")
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
 async fn cancelled_fork_keeps_source_reserved_until_lineage_resolution_finishes() {
     let home = TempDir::new().expect("temp dir");
     let store = projection_store(home.path()).await;

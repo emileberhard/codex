@@ -309,53 +309,107 @@ pub(super) async fn validate_thread_for_paginated_reads(
     // JSONL is canonical and SQLite is only its paginated read projection. A failed projection
     // must not turn into a successful read of an old prefix: retry the projection under the same
     // per-thread lock used by writers, then surface any persistent integrity error to the client.
-    let _writer_guard = store.live_writer_locks.lock(thread_id).await;
-    let resolved =
-        super::super::thread_rollout_resolver::resolve_current_including_archived(store, thread_id)
-            .await?
-            .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
-    if metadata.history_mode == ThreadHistoryMode::Legacy {
-        return super::super::legacy_history_materialization::materialize(
+    let current_rollout_id = {
+        let _writer_guard = store.live_writer_locks.lock(thread_id).await;
+        let resolved = super::super::thread_rollout_resolver::resolve_current_including_archived(
+            store, thread_id,
+        )
+        .await?
+        .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
+        if metadata.history_mode == ThreadHistoryMode::Legacy {
+            return super::super::legacy_history_materialization::materialize(
+                store,
+                resolved.rollout_id,
+                &resolved.path,
+            )
+            .await;
+        }
+        materialize_paginated_rollout(
             store,
             resolved.rollout_id,
-            &resolved.path,
+            resolved.path.as_path(),
+            ProjectionTarget::Current,
         )
-        .await;
-    }
-    if resolved.path.extension().and_then(std::ffi::OsStr::to_str) == Some("zst") {
-        if super::projection_state(store, resolved.rollout_id)
-            .await?
-            .is_none()
-        {
-            return Err(ThreadStoreError::Internal {
-                message: format!(
-                    "compressed paginated rollout {} has no materialized history",
-                    resolved.path.display()
-                ),
-            });
+        .await?;
+        resolved.rollout_id
+    };
+
+    // Imported ancestors have canonical JSONL but may have no local SQLite projection. Read
+    // every selected lineage segment before paging; otherwise its turns silently disappear.
+    // Keep only one writer lock at a time so concurrent forks and reads cannot deadlock.
+    let lineage = store.resolve_rollout_lineage(thread_id).await?;
+    for segment in lineage.segments() {
+        if segment.rollout_id() == current_rollout_id {
+            continue;
         }
+        let _writer_guard = store.live_writer_locks.lock(segment.rollout_id()).await;
+        let end = segment.end.ok_or_else(|| ThreadStoreError::Internal {
+            message: format!(
+                "ancestor rollout {} has no lineage cutoff",
+                segment.rollout_id()
+            ),
+        })?;
+        materialize_paginated_rollout(
+            store,
+            segment.rollout_id(),
+            segment.rollout_path.as_path(),
+            ProjectionTarget::InheritedThrough(end),
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum ProjectionTarget {
+    Current,
+    InheritedThrough(HistoryPosition),
+}
+
+async fn materialize_paginated_rollout(
+    store: &LocalThreadStore,
+    rollout_id: ThreadId,
+    rollout_path: &std::path::Path,
+    target: ProjectionTarget,
+) -> ThreadStoreResult<()> {
+    // Cold compressed rollouts with an existing projection need no decoding. A newly imported
+    // compressed ancestor has no projection, so replay its decoded native bytes below.
+    let projection_state = super::projection_state(store, rollout_id).await?;
+    if let ProjectionTarget::InheritedThrough(end) = target
+        && projection_state.as_ref().is_some_and(|state| {
+            state.next_byte_offset >= end.end_byte_offset
+                && state.next_ordinal >= end.end_ordinal_exclusive
+        })
+    {
         return Ok(());
     }
-    if let Some(projection_state) = super::projection_state(store, resolved.rollout_id).await?
+    if rollout_path.extension().and_then(std::ffi::OsStr::to_str) == Some("zst")
+        && projection_state.is_some()
+        && matches!(target, ProjectionTarget::Current)
+    {
+        return Ok(());
+    }
+    if let Some(projection_state) = projection_state
+        && rollout_path.extension().and_then(std::ffi::OsStr::to_str) != Some("zst")
         && !super::super::thread_history_materialization::projection_checkpoint_is_line_boundary(
-            resolved.path.as_path(),
+            rollout_path,
             projection_state.next_byte_offset,
         )
         .await?
     {
         error!(
-            thread_id = %resolved.rollout_id,
-            rollout_path = %resolved.path.display(),
+            thread_id = %rollout_id,
+            rollout_path = %rollout_path.display(),
             checkpoint_byte_offset = projection_state.next_byte_offset,
             checkpoint_ordinal = projection_state.next_ordinal,
             "rebuilding a misaligned paginated history projection from canonical JSONL"
         );
-        super::delete_thread(store, resolved.rollout_id).await?;
+        super::delete_thread(store, rollout_id).await?;
     }
     super::super::thread_history_materialization::materialize_to_sqlite(
         store,
-        resolved.rollout_id,
-        resolved.path.as_path(),
+        rollout_id,
+        rollout_path,
     )
     .await
 }
