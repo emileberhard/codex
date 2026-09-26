@@ -1633,6 +1633,281 @@ async fn cold_resume_and_forks_inherit_persisted_service_tier_unless_overridden(
 }
 
 #[tokio::test]
+async fn first_turn_persists_start_or_turn_selected_tier_in_paginated_history() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    for (start_tier, turn_tier) in [
+        (Some(Some("priority".to_string())), None),
+        (None, Some(Some("priority".to_string()))),
+    ] {
+        let codex_home = TempDir::new()?;
+        mock_responses_config(&server.uri()).write(codex_home.path())?;
+        let thread_id = {
+            let mut mcp = TestAppServer::builder()
+                .with_codex_home(codex_home.path())
+                .build_initialized()
+                .await?;
+            let start_id = mcp
+                .send_thread_start_request_with_auto_env(ThreadStartParams {
+                    model: Some("gpt-5.4".to_string()),
+                    service_tier: start_tier,
+                    ..Default::default()
+                })
+                .await?;
+            let ThreadStartResponse { thread, .. } =
+                timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+            assert_eq!(thread.history_mode, ThreadHistoryMode::Paginated);
+            assert!(!thread.path.as_ref().expect("thread path").exists());
+            timeout(
+                DEFAULT_READ_TIMEOUT,
+                mcp.start_turn_and_wait_for_completion(TurnStartParams {
+                    thread_id: thread.id.clone(),
+                    input: vec![UserInput::Text {
+                        text: "persist first turn tier".to_string(),
+                        text_elements: Vec::new(),
+                    }],
+                    service_tier: turn_tier,
+                    ..Default::default()
+                }),
+            )
+            .await??;
+            let read_id = mcp
+                .send_thread_read_request(ThreadReadParams {
+                    thread_id: thread.id.clone(),
+                    include_turns: false,
+                })
+                .await?;
+            let loaded: ThreadReadResponse =
+                timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(read_id)).await??;
+            assert_eq!(
+                loaded.thread.extra.and_then(|extra| extra.service_tier),
+                Some("priority".to_string())
+            );
+            thread.id
+        };
+
+        mock_responses_config(&server.uri())
+            .with_root_config("service_tier = \"default\"")
+            .write(codex_home.path())?;
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let read_id = mcp
+            .send_thread_read_request(ThreadReadParams {
+                thread_id: thread_id.clone(),
+                include_turns: false,
+            })
+            .await?;
+        let unloaded: ThreadReadResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(read_id)).await??;
+        assert_eq!(unloaded.thread.extra, None);
+
+        let fork_id = mcp
+            .send_thread_fork_request(ThreadForkParams {
+                thread_id: thread_id.clone(),
+                ..Default::default()
+            })
+            .await?;
+        let inherited: ThreadForkResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(fork_id)).await??;
+        assert_eq!(inherited.service_tier.as_deref(), Some("priority"));
+
+        let fork_id = mcp
+            .send_thread_fork_request(ThreadForkParams {
+                thread_id: thread_id.clone(),
+                service_tier: Some(None),
+                ..Default::default()
+            })
+            .await?;
+        let overridden: ThreadForkResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(fork_id)).await??;
+        assert_eq!(overridden.service_tier.as_deref(), Some("default"));
+
+        let resume_id = mcp
+            .send_thread_resume_request(ThreadResumeParams {
+                thread_id,
+                ..Default::default()
+            })
+            .await?;
+        let resumed: ThreadResumeResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+        assert_eq!(resumed.service_tier.as_deref(), Some("priority"));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cold_resume_retains_fast_intent_when_current_model_does_not_support_it() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    mock_responses_config(&server.uri()).write(codex_home.path())?;
+    let thread_id = {
+        let mut mcp = TestAppServer::builder()
+            .with_codex_home(codex_home.path())
+            .build_initialized()
+            .await?;
+        let start_id = mcp
+            .send_thread_start_request_with_auto_env(ThreadStartParams {
+                model: Some("gpt-5.4".to_string()),
+                service_tier: Some(Some("priority".to_string())),
+                ..Default::default()
+            })
+            .await?;
+        let ThreadStartResponse { thread, .. } =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(start_id)).await??;
+        timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.start_turn_and_wait_for_completion(TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "persist tier before switching model".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            }),
+        )
+        .await??;
+        let update_id = mcp
+            .send_thread_settings_update_request(ThreadSettingsUpdateParams {
+                thread_id: thread.id.clone(),
+                model: Some("mock-model".to_string()),
+                ..Default::default()
+            })
+            .await?;
+        let _: ThreadSettingsUpdateResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(update_id)).await??;
+        let updated: ThreadSettingsUpdatedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("thread/settings/updated"),
+        )
+        .await??;
+        assert_eq!(
+            updated.thread_settings.service_tier.as_deref(),
+            Some("priority")
+        );
+        thread.id
+    };
+
+    mock_responses_config(&server.uri())
+        .with_root_config("service_tier = \"default\"")
+        .write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let resume_id = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread_id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let resumed: ThreadResumeResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+    assert_eq!(resumed.model, "mock-model");
+    assert_eq!(resumed.service_tier.as_deref(), Some("priority"));
+    assert_eq!(
+        resumed.thread.extra.and_then(|extra| extra.service_tier),
+        Some("priority".to_string())
+    );
+
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread_id.clone(),
+            input: vec![UserInput::Text {
+                text: "use unsupported model".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        }),
+    )
+    .await??;
+    let requests = server.received_requests().await.expect("wiremock requests");
+    let last = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("unsupported model request");
+    let body: Value = serde_json::from_slice(&last.body)?;
+    assert_eq!(body.get("service_tier"), None);
+
+    let update_id = mcp
+        .send_thread_settings_update_request(ThreadSettingsUpdateParams {
+            thread_id: thread_id.clone(),
+            model: Some("gpt-5.4".to_string()),
+            ..Default::default()
+        })
+        .await?;
+    let _: ThreadSettingsUpdateResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(update_id)).await??;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("thread/settings/updated"),
+    )
+    .await??;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread_id.clone(),
+            input: vec![UserInput::Text {
+                text: "restore supported model".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        }),
+    )
+    .await??;
+    let requests = server.received_requests().await.expect("wiremock requests");
+    let last = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("supported model request");
+    let body: Value = serde_json::from_slice(&last.body)?;
+    assert_eq!(body.get("service_tier"), Some(&json!("priority")));
+
+    drop(mcp);
+    mock_responses_config(&server.uri())
+        .with_root_config("service_tier = \"default\"")
+        .disable_feature(Feature::FastMode)
+        .write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let resume_id = mcp
+        .send_thread_resume_request(ThreadResumeParams {
+            thread_id: thread_id.clone(),
+            ..Default::default()
+        })
+        .await?;
+    let disabled: ThreadResumeResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+    assert_eq!(disabled.service_tier.as_deref(), Some("priority"));
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id,
+            input: vec![UserInput::Text {
+                text: "keep intent while Fast mode is disabled".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        }),
+    )
+    .await??;
+    let requests = server.received_requests().await.expect("wiremock requests");
+    let last = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("disabled Fast mode request");
+    let body: Value = serde_json::from_slice(&last.body)?;
+    assert_eq!(body.get("service_tier"), None);
+    Ok(())
+}
+
+#[tokio::test]
 async fn owned_off_tier_survives_priority_host_config_on_resume_and_fork() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;

@@ -18,6 +18,16 @@ use std::sync::Arc;
 use tokio::sync::SemaphorePermit;
 
 impl Session {
+    pub(crate) async fn checkpoint_initial_thread_settings(&self) -> ThreadStoreResult<()> {
+        let Some(checkpoint) = self.initial_settings_checkpoint.as_ref() else {
+            return Ok(());
+        };
+        checkpoint
+            .get_or_try_init(|| self.checkpoint_thread_settings())
+            .await
+            .map(|_| ())
+    }
+
     /// Captures and flushes current settings under the shared persistence permit.
     pub(crate) async fn checkpoint_thread_settings(&self) -> ThreadStoreResult<()> {
         let _settings_guard = acquire_persistence_lock(self).await;

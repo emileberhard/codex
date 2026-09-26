@@ -3867,14 +3867,10 @@ impl Config {
             Some(None) => Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string()),
             None => cfg.service_tier,
         };
-        let service_tier = service_tier.and_then(|service_tier| {
-            match ServiceTier::from_request_value(&service_tier) {
-                Some(ServiceTier::Fast) => features
-                    .enabled(Feature::FastMode)
-                    .then(|| ServiceTier::Fast.request_value().to_string()),
-                Some(ServiceTier::Flex) => Some(ServiceTier::Flex.request_value().to_string()),
-                None => Some(service_tier),
-            }
+        let service_tier = service_tier.map(|service_tier| {
+            ServiceTier::from_request_value(&service_tier).map_or(service_tier, |tier| {
+                tier.request_value().to_string()
+            })
         });
 
         let compact_prompt = compact_prompt.or(cfg.compact_prompt).and_then(|value| {

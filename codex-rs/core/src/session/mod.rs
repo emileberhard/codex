@@ -818,8 +818,6 @@ impl Session {
             fast_mode_enabled,
             &model_info,
         );
-        let service_tier =
-            get_service_tier(config.service_tier.clone(), fast_mode_enabled, &model_info);
         let session_configuration = SessionConfiguration {
             provider: create_model_provider(
                 config.model_provider.clone(),
@@ -828,7 +826,7 @@ impl Session {
             step_settings: Arc::new(StepSettings {
                 collaboration_mode,
                 reasoning_summary: config.model_reasoning_summary,
-                service_tier,
+                service_tier: config.service_tier.clone(),
                 personality: config.personality,
                 approval_policy: config.permissions.approval_policy.clone(),
                 approvals_reviewer: config.approvals_reviewer,
@@ -1076,20 +1074,6 @@ impl SessionIo {
 /// encodes a timestamp, so think carefully before changing this.
 pub(crate) fn new_submission_id() -> String {
     Uuid::now_v7().to_string()
-}
-
-fn get_service_tier(
-    configured_service_tier: Option<String>,
-    fast_mode_enabled: bool,
-    model_info: &ModelInfo,
-) -> Option<String> {
-    if !fast_mode_enabled {
-        return None;
-    }
-    configured_service_tier.filter(|service_tier| {
-        service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
-            || model_info.supports_service_tier(service_tier)
-    })
 }
 
 fn unsupported_service_tier_warning(
@@ -1412,6 +1396,9 @@ impl Session {
         if let Some(live_thread) = self.live_thread() {
             live_thread
                 .persist(context)
+                .await
+                .map_err(std::io::Error::other)?;
+            self.checkpoint_initial_thread_settings()
                 .await
                 .map_err(std::io::Error::other)?;
         }
