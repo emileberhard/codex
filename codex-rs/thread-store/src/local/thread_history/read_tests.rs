@@ -1464,6 +1464,70 @@ async fn lineage_reads_nested_forks() {
     assert_eq!(turn_ids(&occurrence_turn), vec!["shared"]);
 }
 
+#[tokio::test]
+async fn inherited_projection_re_resolves_moved_path_and_rejects_missing_bytes() {
+    let (home, store, child_id) = store_with_mode(ThreadHistoryMode::Paginated).await;
+    let ancestor_id = ThreadId::default();
+    let active_path = rollout_path(home.path(), ancestor_id);
+    write_rollout_with_end(
+        active_path.as_path(),
+        ancestor_id,
+        /*history_base*/ None,
+        /*next_ordinal*/ 3,
+    );
+    let end = history_position(
+        active_path.as_path(),
+        ancestor_id,
+        /*end_ordinal_exclusive*/ 3,
+    );
+    write_rollout_with_end(
+        rollout_path(home.path(), child_id).as_path(),
+        child_id,
+        Some(end),
+        /*next_ordinal*/ 2,
+    );
+    let lineage = store
+        .resolve_rollout_lineage(child_id)
+        .await
+        .expect("resolve active ancestor");
+    assert_eq!(lineage.segments()[0].rollout_path, active_path);
+
+    let archived_path = home
+        .path()
+        .join("archived_sessions")
+        .join(active_path.file_name().expect("ancestor filename"));
+    fs::create_dir_all(archived_path.parent().expect("archive directory"))
+        .expect("create archive directory");
+    fs::rename(&active_path, &archived_path).expect("move ancestor after lineage resolution");
+    materialize_inherited_rollout(&store, ancestor_id, end)
+        .await
+        .expect("project ancestor from its new path");
+    let projected = super::super::projection_state(&store, ancestor_id)
+        .await
+        .expect("read ancestor projection")
+        .expect("ancestor projection exists");
+    assert!(projected.next_byte_offset >= end.end_byte_offset);
+    assert!(projected.next_ordinal >= end.end_ordinal_exclusive);
+
+    super::super::delete_thread(&store, ancestor_id)
+        .await
+        .expect("clear ancestor projection");
+    fs::remove_file(&archived_path).expect("remove ancestor representation");
+    let error = materialize_paginated_rollout(
+        &store,
+        ancestor_id,
+        active_path.as_path(),
+        ProjectionTarget::InheritedThrough(end),
+    )
+    .await
+    .expect_err("a no-op materialization must not hide missing inherited history");
+    assert!(matches!(
+        error,
+        ThreadStoreError::Internal { message }
+            if message.contains("projection did not reach")
+    ));
+}
+
 async fn store_with_mode(history_mode: ThreadHistoryMode) -> (TempDir, LocalThreadStore, ThreadId) {
     let home = TempDir::new().expect("temp dir");
     let config = test_config(home.path());

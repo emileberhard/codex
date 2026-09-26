@@ -342,22 +342,53 @@ pub(super) async fn validate_thread_for_paginated_reads(
         if segment.rollout_id() == current_rollout_id {
             continue;
         }
-        let _writer_guard = store.live_writer_locks.lock(segment.rollout_id()).await;
         let end = segment.end.ok_or_else(|| ThreadStoreError::Internal {
             message: format!(
                 "ancestor rollout {} has no lineage cutoff",
                 segment.rollout_id()
             ),
         })?;
-        materialize_paginated_rollout(
-            store,
-            segment.rollout_id(),
-            segment.rollout_path.as_path(),
-            ProjectionTarget::InheritedThrough(end),
-        )
-        .await?;
+        materialize_inherited_rollout(store, segment.rollout_id(), end).await?;
     }
     Ok(())
+}
+
+async fn materialize_inherited_rollout(
+    store: &LocalThreadStore,
+    rollout_id: ThreadId,
+    end: HistoryPosition,
+) -> ThreadStoreResult<()> {
+    let _writer_guard = store.live_writer_locks.lock(rollout_id).await;
+    if super::projection_state(store, rollout_id)
+        .await?
+        .as_ref()
+        .is_some_and(|state| {
+            state.next_byte_offset >= end.end_byte_offset
+                && state.next_ordinal >= end.end_ordinal_exclusive
+        })
+    {
+        return Ok(());
+    }
+    // Archive and unarchive can move an ancestor after lineage resolution. Re-resolve its
+    // immutable identity under the writer lock instead of using the earlier path snapshot.
+    let path = codex_rollout::find_rollout_path_by_rollout_id(
+        store.config.codex_home.as_path(),
+        rollout_id,
+    )
+    .await
+    .map_err(|error| ThreadStoreError::Internal {
+        message: format!("failed to locate inherited rollout {rollout_id}: {error}"),
+    })?
+    .ok_or_else(|| ThreadStoreError::Internal {
+        message: format!("missing inherited rollout {rollout_id}"),
+    })?;
+    materialize_paginated_rollout(
+        store,
+        rollout_id,
+        path.as_path(),
+        ProjectionTarget::InheritedThrough(end),
+    )
+    .await
 }
 
 #[derive(Clone, Copy)]
@@ -411,7 +442,24 @@ async fn materialize_paginated_rollout(
         rollout_id,
         rollout_path,
     )
-    .await
+    .await?;
+    if let ProjectionTarget::InheritedThrough(end) = target {
+        let reached = super::projection_state(store, rollout_id)
+            .await?
+            .is_some_and(|state| {
+                state.next_byte_offset >= end.end_byte_offset
+                    && state.next_ordinal >= end.end_ordinal_exclusive
+            });
+        if !reached {
+            return Err(ThreadStoreError::Internal {
+                message: format!(
+                    "inherited rollout {rollout_id} projection did not reach ordinal {} at byte {}",
+                    end.end_ordinal_exclusive, end.end_byte_offset
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 async fn load_inherited_summary_items(
