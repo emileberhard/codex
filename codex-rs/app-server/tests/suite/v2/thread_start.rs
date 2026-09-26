@@ -1005,7 +1005,7 @@ model_reasoning_effort = "high"
 }
 
 #[tokio::test]
-async fn thread_start_drops_unsupported_service_tier_id() -> Result<()> {
+async fn thread_start_retains_unsupported_service_tier_intent() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
 
     let codex_home = TempDir::new()?;
@@ -1024,8 +1024,8 @@ async fn thread_start_drops_unsupported_service_tier_id() -> Result<()> {
         })
         .await?;
 
-    // Unsupported catalog ids are dropped at session config time instead of echoed back.
-    assert_eq!(service_tier, None);
+    // Readback reports the selected intent. Request creation filters unsupported IDs.
+    assert_eq!(service_tier, Some(service_tier_id));
     Ok(())
 }
 

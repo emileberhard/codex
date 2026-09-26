@@ -293,6 +293,11 @@ impl MemoryStartupContext {
         let reasoning_summary = config
             .model_reasoning_summary
             .unwrap_or(model_info.default_reasoning_summary);
+        let service_tier = if config.features.enabled(codex_features::Feature::FastMode) {
+            model_info.service_tier_for_request(config_snapshot.service_tier)
+        } else {
+            None
+        };
 
         StageOneRequestContext {
             version: self.version,
@@ -307,7 +312,7 @@ impl MemoryStartupContext {
             ),
             reasoning_effort: Some(reasoning_effort),
             reasoning_summary,
-            service_tier: config_snapshot.service_tier,
+            service_tier,
         }
     }
 

@@ -384,8 +384,10 @@ is optional so clients can read responses from older app-server versions.
 
 With the existing `thread.extra` opt-in, loaded thread responses include
 `extra.serviceTier` from the same live configuration snapshot as model and effort.
-`priority` and `fast` both mean Fast mode; `default` means explicit standard
-routing. An absent/null `extra` is unavailable readback, including unloaded
+`priority` and `fast` both mean selected Fast intent; `default` means explicit
+standard routing. A request uses Fast only when the current model supports it
+and the FastMode feature is enabled; otherwise the request omits the tier while
+the selected intent remains available for a later supported model. An absent/null `extra` is unavailable readback, including unloaded
 threads, and must not be interpreted as Fast off. Reading does not resume a
 thread or materialize its history. This private field can be removed when
 upstream thread reads expose authoritative service-tier state.

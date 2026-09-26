@@ -40,6 +40,13 @@ pub(super) async fn sampler_config(
                     model, /*configured_window*/ None,
                 )
             });
+    let service_tier = if input.config.features.enabled(Feature::FastMode) {
+        luna_model
+            .as_ref()
+            .and_then(|model| model.service_tier_for_request(input.config.service_tier.clone()))
+    } else {
+        None
+    };
     let luna_compaction_hash = luna_model.and_then(|model| model.comp_hash);
     LunaSamplerConfig {
         provider: create_model_provider(input.config.model_provider.clone(), Some(auth_manager)),
@@ -56,7 +63,7 @@ pub(super) async fn sampler_config(
             .thread_store
             .get::<ThreadOriginator>()
             .map(|originator| originator.0.clone()),
-        service_tier: input.config.service_tier.clone(),
+        service_tier,
         luna_compaction_hash,
         max_input_tokens,
         metrics: input.extension_metrics.clone(),

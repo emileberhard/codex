@@ -663,6 +663,18 @@ async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_meta
         request_context.service_tier,
         Some(ServiceTier::Fast.request_value().to_string())
     );
+    let mut fast_disabled = test.config.clone();
+    fast_disabled
+        .features
+        .disable(codex_features::Feature::FastMode);
+    let disabled_request_context = context
+        .stage_one_request_context(
+            &fast_disabled,
+            fast_disabled.model.as_deref().unwrap_or("gpt-5.4-mini"),
+            ReasoningEffort::Low,
+        )
+        .await;
+    assert_eq!(disabled_request_context.service_tier, None);
 
     let stage_one = mount_sse_once(
         &server,

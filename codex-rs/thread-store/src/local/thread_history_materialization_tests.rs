@@ -1278,6 +1278,7 @@ async fn paginated_reads_project_imported_nested_and_reverted_ancestors() {
     let store = projection_store(home.path()).await;
     let root_id = ThreadId::default();
     create_paginated_thread(&store, root_id).await;
+    seed_paginated_thread_metadata(&store, root_id).await;
     store
         .persist_thread(root_id, PersistContext::Standard)
         .await
@@ -1302,6 +1303,7 @@ async fn paginated_reads_project_imported_nested_and_reverted_ancestors() {
         /*subagent_history_start_ordinal*/ None,
     )
     .await;
+    seed_paginated_thread_metadata(&store, middle_id).await;
     store
         .persist_thread(middle_id, PersistContext::Standard)
         .await
@@ -1349,6 +1351,7 @@ async fn paginated_reads_project_imported_nested_and_reverted_ancestors() {
         /*subagent_history_start_ordinal*/ None,
     )
     .await;
+    seed_paginated_thread_metadata(&store, child_id).await;
     store
         .persist_thread(child_id, PersistContext::Standard)
         .await
@@ -2823,6 +2826,7 @@ async fn imported_unknown_tail_keeps_known_ancestor_turns_readable() {
     let store = projection_store(home.path()).await;
     let ancestor_id = ThreadId::default();
     create_paginated_thread(&store, ancestor_id).await;
+    seed_paginated_thread_metadata(&store, ancestor_id).await;
     store
         .persist_thread(ancestor_id, PersistContext::Standard)
         .await
@@ -2857,6 +2861,7 @@ async fn imported_unknown_tail_keeps_known_ancestor_turns_readable() {
         /*subagent_history_start_ordinal*/ None,
     )
     .await;
+    seed_paginated_thread_metadata(&store, child_id).await;
     store
         .persist_thread(child_id, PersistContext::Standard)
         .await
@@ -2904,6 +2909,7 @@ async fn compressed_current_rollout_without_projection_is_readable() {
     let store = projection_store(home.path()).await;
     let thread_id = ThreadId::default();
     create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
     store
         .persist_thread(thread_id, PersistContext::Standard)
         .await
