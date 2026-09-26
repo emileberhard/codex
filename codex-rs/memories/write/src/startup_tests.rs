@@ -664,9 +664,10 @@ async fn memories_startup_phase1_uses_live_thread_service_tier_and_detached_meta
         Some(ServiceTier::Fast.request_value().to_string())
     );
     let mut fast_disabled = test.config.clone();
-    let _ = fast_disabled
+    fast_disabled
         .features
-        .disable(codex_features::Feature::FastMode);
+        .disable(codex_features::Feature::FastMode)
+        .expect("disable Fast for memory request test");
     let disabled_request_context = context
         .stage_one_request_context(
             &fast_disabled,
