@@ -1076,6 +1076,20 @@ pub(crate) fn new_submission_id() -> String {
     Uuid::now_v7().to_string()
 }
 
+fn get_service_tier(
+    configured_service_tier: Option<String>,
+    fast_mode_enabled: bool,
+    model_info: &ModelInfo,
+) -> Option<String> {
+    if !fast_mode_enabled {
+        return None;
+    }
+    configured_service_tier.filter(|service_tier| {
+        service_tier == SERVICE_TIER_DEFAULT_REQUEST_VALUE
+            || model_info.supports_service_tier(service_tier)
+    })
+}
+
 fn unsupported_service_tier_warning(
     configured_service_tier: Option<&str>,
     fast_mode_enabled: bool,
