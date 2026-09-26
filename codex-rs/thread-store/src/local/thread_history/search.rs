@@ -61,7 +61,7 @@ pub(in crate::local) async fn search_thread_occurrences(
             message: "thread/searchOccurrences requires page_size greater than zero".to_string(),
         });
     }
-    validate_thread_for_paginated_reads(
+    let lineage = validate_thread_for_paginated_reads(
         store,
         params.thread_id,
         /*include_archived*/ true,
@@ -74,7 +74,6 @@ pub(in crate::local) async fn search_thread_occurrences(
         &params.search_term,
     )?;
     let matcher = LiteralMatcher::new(params.search_term.as_str());
-    let lineage = store.resolve_rollout_lineage(params.thread_id).await?;
     let cursor_segment = cursor
         .as_ref()
         .map(|cursor| {

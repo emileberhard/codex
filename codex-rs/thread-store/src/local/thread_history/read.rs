@@ -125,8 +125,8 @@ pub(in crate::local) async fn observation_cursors(
             }
         }
     }
-    validate_thread_for_paginated_reads(store, thread_id, true, "thread/subscribe").await?;
-    let lineage = store.resolve_rollout_lineage(thread_id).await?;
+    let lineage =
+        validate_thread_for_paginated_reads(store, thread_id, true, "thread/subscribe").await?;
     let segment = lineage
         .segments()
         .last()
@@ -173,14 +173,13 @@ pub(in crate::local) async fn latest_turn_completion(
     store: &LocalThreadStore,
     thread_id: ThreadId,
 ) -> ThreadStoreResult<Option<i64>> {
-    validate_thread_for_paginated_reads(
+    let lineage = validate_thread_for_paginated_reads(
         store,
         thread_id,
         true,
         "thread/list.includeCompletionTimes",
     )
     .await?;
-    let lineage = store.resolve_rollout_lineage(thread_id).await?;
     let page = page_turn_rows(
         store.thread_history_db().await?,
         thread_id,
@@ -198,7 +197,7 @@ pub(in crate::local) async fn list_turns(
     store: &LocalThreadStore,
     params: ListTurnsParams,
 ) -> ThreadStoreResult<TurnPage> {
-    validate_thread_for_paginated_reads(
+    let lineage = validate_thread_for_paginated_reads(
         store,
         params.thread_id,
         params.include_archived,
@@ -206,7 +205,6 @@ pub(in crate::local) async fn list_turns(
     )
     .await?;
     validate_page_size(params.page_size)?;
-    let lineage = store.resolve_rollout_lineage(params.thread_id).await?;
     let pool = store.thread_history_db().await?;
     let page = page_turn_rows(
         pool,
@@ -262,7 +260,7 @@ pub(in crate::local) async fn list_items(
     store: &LocalThreadStore,
     params: ListItemsParams,
 ) -> ThreadStoreResult<ItemPage> {
-    validate_thread_for_paginated_reads(
+    let lineage = validate_thread_for_paginated_reads(
         store,
         params.thread_id,
         params.include_archived,
@@ -270,7 +268,6 @@ pub(in crate::local) async fn list_items(
     )
     .await?;
     validate_page_size(params.page_size)?;
-    let lineage = store.resolve_rollout_lineage(params.thread_id).await?;
     let pool = store.thread_history_db().await?;
     let page = page_item_rows(pool, &lineage, &params).await?;
 
@@ -286,7 +283,7 @@ pub(super) async fn validate_thread_for_paginated_reads(
     thread_id: ThreadId,
     include_archived: bool,
     operation: &'static str,
-) -> ThreadStoreResult<()> {
+) -> ThreadStoreResult<RolloutLineage> {
     let Some(state_db) = store.state_db().await else {
         return Err(ThreadStoreError::Unsupported { operation });
     };
@@ -309,7 +306,7 @@ pub(super) async fn validate_thread_for_paginated_reads(
     // JSONL is canonical and SQLite is only its paginated read projection. A failed projection
     // must not turn into a successful read of an old prefix: retry the projection under the same
     // per-thread lock used by writers, then surface any persistent integrity error to the client.
-    let current_rollout_id = {
+    let lineage = {
         let _writer_guard = store.live_writer_locks.lock(thread_id).await;
         let resolved = super::super::thread_rollout_resolver::resolve_current_including_archived(
             store, thread_id,
@@ -317,12 +314,13 @@ pub(super) async fn validate_thread_for_paginated_reads(
         .await?
         .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
         if metadata.history_mode == ThreadHistoryMode::Legacy {
-            return super::super::legacy_history_materialization::materialize(
+            super::super::legacy_history_materialization::materialize(
                 store,
                 resolved.rollout_id,
                 &resolved.path,
             )
-            .await;
+            .await?;
+            return store.resolve_rollout_lineage(thread_id).await;
         }
         materialize_paginated_rollout(
             store,
@@ -331,17 +329,17 @@ pub(super) async fn validate_thread_for_paginated_reads(
             ProjectionTarget::Current,
         )
         .await?;
-        resolved.rollout_id
+        store.resolve_rollout_lineage(thread_id).await?
     };
 
     // Imported ancestors have canonical JSONL but may have no local SQLite projection. Read
     // every selected lineage segment before paging; otherwise its turns silently disappear.
     // Keep only one writer lock at a time so concurrent forks and reads cannot deadlock.
-    let lineage = store.resolve_rollout_lineage(thread_id).await?;
-    for segment in lineage.segments() {
-        if segment.rollout_id() == current_rollout_id {
-            continue;
-        }
+    for segment in lineage
+        .segments()
+        .iter()
+        .take(lineage.segments().len().saturating_sub(1))
+    {
         let end = segment.end.ok_or_else(|| ThreadStoreError::Internal {
             message: format!(
                 "ancestor rollout {} has no lineage cutoff",
@@ -350,7 +348,7 @@ pub(super) async fn validate_thread_for_paginated_reads(
         })?;
         materialize_inherited_rollout(store, segment.rollout_id(), end).await?;
     }
-    Ok(())
+    Ok(lineage)
 }
 
 async fn materialize_inherited_rollout(
@@ -358,19 +356,25 @@ async fn materialize_inherited_rollout(
     rollout_id: ThreadId,
     end: HistoryPosition,
 ) -> ThreadStoreResult<()> {
+    // A frozen prefix already in SQLite needs no ancestor writer lock.
+    if super::projection_state(store, rollout_id)
+        .await?
+        .as_ref()
+        .is_some_and(|state| covers_inherited_prefix(state, end))
+    {
+        return Ok(());
+    }
     let _writer_guard = store.live_writer_locks.lock(rollout_id).await;
     if super::projection_state(store, rollout_id)
         .await?
         .as_ref()
-        .is_some_and(|state| {
-            state.next_byte_offset >= end.end_byte_offset
-                && state.next_ordinal >= end.end_ordinal_exclusive
-        })
+        .is_some_and(|state| covers_inherited_prefix(state, end))
     {
         return Ok(());
     }
-    // Archive and unarchive can move an ancestor after lineage resolution. Re-resolve its
-    // immutable identity under the writer lock instead of using the earlier path snapshot.
+    // Archive and unarchive can move an ancestor after lineage resolution. Resolve its
+    // immutable identity again before opening it. A further move during the read is caught
+    // by the projection checkpoint below rather than silently omitting the ancestor.
     let path = codex_rollout::find_rollout_path_by_rollout_id(
         store.config.codex_home.as_path(),
         rollout_id,
@@ -397,6 +401,12 @@ enum ProjectionTarget {
     InheritedThrough(HistoryPosition),
 }
 
+fn covers_inherited_prefix(state: &super::RolloutProjectionState, end: HistoryPosition) -> bool {
+    // Unknown future rollout records consume decoded bytes but deliberately leave their
+    // ordinals pending. Byte coverage proves the entire native prefix was inspected.
+    state.next_byte_offset >= end.end_byte_offset
+}
+
 async fn materialize_paginated_rollout(
     store: &LocalThreadStore,
     rollout_id: ThreadId,
@@ -407,10 +417,9 @@ async fn materialize_paginated_rollout(
     // compressed ancestor has no projection, so replay its decoded native bytes below.
     let projection_state = super::projection_state(store, rollout_id).await?;
     if let ProjectionTarget::InheritedThrough(end) = target
-        && projection_state.as_ref().is_some_and(|state| {
-            state.next_byte_offset >= end.end_byte_offset
-                && state.next_ordinal >= end.end_ordinal_exclusive
-        })
+        && projection_state
+            .as_ref()
+            .is_some_and(|state| covers_inherited_prefix(state, end))
     {
         return Ok(());
     }
@@ -446,15 +455,12 @@ async fn materialize_paginated_rollout(
     if let ProjectionTarget::InheritedThrough(end) = target {
         let reached = super::projection_state(store, rollout_id)
             .await?
-            .is_some_and(|state| {
-                state.next_byte_offset >= end.end_byte_offset
-                    && state.next_ordinal >= end.end_ordinal_exclusive
-            });
+            .is_some_and(|state| covers_inherited_prefix(&state, end));
         if !reached {
             return Err(ThreadStoreError::Internal {
                 message: format!(
-                    "inherited rollout {rollout_id} projection did not reach ordinal {} at byte {}",
-                    end.end_ordinal_exclusive, end.end_byte_offset
+                    "inherited rollout {rollout_id} projection did not reach byte {}",
+                    end.end_byte_offset
                 ),
             });
         }

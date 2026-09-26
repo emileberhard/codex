@@ -2818,6 +2818,137 @@ async fn unknown_rollout_lines_leave_ordinals_pending_for_valid_retries() {
 }
 
 #[tokio::test]
+async fn imported_unknown_tail_keeps_known_ancestor_turns_readable() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let ancestor_id = ThreadId::default();
+    create_paginated_thread(&store, ancestor_id).await;
+    store
+        .persist_thread(ancestor_id, PersistContext::Standard)
+        .await
+        .expect("persist ancestor metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id: ancestor_id,
+            items: vec![turn_started("known-turn"), turn_completed("known-turn")],
+        })
+        .await
+        .expect("append known ancestor turn");
+    let ancestor_path = store
+        .live_rollout_path(ancestor_id)
+        .await
+        .expect("ancestor path");
+    append_suffix(
+        ancestor_path.as_path(),
+        "{\"timestamp\":\"2025-01-01T00:00:00.000Z\",\"ordinal\":3,\"type\":\"future_item\",\"payload\":{}}\n",
+    );
+    let history_base = HistoryPosition {
+        thread_id: ancestor_id,
+        end_ordinal_exclusive: 4,
+        end_byte_offset: fs::metadata(&ancestor_path)
+            .expect("ancestor metadata")
+            .len(),
+    };
+    let child_id = ThreadId::default();
+    create_paginated_subagent_thread(
+        &store,
+        child_id,
+        Some(history_base),
+        /*subagent_history_start_ordinal*/ None,
+    )
+    .await;
+    store
+        .persist_thread(child_id, PersistContext::Standard)
+        .await
+        .expect("persist child metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id: child_id,
+            items: vec![turn_started("child-turn"), turn_completed("child-turn")],
+        })
+        .await
+        .expect("append child turn");
+    super::super::thread_history::delete_thread(&store, ancestor_id)
+        .await
+        .expect("clear imported ancestor projection");
+
+    let page = store
+        .list_turns(ListTurnsParams {
+            thread_id: child_id,
+            include_archived: false,
+            cursor: None,
+            page_size: 10,
+            sort_direction: SortDirection::Asc,
+            items_view: StoredTurnItemsView::NotLoaded,
+        })
+        .await
+        .expect("read known turns around future ancestor item");
+    assert_eq!(
+        page.turns
+            .iter()
+            .map(|turn| turn.turn_id.as_str())
+            .collect::<Vec<_>>(),
+        ["known-turn", "child-turn"]
+    );
+    let projected = super::super::thread_history::projection_state(&store, ancestor_id)
+        .await
+        .expect("read ancestor projection")
+        .expect("ancestor projection exists");
+    assert_eq!(projected.next_byte_offset, history_base.end_byte_offset);
+    assert!(projected.next_ordinal < history_base.end_ordinal_exclusive);
+}
+
+#[tokio::test]
+async fn compressed_current_rollout_without_projection_is_readable() {
+    let home = TempDir::new().expect("temp dir");
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .expect("persist thread metadata");
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![turn_started("stored-turn"), turn_completed("stored-turn")],
+        })
+        .await
+        .expect("append turn");
+    let rollout_path = store
+        .live_rollout_path(thread_id)
+        .await
+        .expect("rollout path");
+    store
+        .shutdown_thread(thread_id)
+        .await
+        .expect("shutdown thread");
+    compress_rollout(rollout_path.as_path());
+    super::super::thread_history::delete_thread(&store, thread_id)
+        .await
+        .expect("clear imported projection");
+
+    let page = store
+        .list_turns(ListTurnsParams {
+            thread_id,
+            include_archived: false,
+            cursor: None,
+            page_size: 10,
+            sort_direction: SortDirection::Asc,
+            items_view: StoredTurnItemsView::NotLoaded,
+        })
+        .await
+        .expect("project compressed current rollout");
+    assert_eq!(
+        page.turns
+            .iter()
+            .map(|turn| turn.turn_id.as_str())
+            .collect::<Vec<_>>(),
+        ["stored-turn"]
+    );
+}
+
+#[tokio::test]
 async fn event_timestamps_allow_invalid_rollout_timestamps() {
     let home = TempDir::new().expect("temp dir");
     let store = projection_store(home.path()).await;
