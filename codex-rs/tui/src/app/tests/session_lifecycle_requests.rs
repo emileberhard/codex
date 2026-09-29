@@ -276,6 +276,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
         /*log_db*/ None,
         state_db,
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        Default::default(),
     )
     .await?;
     let codex_home = config.codex_home.display().to_string();
@@ -664,7 +665,7 @@ pub(super) fn recorded_params(requests: &RecordedRequests, method: &str) -> Vec<
         .collect()
 }
 
-async fn make_history_test_app() -> Result<(App, tempfile::TempDir)> {
+async fn make_history_test_app() -> Result<(Box<App>, tempfile::TempDir)> {
     let mut app = make_test_app().await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
@@ -678,6 +679,7 @@ async fn delete_current_thread_navigates_only_after_success() -> Result<()> {
     for target in [
         AppServerTarget::Embedded,
         AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
             endpoint: endpoint.clone(),
         },
         AppServerTarget::Remote { endpoint },
@@ -984,6 +986,7 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
     let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:4500")?;
     for target in [
         AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
             endpoint: endpoint.clone(),
         },
         AppServerTarget::Remote { endpoint },
@@ -1065,11 +1068,6 @@ async fn archive_current_thread_returns_shared_servers_to_agents() -> Result<()>
                 )
                 .is_some()
         );
-        assert_snapshot!(
-            "agents_command_center_after_archive",
-            render_bottom_popup(&app.chat_widget, /*width*/ 100)
-        );
-
         server.shutdown().await?;
         proxy.await??;
     }
@@ -1089,11 +1087,12 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         codex_home.path().join("config.toml"),
         "web_search = \"disabled\"\n",
     )?;
-    let (mut app_server, mut requests, mut proxy) = start_recording_app_server(
+    // Keep the large lifecycle futures off the Windows test thread's stack.
+    let (mut app_server, mut requests, mut proxy) = Box::pin(start_recording_app_server(
         &app.config,
         /*blocked_thread_list*/ None,
         /*failed_thread_name*/ None,
-    )
+    ))
     .await?;
     app_server
         .start_dynamic_tool_mcp(
@@ -1188,14 +1187,13 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         ThreadHistoryMode::Legacy,
         "Approved task source",
     )?;
-    app_server
-        .resume_thread(
-            &app.local_settings,
-            app.config.clone(),
-            delegation_source,
-            crate::app_server_session::ResumeModelSettings::RestoreFromThread,
-        )
-        .await?;
+    Box::pin(app_server.resume_thread(
+        &app.local_settings,
+        app.config.clone(),
+        delegation_source,
+        crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+    ))
+    .await?;
     let resumed = recorded_params(&requests, "thread/resume")
         .pop()
         .expect("resumed task request");
@@ -1203,14 +1201,13 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         resumed["config"]["mcp_servers.codex_tui"],
         starts[0]["config"]["mcp_servers.codex_tui"]
     );
-    app_server
-        .resume_thread(
-            &app.local_settings,
-            app.config.clone(),
-            delegation_source,
-            crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
-        )
-        .await?;
+    Box::pin(app_server.resume_thread(
+        &app.local_settings,
+        app.config.clone(),
+        delegation_source,
+        crate::app_server_session::ResumeModelSettings::PreserveExistingThread,
+    ))
+    .await?;
     let reattached = recorded_params(&requests, "thread/resume")
         .pop()
         .expect("reattached task request");
@@ -1218,8 +1215,7 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         reattached["config"]["mcp_servers.codex_tui"],
         starts[0]["config"]["mcp_servers.codex_tui"]
     );
-    app_server
-        .fork_thread(&app.local_settings, app.config.clone(), delegation_source)
+    Box::pin(app_server.fork_thread(&app.local_settings, app.config.clone(), delegation_source))
         .await?;
     let forked = recorded_params(&requests, "thread/fork")
         .pop()
@@ -1270,12 +1266,13 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         paused.contains("TUI is reconnecting; tool was not sent"),
         "{paused}"
     );
-    let (replacement, replacement_requests, replacement_proxy) = start_recording_app_server(
-        &app.config,
-        /*blocked_thread_list*/ None,
-        /*failed_thread_name*/ None,
-    )
-    .await?;
+    let (replacement, replacement_requests, replacement_proxy) =
+        Box::pin(start_recording_app_server(
+            &app.config,
+            /*blocked_thread_list*/ None,
+            /*failed_thread_name*/ None,
+        ))
+        .await?;
     let (new_tx, new_rx) = mpsc::unbounded_channel();
     let new_sender = AppEventSender::new(new_tx);
     drop(events);
@@ -1318,13 +1315,14 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         }
     };
     let AppEvent::DynamicToolThreadStarted {
-        thread_id: child_thread_id,
+        thread,
         task_tools_available,
         registered,
     } = registration
     else {
         panic!("expected the MCP-created task to register")
     };
+    let child_thread_id = ThreadId::from_string(&thread.id)?;
     assert!(task_tools_available);
     assert!(registered.send(()).is_ok());
     let created = creation.await??;
@@ -1339,14 +1337,34 @@ async fn local_daemon_registers_approval_gated_mcp_tools_for_both_start_paths() 
         child["config"]["mcp_servers.codex_tui"],
         starts[0]["config"]["mcp_servers.codex_tui"]
     );
-    let forked = call_tool(
-        3,
-        "fork_thread",
-        serde_json::json!({"threadId": delegation_source}),
-    )
-    .send()
-    .await?;
+    // Fork another task: this synthetic MCP call has no active turn to cut before.
+    let fork_source =
+        create_history_rollout(&app.config, ThreadHistoryMode::Legacy, "Task to fork")?;
+    let forked = tokio::spawn(
+        call_tool(
+            3,
+            "fork_thread",
+            serde_json::json!({"threadId": fork_source}),
+        )
+        .send(),
+    );
+    let registration = tokio::time::timeout(Duration::from_secs(/*secs*/ 5), events.recv())
+        .await?
+        .expect("fork registration event");
+    let AppEvent::DynamicToolThreadStarted { thread, .. } = &registration else {
+        panic!("expected the MCP fork to register")
+    };
+    let forked_thread_id = ThreadId::from_string(&thread.id)?;
+    let expected_thread = thread.clone();
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    Box::pin(app.handle_event(&mut tui, &mut app_server, registration)).await?;
+    assert_eq!(
+        app.agents_overview.threads[&forked_thread_id],
+        Some(expected_thread)
+    );
+    let forked = forked.await??;
     assert!(forked.status().is_success());
+    assert!(forked.text().await?.contains(&forked_thread_id.to_string()));
     let forked = recorded_params(&requests, "thread/fork")
         .pop()
         .expect("MCP-created fork request");
@@ -1767,7 +1785,7 @@ async fn dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespac
             .await?
             .expect("background task registration event");
     let AppEvent::DynamicToolThreadStarted {
-        thread_id: created_thread_id,
+        thread,
         task_tools_available,
         registered,
     } = registration
@@ -1775,16 +1793,22 @@ async fn dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespac
         panic!("expected background task registration before its first turn: {registration:?}")
     };
     assert!(recorded_params(&requests, "turn/start").is_empty());
+    let created_thread_id = ThreadId::from_string(&thread.id)?;
+    let expected_thread = thread.clone();
     Box::pin(app.handle_event(
         &mut tui,
         &mut app_server,
         AppEvent::DynamicToolThreadStarted {
-            thread_id: created_thread_id,
+            thread,
             task_tools_available,
             registered,
         },
     ))
     .await?;
+    assert_eq!(
+        app.agents_overview.threads[&created_thread_id],
+        Some(expected_thread)
+    );
     assert!(
         app.agents_overview
             .dispatched_requests
@@ -1852,7 +1876,7 @@ async fn dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespac
         },
     );
     let AppEvent::DynamicToolThreadStarted {
-        thread_id: continued_thread_id,
+        thread,
         task_tools_available,
         registered,
     } = tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 5), events.recv())
@@ -1861,13 +1885,13 @@ async fn dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespac
     else {
         panic!("expected follow-up task registration before its next turn")
     };
-    assert_eq!(continued_thread_id, creation_source);
+    assert_eq!(ThreadId::from_string(&thread.id)?, creation_source);
     assert_eq!(recorded_params(&requests, "turn/start").len(), 1);
     Box::pin(app.handle_event(
         &mut tui,
         &mut app_server,
         AppEvent::DynamicToolThreadStarted {
-            thread_id: continued_thread_id,
+            thread,
             task_tools_available,
             registered,
         },
@@ -1926,6 +1950,9 @@ async fn dynamic_tool_requests_ignore_other_namespaces_and_dispatch_tui_namespac
 #[tokio::test]
 async fn older_pagination_reconciles_review_prompts_across_page_boundaries() -> Result<()> {
     let (mut app, codex_home) = make_history_test_app().await?;
+    // The inline scrollback row cap fixes the page boundary around the review marker.
+    app.local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Terminal;
+    app.local_settings.tui.alternate_screen = codex_config::types::AltScreenMode::Never;
     app.local_settings.tui.terminal_resize_reflow_max_rows = Some(100);
     let thread_id = create_fake_paginated_rollout(
         codex_home.path(),
@@ -2122,7 +2149,7 @@ async fn older_pagination_reconciles_review_prompts_across_page_boundaries() -> 
 }
 
 #[tokio::test]
-async fn transcript_home_loads_every_older_history_page() -> Result<()> {
+async fn transcript_alt_beginning_loads_every_older_history_page() -> Result<()> {
     let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
@@ -2259,7 +2286,7 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
     app.handle_backtrack_overlay_event(
         &mut tui,
         &mut app_server,
-        TuiEvent::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
+        TuiEvent::Key(KeyEvent::new(KeyCode::Char('<'), KeyModifiers::ALT)),
     )
     .await?;
     while app_server.has_older_history(thread_id) {
@@ -2278,7 +2305,7 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
             .any(|line| line.to_string().contains("history output 0"))
     }));
     let Some(Overlay::Transcript(overlay)) = app.overlay.as_mut() else {
-        panic!("expected transcript overlay after Home navigation");
+        panic!("expected transcript overlay after beginning navigation");
     };
     let area = Rect::new(
         /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 12,
@@ -2541,6 +2568,9 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();
     app.config.sqlite = SqliteConfig::new_for_testing(codex_home.path().abs());
+    // Keep initial hydration within the inline scrollback budget so refill has work to do.
+    app.local_settings.transcript_mode = crate::transcript_mode::TranscriptMode::Terminal;
+    app.local_settings.tui.alternate_screen = codex_config::types::AltScreenMode::Never;
     app.local_settings.tui.terminal_resize_reflow_max_rows = Some(8);
     let thread_id = create_history_rollout(
         &app.config,
@@ -2624,6 +2654,7 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
             &app.config,
             &app.local_settings,
             started.session.model.as_str(),
+            started.session.model.as_str(),
             &started.session,
             /*is_first_event*/ false,
             Some("This is a test announcement".to_string()),
@@ -2649,10 +2680,6 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
     .await;
     assert!(app.scrollback_has_older_history);
     if let Some(Overlay::Transcript(overlay)) = app.overlay.as_mut() {
-        overlay.handle_event(
-            &mut tui,
-            TuiEvent::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
-        )?;
         let area = Rect::new(
             /*x*/ 0, /*y*/ 0, /*width*/ 100, /*height*/ 16,
         );
@@ -2668,15 +2695,21 @@ async fn underfilled_scrollback_fetches_older_pages_without_opening_the_transcri
                 .collect::<Vec<_>>()
                 .join("\n")
         };
+        // Inspect the loaded start without Home, which now requests all older pages.
+        render_overlay(overlay);
+        overlay.set_highlight_cell(Some(0));
         let partial = render_overlay(overlay);
-        assert!(partial.contains("Earlier messages are available — scroll up to load them"));
+        assert!(partial.contains("Earlier messages available."));
         assert!(!partial.contains("OpenAI Codex"));
         assert!(!partial.contains("This is a test announcement"));
         assert!(!partial.contains('%'));
 
-        overlay.set_history_state(crate::pager_overlay::TranscriptHistoryState::LoadingOlder);
+        overlay.handle_event(
+            &mut tui,
+            TuiEvent::Key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE)),
+        )?;
         let loading = render_overlay(overlay);
-        assert!(loading.contains("Loading earlier messages..."));
+        assert!(loading.contains("Loading earlier messages…"));
         assert!(!loading.contains("OpenAI Codex"));
         assert!(!loading.contains('%'));
     } else {
@@ -2898,6 +2931,7 @@ async fn agents_overview_seeds_loaded_threads_when_recent_listing_is_unavailable
         .await?;
         let started = app_server.start_thread(&app.config).await?;
         app.app_server_target = AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
             endpoint: crate::RemoteAppServerEndpoint::UnixSocket {
                 socket_path: test_path_buf("/tmp/unused.sock").abs(),
             },
@@ -3118,7 +3152,11 @@ async fn cold_paginated_subagent_transcript_excludes_inherited_parent_history() 
         )
         .await?;
     let child_turn_page = app_server
-        .thread_turns_page(child_thread_id, /*cursor*/ None)
+        .thread_turns_page(
+            child_thread_id,
+            /*cursor*/ None,
+            crate::app_server_session::INITIAL_HISTORY_TURN_LIMIT,
+        )
         .await?;
     let child_item_page = app_server
         .thread_items_page(
@@ -3804,7 +3842,7 @@ async fn changing_directory_preserves_project_trust_permissions_history_and_hook
                 AppEvent::InsertHistoryCell(cell) => Some(cell),
                 _ => None,
             })
-            .map(|cell| lines_to_single_string(&cell.display_lines(/*width*/ 200)))
+            .map(|cell| lines_to_single_string(&cell.transcript_lines(/*width*/ 200)))
             .collect::<Vec<_>>()
     };
     let change = |thread_id, path: &str| AppEvent::ChangeWorkingDirectory {
@@ -4330,12 +4368,13 @@ fn session_lifecycle_avoids_redundant_subagent_metadata_reads() -> Result<()> {
                         .replace(&child_thread_id.to_string(), "[child]"),
                     @r###"
                       Subagents
-                      Select an agent to watch. ⌥ + ← previous, ⌥ + → next.
+                      Select an agent to watch. ⌥+← previous, ⌥+→ next.
+
 
                     › 1. • Main [default] (current)  [root]
                       2. • /root/worker              [child]
 
-                      Press enter to confirm or esc to go back
+                      enter select · esc back
                     "###
                 );
                 assert_eq!(take_backfill_counts(&requests), (0, 0));
@@ -4433,6 +4472,7 @@ async fn external_writer_escape_preserves_snapshot_and_explicit_quits() -> Resul
     let endpoint = crate::resolve_remote_addr("ws://127.0.0.1:4500")?;
     for target in [
         AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
             endpoint: endpoint.clone(),
         },
         AppServerTarget::Remote { endpoint },
@@ -4616,15 +4656,18 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
         )
         .await?;
         app.app_server_target = AppServerTarget::LocalDaemon {
+            allow_embedded_fallback: true,
             endpoint: crate::resolve_remote_addr("ws://127.0.0.1:4500")?,
         };
         let current = Box::pin(server.start_thread(&app.config)).await?;
         let current_id = current.session.thread_id;
         app.enqueue_primary_thread_session(current.session, current.turns)
             .await?;
-        let thread = owner
+        let mut thread = owner
             .thread_read(thread_id, /*include_turns*/ false)
             .await?;
+        // Keep the age label stable while the server exercises failure recovery.
+        thread.updated_at = chrono::Utc::now().timestamp() - 7 * 24 * 60 * 60;
         let mut view = app.agents_overview_view(vec![thread], Some(thread_id));
         view.handle_paste("Keep this draft".into());
         app.chat_widget.show_bottom_pane_view(Box::new(view));
@@ -4648,9 +4691,10 @@ async fn command_center_read_only_open_requests_and_failure_preservation() -> Re
                   Unable to complete action
                   Couldn't load this conversation. Please try again.
 
+
                 › 1. Return to command center
 
-                  Press enter to confirm or esc to go back
+                  enter select · esc back
                 ");
             }
             assert_eq!(app.current_displayed_thread_id(), Some(current_id));

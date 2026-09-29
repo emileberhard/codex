@@ -134,7 +134,9 @@ pub(super) async fn send_subscribe_response(
                 })
                 .collect();
             let history_unavailable = baseline.observation_items.history_unavailable;
-            let active_turn = baseline.active_turn_metadata();
+            let active_turn = baseline.active_turn_snapshot_with_items_view(
+                codex_app_server_protocol::TurnItemsView::NotLoaded,
+            );
             let listener_generation = baseline.listener_generation;
             (
                 live_items,

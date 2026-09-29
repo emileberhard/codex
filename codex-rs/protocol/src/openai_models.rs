@@ -481,6 +481,10 @@ pub struct ModelInfo {
     pub supports_experimental_context: bool,
     #[serde(default)]
     pub use_responses_lite: bool,
+    /// Whether the model accepts reasoning-effort `configuration_update` items.
+    /// Missing metadata keeps effort changes on the ordinary request parameter.
+    #[serde(default)]
+    pub supports_reasoning_effort_updates: bool,
     #[serde(default)]
     pub node_repl_auto_review_required: bool,
     #[serde(default)]
@@ -576,15 +580,68 @@ pub struct ConfirmationPolicies {
 pub struct ToolMessages {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_user_message_async: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_agent: Option<MultiAgentToolMessages>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_mode: Option<CodeModeToolMessages>,
 }
 
 /// Model-owned messages for a built-in tool.
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
 pub struct ToolMessage {
-    /// Missing or null uses the built-in description; an empty string leaves the description
-    /// empty without disabling the tool.
+    /// Missing or null uses the built-in description; an empty string suppresses its static
+    /// text without disabling the tool. Tool-owned runtime guidance is retained.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Complete JSON Schema encoded as a string. Consumed by Multi-Agent V2 tools and Code Mode wait.
+    /// Uses the harness's supported schema subset; unrecognized keywords are ignored.
+    /// Missing, null, invalid or unsupported structures, or a root without `type: "object"`
+    /// retains the harness parameters. Schema semantics must remain API-compatible.
+    /// Overrides must declare harness-encrypted properties so their annotations can be retained.
+    /// Argument handling is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parameters: Option<String>,
+}
+
+/// Model-owned descriptions and parameters for Multi-Agent V2 tools, independent of their namespace.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
+pub struct MultiAgentToolMessages {
+    /// Replaces the static description. Missing or null uses the bundled text; an empty string
+    /// suppresses it. Generated model information and local usage hints are retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spawn_agent: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_message: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followup_task: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_agent: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupt_agent: Option<ToolMessage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_agents: Option<ToolMessage>,
+}
+
+/// Model-owned instructions for Code Mode's exec and wait tools.
+#[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq, TS, JsonSchema)]
+pub struct CodeModeToolMessages {
+    /// Instructional template supporting `{{ default_exec_yield_time_ms }}` and `{{ image_helper }}`.
+    /// Runtime tool declarations are appended. Unknown placeholders remain literal.
+    /// Exec accepts raw JavaScript; `parameters` is not consumed and its grammar is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exec: Option<ToolMessage>,
+    /// Complete description and JSON parameter schema, selected independently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait: Option<ToolMessage>,
+    /// Literal guidance appended when deferred nested tools exist.
+    /// Missing or null uses bundled text; an empty string omits the section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deferred_nested_tools_guidance: Option<String>,
+    /// Literal shared TypeScript definitions, emitted when Code Mode Only exposes MCP results.
+    /// Missing or null uses bundled definitions; an empty string omits the section.
+    /// Custom definitions must remain compatible with the generated tool declarations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_typescript_preamble: Option<String>,
 }
 
 /// Model-owned defaults for the context-window token-budget feature.
@@ -856,9 +913,12 @@ impl ModelPreset {
 
 impl ModelInfo {
     pub fn supports_service_tier(&self, service_tier: &str) -> bool {
-        self.service_tiers
-            .iter()
-            .any(|tier| tier.id == service_tier)
+        // Flex is an API request option, even when the Codex catalog does not advertise it.
+        service_tier == ServiceTier::Flex.request_value()
+            || self
+                .service_tiers
+                .iter()
+                .any(|tier| tier.id == service_tier)
     }
 
     pub fn service_tier_for_request(&self, service_tier: Option<String>) -> Option<String> {
@@ -957,6 +1017,7 @@ mod tests {
             supports_search_tool: false,
             supports_experimental_context: false,
             use_responses_lite: false,
+            supports_reasoning_effort_updates: false,
             guardian: None,
             node_repl_auto_review_required: false,
             node_repl_disabled: false,
@@ -999,12 +1060,14 @@ mod tests {
                 serde_json::json!({"tools": {"send_user_message_async": {"description": ""}}}),
                 Some(Some(ToolMessage {
                     description: Some(String::new()),
+                    ..Default::default()
                 })),
             ),
             (
                 serde_json::json!({"tools": {"send_user_message_async": {"description": "Catalog description"}}}),
                 Some(Some(ToolMessage {
                     description: Some("Catalog description".to_string()),
+                    ..Default::default()
                 })),
             ),
         ] {
@@ -1022,6 +1085,7 @@ mod tests {
                 (
                     expected.as_ref().map(|tool| ToolMessages {
                         send_user_message_async: tool.clone(),
+                        ..Default::default()
                     }),
                     expected.map(|tool| tool.map(|tool| match tool.description {
                         Some(description) => serde_json::json!({"description": description}),
@@ -1029,6 +1093,43 @@ mod tests {
                     })),
                 )
             );
+        }
+    }
+
+    #[test]
+    fn spawn_agent_messages_preserve_sparse_and_empty_values() {
+        for (value, expected) in [
+            (serde_json::json!({}), serde_json::json!({})),
+            (
+                serde_json::json!({"multi_agent": null}),
+                serde_json::json!({}),
+            ),
+            (
+                serde_json::json!({"multi_agent": {"spawn_agent": null}}),
+                serde_json::json!({"multi_agent": {}}),
+            ),
+            (
+                serde_json::json!({"multi_agent": {"spawn_agent": {"description": null}}}),
+                serde_json::json!({"multi_agent": {"spawn_agent": {}}}),
+            ),
+            (
+                serde_json::json!({"multi_agent": {"spawn_agent": {"description": "Catalog spawn"}}}),
+                serde_json::json!({"multi_agent": {"spawn_agent": {"description": "Catalog spawn"}}}),
+            ),
+            (
+                serde_json::json!({"multi_agent": {"spawn_agent": {"description": ""}}}),
+                serde_json::json!({"multi_agent": {"spawn_agent": {"description": ""}}}),
+            ),
+        ] {
+            let tools: ToolMessages =
+                serde_json::from_value(value).expect("deserialize tool messages");
+            assert_eq!(
+                serde_json::to_value(&tools).expect("serialize tool messages"),
+                expected
+            );
+            let restored: ToolMessages =
+                serde_json::from_value(expected).expect("restore tool messages");
+            assert_eq!(restored, tools);
         }
     }
 
@@ -1330,7 +1431,16 @@ mod tests {
             tools: Some(ToolMessages {
                 send_user_message_async: Some(ToolMessage {
                     description: Some("Catalog description".to_string()),
+                    ..Default::default()
                 }),
+                multi_agent: Some(MultiAgentToolMessages {
+                    spawn_agent: Some(ToolMessage {
+                        description: Some("Catalog spawn description".to_string()),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
             }),
             instructions_template: None,
             instructions_variables: None,
@@ -1402,7 +1512,9 @@ mod tests {
             tools: Some(ToolMessages {
                 send_user_message_async: Some(ToolMessage {
                     description: Some(String::new()),
+                    ..Default::default()
                 }),
+                ..Default::default()
             }),
             instructions_template: Some("canonical instructions".to_string()),
             ..Default::default()
@@ -1461,6 +1573,7 @@ mod tests {
         assert!(!model.supports_search_tool);
         assert!(!model.supports_experimental_context);
         assert!(!model.use_responses_lite);
+        assert!(!model.supports_reasoning_effort_updates);
         assert!(!model.node_repl_auto_review_required);
         assert!(!model.node_repl_disabled);
         assert_eq!(model.comp_hash, None);
@@ -1781,6 +1894,19 @@ mod tests {
         assert_eq!(
             model.service_tier_for_request(Some(SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string())),
             None
+        );
+    }
+
+    #[test]
+    fn service_tier_for_request_preserves_flex_without_catalog_support() {
+        let model = ModelInfo {
+            service_tiers: Vec::new(),
+            ..test_model(/*spec*/ None)
+        };
+
+        assert_eq!(
+            model.service_tier_for_request(Some(ServiceTier::Flex.request_value().to_string())),
+            Some(ServiceTier::Flex.request_value().to_string())
         );
     }
 

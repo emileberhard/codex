@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::session::Submission;
 use async_channel::Receiver;
 use async_channel::Sender;
 use codex_async_utils::OrCancelExt;
@@ -9,7 +10,6 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
-use codex_protocol::protocol::Submission;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::user_input::UserInput;
 use serde_json::Value;
@@ -62,7 +62,7 @@ pub(crate) async fn run_codex_thread_interactive(
 ) -> Result<(Arc<Session>, SessionIo), CodexErr> {
     let _admission = parent_session
         .services
-        .agent_control
+        .local_agent_runtime
         .acquire_new_work_admission()?;
     if config.permissions.approval_policy.value() != AskForApproval::Never {
         return Err(CodexErr::InvalidRequest(
@@ -118,7 +118,10 @@ pub(crate) async fn run_codex_thread_interactive(
             ThreadSource::Subagent
         }),
         originator: parent_ctx.originator.clone(),
-        agent_control: parent_session.services.agent_control.clone(),
+        agent_control: crate::agent::control::AgentControlInit::Inherited {
+            control: Arc::clone(&parent_session.services.agent_control),
+            runtime: parent_session.services.local_agent_runtime.clone(),
+        },
         dynamic_tools: Vec::new(),
         metrics_service_name: None,
         user_shell_override: None,
@@ -201,13 +204,13 @@ pub(crate) async fn run_codex_thread_one_shot(
 ) -> Result<(Arc<Session>, SessionIo), CodexErr> {
     let _admission = parent_session
         .services
-        .agent_control
+        .local_agent_runtime
         .acquire_new_work_admission()?;
     // Use a child token so we can stop the delegate after completion without
     // requiring the caller to cancel the parent token.
     let child_cancel = cancel_token.child_token();
     let parent_turn_id = parent_ctx.sub_id.clone();
-    let parent_environments = parent_ctx.environments.clone();
+    let parent_environments = parent_ctx.initial_environments.clone();
     let root_turn_id = parent_ctx.turn_metadata_state.root_turn_id();
     let (session, io) = Box::pin(run_codex_thread_interactive(
         config,
@@ -270,6 +273,7 @@ pub(crate) async fn run_codex_thread_one_shot(
                         parent_turn_id: None,
                         root_turn_id: None,
                         new_work_admission: None,
+                        residency_guard: None,
                     })
                     .await;
                 child_cancel.cancel();

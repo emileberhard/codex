@@ -312,6 +312,7 @@ async fn windows_executor_skill_read_requires_a_requested_sandbox() {
             &FileSystemSandboxPolicy::restricted(Vec::new()),
             NetworkSandboxPolicy::Restricted,
         ),
+        PathUri::parse("file:///C:/skill").expect("Windows resource cwd"),
     );
     let resource = SkillResourceId::environment(
         "skill://windows-root/C:/skill/SKILL.md",
@@ -393,7 +394,7 @@ async fn selected_root_id_distinguishes_identical_executor_paths() {
             host_snapshot: None,
             include_host_skills: false,
             include_bundled_skills: true,
-            include_orchestrator_skills: false,
+            include_cloud_skills: false,
             mcp_resources: None,
             executor_capability_discovery: None,
         })
@@ -483,7 +484,7 @@ async fn executor_discovery_preserves_posix_and_windows_locator_alias_roots() {
                 host_snapshot: None,
                 include_host_skills: false,
                 include_bundled_skills: true,
-                include_orchestrator_skills: false,
+                include_cloud_skills: false,
                 mcp_resources: None,
                 executor_capability_discovery: Some(discovery),
             })
@@ -600,7 +601,7 @@ async fn executor_discovery_routes_produce_equivalent_catalog_metadata() {
         host_snapshot: None,
         include_host_skills: false,
         include_bundled_skills: true,
-        include_orchestrator_skills: false,
+        include_cloud_skills: false,
         mcp_resources: None,
         executor_capability_discovery,
     };
@@ -752,7 +753,7 @@ async fn pre_discovered_executor_catalog_snapshot() {
             host_snapshot: None,
             include_host_skills: false,
             include_bundled_skills: true,
-            include_orchestrator_skills: false,
+            include_cloud_skills: false,
             mcp_resources: None,
             executor_capability_discovery: Some(executor_capability_discovery),
         })
@@ -869,7 +870,7 @@ async fn direct_executor_discovery_preserves_hidden_nested_and_probed_metadata()
             host_snapshot: None,
             include_host_skills: false,
             include_bundled_skills: true,
-            include_orchestrator_skills: false,
+            include_cloud_skills: false,
             mcp_resources: None,
             executor_capability_discovery: None,
         })
@@ -929,7 +930,7 @@ async fn high_level_discovery_reuses_materialized_skill_contents_for_reads() {
             host_snapshot: None,
             include_host_skills: false,
             include_bundled_skills: true,
-            include_orchestrator_skills: false,
+            include_cloud_skills: false,
             mcp_resources: None,
             executor_capability_discovery: Some(executor_capability_discovery),
         })
@@ -978,7 +979,10 @@ async fn high_level_discovery_cache_separates_filesystem_permission_contexts() {
         .expect("update executor skill");
     let sandbox_contexts = HashMap::from([(
         "local".to_string(),
-        FileSystemSandboxContext::from_permission_profile(PermissionProfile::Disabled),
+        FileSystemSandboxContext::from_permission_profile(
+            PermissionProfile::Disabled,
+            PathUri::from_host_native_path(&test_root).expect("skill root URI"),
+        ),
     )]);
     let second_snapshot = cache.snapshot(&executor_roots, &sandbox_contexts).await;
     let second_discovery = second_snapshot.roots()[0]

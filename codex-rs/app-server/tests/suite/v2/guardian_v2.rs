@@ -1187,21 +1187,46 @@ async fn guardian_v2_routes_scoped_tool_approvals(
                 vec![
                     json!(["additional_tools", "developer", null]),
                     json!(["message", "developer", ["guardian.classifier_instructions"]]),
+                    json!(["message", "user", null]),
                     json!(["message", "developer", null]),
                     json!(["message", "developer", ["guardian.trusted_tool"]]),
                     json!(["message", "developer", ["guardian.trusted_skills"]]),
                     json!(["message", "user", null]),
                 ],
             );
-            let content = input[5]["content"].as_array().expect("untrusted evidence");
-            let texts = content
+            let history = input[2]["content"].as_array().expect("untrusted history");
+            let history_texts = history
                 .iter()
                 .filter_map(|item| item["text"].as_str())
                 .collect::<Vec<_>>();
-            assert_eq!(texts.first().copied(), Some(">>> TRANSCRIPT START\n"));
-            assert!(texts.iter().any(|text| text.contains(USER_CONTEXT)));
-            assert!(texts.iter().any(|text| text.contains("guardian-0")));
-            assert_eq!(texts.last().copied(), Some(">>> APPROVAL REQUEST END\n"));
+            assert_eq!(
+                history_texts.first().copied(),
+                Some(">>> TRANSCRIPT START\n")
+            );
+            assert!(history_texts.iter().any(|text| text.contains(USER_CONTEXT)));
+            assert!(history_texts.iter().any(|text| text.contains("guardian-0")));
+            assert_eq!(
+                history_texts.last().copied(),
+                Some(">>> TRANSCRIPT END\n\n")
+            );
+            assert!(history.iter().all(|item| item["type"] == "input_text"));
+
+            let content = input[6]["content"].as_array().expect("action and images");
+            let action_texts = content
+                .iter()
+                .filter_map(|item| item["text"].as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                &action_texts[..2],
+                &[
+                    "The Codex agent has requested the following action:\n",
+                    ">>> APPROVAL REQUEST START\n",
+                ],
+            );
+            assert_eq!(
+                action_texts.last().copied(),
+                Some(">>> APPROVAL REQUEST END\n")
+            );
             assert!(
                 content[..content.len() - 1]
                     .iter()
@@ -1743,6 +1768,38 @@ async fn guardian_v2_routes_scoped_tool_approvals(
         })
         .await?;
         timeout(TIMEOUT, app_server.shutdown_gracefully()).await??;
+        let reviewer_id = responses_state
+            .guardian_requests
+            .lock()
+            .expect("Guardian requests")[0]["client_metadata"]["thread_id"]
+            .as_str()
+            .expect("reviewer ID")
+            .to_owned();
+        let state_db = StateRuntime::init(
+            codex_state::SqliteConfig::new_for_testing(codex_home.path().abs()),
+            "mock_provider".to_owned(),
+        )
+        .await?;
+        let metadata = state_db
+            .get_thread(codex_protocol::ThreadId::from_string(&reviewer_id)?)
+            .await?
+            .expect("reviewer metadata should be persisted");
+        assert_eq!(
+            (
+                metadata.source.as_str(),
+                metadata.title.as_str(),
+                metadata.name.as_deref(),
+                metadata.preview.as_deref(),
+                metadata.first_user_message.as_deref(),
+            ),
+            (
+                r#"{"subagent":{"other":"guardian"}}"#,
+                "Guardian review",
+                None,
+                Some("Approval review"),
+                None
+            ),
+        );
         let events = captured_analytics_events(&analytics_server).await;
         let turn = &turn["event_params"];
         assert_eq!(turn["guardian_v2_enabled"], classifier_in_scope);

@@ -1,5 +1,6 @@
 use super::*;
 use crate::app_event::ConnectorsSnapshot;
+use crate::bottom_pane::RestrictedInputMode;
 use crate::history_cell::ThreadRecapLoadingCell;
 use base64::Engine;
 use codex_app_server_protocol::ImageReference;
@@ -11,6 +12,34 @@ use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::permissions::NetworkSandboxPolicy;
 use pretty_assertions::assert_eq;
 use std::collections::VecDeque;
+
+#[tokio::test]
+async fn composer_submission_sends_once_and_requests_latest() {
+    let (mut chat, mut events, mut operations) =
+        make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    chat.apply_external_edit("send once".to_string());
+    while events.try_recv().is_ok() {}
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(
+        std::iter::from_fn(|| events.try_recv().ok())
+            .filter(|event| matches!(event, AppEvent::FollowTranscript))
+            .count(),
+        1
+    );
+    let Op::UserTurn { items, .. } = next_submit_op(&mut operations) else {
+        panic!("expected submitted user turn");
+    };
+    assert_eq!(
+        items,
+        vec![UserInput::Text {
+            text: "send once".into(),
+            text_elements: Vec::new(),
+        }]
+    );
+    assert!(operations.try_recv().is_err());
+    assert_eq!(chat.composer_text_with_pending(), "");
+}
 
 fn paste_hidden_shell_payload(chat: &mut ChatWidget) -> String {
     let payload = format!("!echo {}", "x".repeat(1000));
@@ -181,9 +210,16 @@ async fn rejected_hidden_shell_paste_preserves_colliding_draft_paste() {
     let draft_payload = format!("draft {}", "y".repeat(1000));
     chat.handle_paste(draft_payload.clone());
     chat.set_model("");
+    chat.bottom_pane
+        .record_replayed_user_message_history(crate::bottom_pane::HistoryEntry::new(
+            "earlier prompt".into(),
+        ));
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Char('e')));
 
     handle_turn_completed(&mut chat, "turn-1", /*duration_ms*/ None);
     chat.set_model(&model);
+    chat.handle_key_event(KeyEvent::from(KeyCode::Esc));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     assert_hidden_shell_payload_is_literal(op_rx.try_recv(), format!("{payload}\n{draft_payload}"));
@@ -1018,7 +1054,7 @@ async fn blocked_image_restore_preserves_mention_bindings() {
     );
     assert_eq!(chat.bottom_pane.take_mention_bindings(), mention_bindings);
 
-    let cells = drain_insert_history(&mut rx);
+    let cells = drain_insert_history_transcript(&mut rx);
     let warning = cells
         .last()
         .map(|lines| lines_to_single_string(lines))
@@ -1824,11 +1860,17 @@ async fn restore_thread_input_state_applies_running_state_policy() {
     );
 
     chat.pause_for_disconnect();
-    chat.handle_disconnected_key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+    chat.handle_restricted_key(
+        KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
+        RestrictedInputMode::Disconnected,
+    );
     assert!(!chat.has_queued_follow_up_messages());
     // Editing the last queued draft must not release the uncertain steer for replay.
     assert!(chat.capture_thread_input_state().unwrap().recovered_queue);
-    chat.handle_disconnected_key(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+    chat.handle_restricted_key(
+        KeyEvent::new(KeyCode::Up, KeyModifiers::ALT),
+        RestrictedInputMode::Disconnected,
+    );
     assert_eq!(
         chat.composer_text_with_pending(),
         "submitted history\nqueued history"

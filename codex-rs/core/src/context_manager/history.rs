@@ -381,6 +381,12 @@ impl ContextManager {
         self.world_state_baseline = Some(snapshot);
     }
 
+    pub(crate) fn world_state_checkpoint(&self) -> Option<WorldStateItem> {
+        self.world_state_baseline
+            .clone()
+            .map(|snapshot| WorldStateItem::full(snapshot.into_object()))
+    }
+
     pub(crate) fn set_token_usage_full(&mut self, context_window: i64) {
         match &mut self.token_info {
             Some(info) => info.fill_to_context_window(context_window),
@@ -445,6 +451,12 @@ impl ContextManager {
                 review_history.record(&processed.item);
             }
             Arc::make_mut(&mut self.items).push(processed);
+            if self.guardian_context_mode == GuardianContextMode::ThreadOwned
+                && let Some(metadata) = metadata
+                && Arc::make_mut(&mut self.retained_context).record_sender_user_messages(metadata)
+            {
+                self.user_message_revision = self.user_message_revision.saturating_add(1);
+            }
             self.record_user_authorization(
                 item,
                 metadata,
@@ -484,17 +496,14 @@ impl ContextManager {
         &self.items
     }
 
-    /// Returns raw items in the history and consumes the snapshot.
-    pub(crate) fn into_raw_items(self) -> Vec<ResponseItem> {
-        self.into_annotated_items()
-            .into_iter()
-            .map(ResponseItemEnvelope::into_item)
-            .collect()
-    }
-
     /// Returns annotated history items and consumes the snapshot.
     pub(crate) fn into_annotated_items(self) -> Vec<ResponseItemEnvelope> {
-        Arc::unwrap_or_clone(self.items)
+        Arc::unwrap_or_clone(self.into_shared_annotated_items())
+    }
+
+    /// Keeps shared response items while releasing the snapshot's unrelated metadata.
+    pub(crate) fn into_shared_annotated_items(self) -> Arc<Vec<ResponseItemEnvelope>> {
+        self.items
     }
 
     pub(crate) fn history_version(&self) -> u64 {

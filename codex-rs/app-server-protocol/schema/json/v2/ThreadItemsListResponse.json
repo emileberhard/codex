@@ -1632,6 +1632,7 @@
     "ThreadItemEntry": {
       "properties": {
         "completedAtMs": {
+          "description": "Unix timestamp (milliseconds) when the item completed, if recorded by the producer.",
           "format": "int64",
           "type": [
             "integer",
@@ -1648,6 +1649,7 @@
           "$ref": "#/definitions/ThreadItem"
         },
         "startedAtMs": {
+          "description": "Unix timestamp (milliseconds) when the item started, if recorded by the producer.",
           "format": "int64",
           "type": [
             "integer",

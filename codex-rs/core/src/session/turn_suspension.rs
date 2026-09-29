@@ -36,7 +36,7 @@ pub(super) async fn suspend_turn_and_shutdown(
     // until every currently active child has been suspended leaf-first.
     if session
         .services
-        .agent_control
+        .local_agent_runtime
         .list_active_agent_subtree_thread_ids(session.thread_id)
         .await?
         .len()

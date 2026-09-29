@@ -19,10 +19,7 @@ pub struct ResponseDebugContext {
 pub fn extract_response_debug_context(transport: &TransportError) -> ResponseDebugContext {
     let mut context = ResponseDebugContext::default();
 
-    let TransportError::Http {
-        headers, body: _, ..
-    } = transport
-    else {
+    let TransportError::Http { headers, .. } = transport else {
         return context;
     };
 
@@ -69,6 +66,7 @@ pub fn telemetry_transport_error_message(error: &TransportError) -> String {
         TransportError::Connection(err) => err.to_string(),
         TransportError::Network(err) => err.to_string(),
         TransportError::Build(err) => err.to_string(),
+        TransportError::Policy(denied) => denied.to_string(),
     }
 }
 
@@ -83,8 +81,11 @@ pub fn telemetry_api_error_message(error: &ApiError) -> String {
         ApiError::Retryable { .. } => "retryable error".to_string(),
         ApiError::RateLimitExceeded { .. } => "rate limit exceeded".to_string(),
         ApiError::RateLimit(_) => "rate limit".to_string(),
-        ApiError::InvalidRequest { .. } => "invalid request".to_string(),
+        ApiError::InvalidRequest { .. } | ApiError::InvalidPrompt { .. } => {
+            "invalid request".to_string()
+        }
         ApiError::CyberPolicy { .. } => "cyber policy".to_string(),
+        ApiError::BioPolicy { .. } => "bio policy".to_string(),
         ApiError::MisalignmentPolicyViolation { .. } => "misalignment policy violation".to_string(),
         ApiError::ServerOverloaded => "server overloaded".to_string(),
     }

@@ -15,15 +15,6 @@ use toml::Table;
 use toml::Value as TomlValue;
 
 #[test]
-fn transcript_v2_resolves_explicit_config_overrides() {
-    let mut features = Features::with_defaults();
-    for enabled in [false, true, false] {
-        features.apply_map(&BTreeMap::from([("transcript_v2".to_string(), enabled)]));
-        assert_eq!(features.enabled(Feature::TranscriptV2), enabled);
-    }
-}
-
-#[test]
 fn sleep_tool_config_rejects_unknown_mode() {
     assert!(toml::from_str::<FeaturesToml>("[sleep_tool]\nmode = 'off'").is_err());
 }
@@ -191,7 +182,8 @@ fn guardian_thread_context_resolves_nested_config_and_profile_overrides() {
     let enabled_context = "[guardianv2]\nthread_context = true";
     let disabled_context = "[guardianv2]\nthread_context = false";
     for (base, profile, enabled) in [
-        ("", "", false),
+        ("", "", true),
+        ("guardianv2 = false", "", true),
         (disabled_context, "", false),
         (enabled_context, "", true),
         (enabled_context, disabled_context, false),
@@ -216,9 +208,7 @@ fn guardian_thread_context_resolves_nested_config_and_profile_overrides() {
             FeatureOverrides::default(),
         );
         let mut expected = Features::with_defaults();
-        if enabled {
-            expected.enable(Feature::GuardianThreadContext);
-        }
+        expected.set_enabled(Feature::GuardianThreadContext, enabled);
         assert_eq!(features.enabled_features(), expected.enabled_features());
     }
 }
@@ -745,6 +735,7 @@ tool_namespace = "agents"
 hide_spawn_agent_metadata = true
 expose_spawn_agent_model_overrides = true
 wait_agent_enabled = false
+disable_direct_message = true
 non_code_mode_only = true
 "#,
     )
@@ -772,6 +763,7 @@ non_code_mode_only = true
             hide_spawn_agent_metadata: Some(true),
             expose_spawn_agent_model_overrides: Some(true),
             wait_agent_enabled: Some(false),
+            disable_direct_message: Some(true),
             non_code_mode_only: Some(true),
         }))
     );

@@ -1873,17 +1873,17 @@ pub struct ThreadItemEntry {
     #[ts(type = "number", optional)]
     pub started_at_ordinal: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(type = "number", optional)]
-    pub started_at_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(type = "number", optional)]
-    pub completed_at_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub is_complete: Option<bool>,
     /// Turn containing this item.
     pub turn_id: String,
     pub item: ThreadItem,
+    /// Unix timestamp (milliseconds) when the item started, if recorded by the producer.
+    #[ts(type = "number | null")]
+    pub started_at_ms: Option<i64>,
+    /// Unix timestamp (milliseconds) when the item completed, if recorded by the producer.
+    #[ts(type = "number | null")]
+    pub completed_at_ms: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

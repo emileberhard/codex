@@ -35,7 +35,7 @@ use tokio::sync::oneshot;
 use tokio::time::timeout;
 
 const INITIAL_MODEL: &str = "gpt-5.4";
-const COMMITTED_MODEL: &str = "gpt-5.2";
+pub(super) const COMMITTED_MODEL: &str = "gpt-5.2";
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 fn assert_checkpoints(test: &TestCodex, expected: &[ThreadSettingsSnapshot]) -> Result<()> {
@@ -62,7 +62,7 @@ fn assert_checkpoints(test: &TestCodex, expected: &[ThreadSettingsSnapshot]) -> 
 #[test_case(ThreadHistoryMode::Legacy; "legacy")]
 #[test_case(ThreadHistoryMode::Paginated; "paginated")]
 #[tokio::test]
-async fn initial_plugin_ids_use_turn_context_without_extra_settings_checkpoints(
+async fn initial_plugin_ids_are_checkpointed_once_on_materialization(
     history_mode: ThreadHistoryMode,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -95,7 +95,8 @@ async fn initial_plugin_ids_use_turn_context_without_extra_settings_checkpoints(
     )
     .await;
     test.codex.flush_rollout().await?;
-    assert_checkpoints(&test, &[])?;
+    let mut expected = vec![test.codex.thread_settings_snapshot().await];
+    assert_checkpoints(&test, &expected)?;
     let rollout_path = test.codex.rollout_path().expect("rollout path");
     let (items, _, parse_errors) =
         codex_rollout::RolloutRecorder::load_rollout_items(&rollout_path).await?;
@@ -124,8 +125,9 @@ async fn initial_plugin_ids_use_turn_context_without_extra_settings_checkpoints(
         },
     )
     .await?;
-    let expected = vec![test.codex.thread_settings_snapshot().await];
-    assert!(expected[0].disabled_plugin_ids.is_empty());
+    let cleared = test.codex.thread_settings_snapshot().await;
+    assert!(cleared.disabled_plugin_ids.is_empty());
+    expected.push(cleared);
     test.codex.flush_rollout().await?;
     assert_checkpoints(&test, &expected)?;
     let response =
@@ -138,8 +140,8 @@ async fn initial_plugin_ids_use_turn_context_without_extra_settings_checkpoints(
     Ok(())
 }
 
-struct PauseAfterCommit {
-    gate: Mutex<Option<(oneshot::Sender<()>, mpsc::Receiver<()>)>>,
+pub(super) struct PauseAfterCommit {
+    pub(super) gate: Mutex<Option<(oneshot::Sender<()>, mpsc::Receiver<()>)>>,
 }
 
 impl ConfigContributor<Config> for PauseAfterCommit {

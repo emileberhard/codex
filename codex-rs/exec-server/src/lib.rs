@@ -46,6 +46,9 @@ mod telemetry;
 mod trace_context;
 mod websocket_pong_watchdog;
 
+// Shared limits for inbound executor messages across all transports.
+mod client_inbound_request_limit;
+
 use codex_exec_server_protocol as protocol;
 
 /// Process-local opt-in for tying a remote executor to its parent's stdin pipe.
@@ -71,10 +74,14 @@ pub use codex_exec_server_protocol::ExecutorCapabilityDiscoverySnapshot;
 pub use codex_exec_server_protocol::ProcessId;
 pub use codex_file_system::CopyOptions;
 pub use codex_file_system::CreateDirectoryOptions;
+pub use codex_file_system::EnvironmentAccess;
+pub use codex_file_system::EnvironmentAccessExt;
+pub use codex_file_system::EnvironmentAccessKey;
 pub use codex_file_system::ExecutorFileSystem;
 pub use codex_file_system::ExecutorFileSystemFuture;
 pub use codex_file_system::FILE_READ_CHUNK_SIZE;
 pub use codex_file_system::FileMetadata;
+pub use codex_file_system::FileSystemEnvironmentAccessor;
 pub use codex_file_system::FileSystemReadStream;
 pub use codex_file_system::FileSystemResult;
 pub use codex_file_system::FileSystemSandboxContext;

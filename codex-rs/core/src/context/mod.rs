@@ -1,5 +1,6 @@
 //! Context fragments injected into model input.
 
+mod agent_message_board_notification;
 mod approved_command_prefix_saved;
 mod apps_instructions;
 mod available_plugins_instructions;
@@ -19,6 +20,7 @@ mod guardian_followup_review_reminder;
 mod guardian_node_repl_policy;
 mod guardian_policy;
 mod guardian_review_evidence;
+mod guardian_sender_messages;
 mod guardian_tool_descriptions;
 mod hook_additional_context;
 mod image_resize_notice;
@@ -50,6 +52,7 @@ mod user_shell_command;
 mod user_verification_notice;
 pub(crate) mod world_state;
 
+pub(crate) use agent_message_board_notification::AgentMessageBoardNotification;
 pub(crate) use approved_command_prefix_saved::APPROVED_COMMAND_PREFIX_SAVED_MESSAGE_PREFIX;
 pub(crate) use approved_command_prefix_saved::ApprovedCommandPrefixSaved;
 pub(crate) use apps_instructions::AppsInstructions;
@@ -79,6 +82,7 @@ pub use guardian_review_evidence::GuardianReviewEvidence;
 pub use guardian_review_evidence::GuardianReviewEvidenceFragment;
 pub use guardian_review_evidence::GuardianReviewEvidenceRecord;
 pub use guardian_review_evidence::GuardianUserInputSnapshot;
+pub(crate) use guardian_sender_messages::GuardianSenderMessages;
 pub(crate) use guardian_tool_descriptions::GuardianToolDescriptions;
 pub(crate) use hook_additional_context::HookAdditionalContext;
 pub(crate) use image_resize_notice::ImageResizeNotice;

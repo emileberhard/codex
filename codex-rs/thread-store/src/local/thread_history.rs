@@ -470,17 +470,19 @@ INSERT INTO thread_items (
     rollout_ordinal,
     updated_at_ordinal,
     created_at_ms,
+    started_at_ms,
+    completed_at_ms,
     item_type,
     item_json,
-    is_complete,
-    completed_at_ms
-) VALUES (?, ?, ?, ?, ?, ?, json_extract(?, '$.type'), ?, ?, ?)
+    is_complete
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, json_extract(?, '$.type'), ?, ?)
 ON CONFLICT(thread_id, turn_id, item_id) DO UPDATE SET
     updated_at_ordinal = excluded.updated_at_ordinal,
+    started_at_ms = COALESCE(thread_items.started_at_ms, excluded.started_at_ms),
+    completed_at_ms = COALESCE(thread_items.completed_at_ms, excluded.completed_at_ms),
     item_type = excluded.item_type,
     item_json = excluded.item_json,
-    is_complete = excluded.is_complete,
-    completed_at_ms = excluded.completed_at_ms
+    is_complete = excluded.is_complete
 WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
             "#,
         )
@@ -490,10 +492,11 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
         .bind(rollout_ordinal)
         .bind(rollout_ordinal)
         .bind(created_at_ms)
+        .bind(item.started_at_ms)
+        .bind(item.completed_at_ms)
         .bind(item_json.as_str())
         .bind(item_json.as_str())
         .bind(item.is_complete)
-        .bind(item.completed_at_ms)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;
@@ -507,7 +510,6 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
         .bind(rollout_ordinal)
         .bind(item_json.as_str())
         .bind(item.is_complete)
-        .bind(item.completed_at_ms)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;
