@@ -442,6 +442,7 @@ fn web_search_page_actions_and_results_survive_json_output() {
             let mut processor = EventProcessorWithJsonOutput::new(/*last_message_path*/ None);
             let collected = processor.collect_thread_events(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     item: ThreadItem::WebSearch(ApiWebSearchItem {
                         id: "search-1".to_string(),
                         query: url.to_string(),

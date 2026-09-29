@@ -916,6 +916,7 @@ async fn desktop_async_answer_dismisses_only_its_question_and_preserves_the_othe
         };
         chat.handle_server_notification(
             ServerNotification::ItemCompleted(ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id: "thread".into(),
                 turn_id: "turn".into(),
                 completed_at_ms: 0,

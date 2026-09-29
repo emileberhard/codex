@@ -27,6 +27,7 @@ async fn live_async_question_notifies_once_and_takes_priority_over_turn_completi
     }
 
     let notification = ServerNotification::ItemCompleted(ItemCompletedNotification {
+        started_at_ordinal: None,
         item,
         thread_id: "thread".into(),
         turn_id: "turn".into(),
