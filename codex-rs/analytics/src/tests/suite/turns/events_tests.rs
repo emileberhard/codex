@@ -553,6 +553,7 @@ async fn turn_event_counts_completed_tool_items() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                     ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         started_at_ms: 998,
@@ -569,6 +570,7 @@ async fn turn_event_counts_completed_tool_items() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                     ItemCompletedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         completed_at_ms: 1_000,

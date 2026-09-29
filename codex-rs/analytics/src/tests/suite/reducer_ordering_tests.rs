@@ -308,6 +308,7 @@ async fn completed_background_tool_item_emits_after_turn_event() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                 ItemStartedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-2".to_string(),
                     turn_id: "turn-2".to_string(),
                     started_at_ms: 998,
@@ -343,6 +344,7 @@ async fn completed_background_tool_item_emits_after_turn_event() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-2".to_string(),
                     turn_id: "turn-2".to_string(),
                     completed_at_ms: 1_000,
@@ -430,6 +432,7 @@ async fn item_completed_without_turn_state_does_not_create_turn_state() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-2".to_string(),
                     turn_id: "turn-2".to_string(),
                     completed_at_ms: 1_000,

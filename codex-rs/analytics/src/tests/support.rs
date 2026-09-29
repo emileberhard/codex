@@ -541,6 +541,7 @@ pub(super) async fn ingest_completed_command_execution_item(
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                 ItemStartedNotification {
+                    started_at_ordinal: None,
                     thread_id: thread_id.to_string(),
                     turn_id: "turn-1".to_string(),
                     started_at_ms: 1_000,
@@ -559,6 +560,7 @@ pub(super) async fn ingest_completed_command_execution_item(
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: thread_id.to_string(),
                     turn_id: "turn-1".to_string(),
                     completed_at_ms: 1_042,

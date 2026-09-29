@@ -230,6 +230,7 @@ async fn item_lifecycle_notifications_publish_command_execution_event() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                     ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-1".to_string(),
                         turn_id: "turn-1".to_string(),
                         started_at_ms: 1_000,
@@ -263,6 +264,7 @@ async fn item_lifecycle_notifications_publish_command_execution_event() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-1".to_string(),
                     turn_id: "turn-1".to_string(),
                     completed_at_ms: 1_045,
@@ -378,6 +380,7 @@ async fn collaborator_tool_events_keep_response_ids_when_completion_races_sampli
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                     ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-1".into(),
                         turn_id: "turn-1".into(),
                         started_at_ms: 1_000,
@@ -392,6 +395,7 @@ async fn collaborator_tool_events_keep_response_ids_when_completion_races_sampli
         ));
         let completion = AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
             ItemCompletedNotification {
+                started_at_ordinal: None,
                 thread_id: "thread-1".into(),
                 turn_id: "turn-1".into(),
                 completed_at_ms: 1_010,
@@ -707,6 +711,7 @@ async fn mcp_elicitation_classification_survives_turn_completion_and_preserves_c
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                     ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         started_at_ms: 998,
@@ -749,6 +754,7 @@ async fn mcp_elicitation_classification_survives_turn_completion_and_preserves_c
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                     ItemCompletedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         completed_at_ms: 1_000,
@@ -879,6 +885,7 @@ async fn image_generation_events_preserve_transparent_background_metadata() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                     ItemStartedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         started_at_ms: 998,
@@ -892,6 +899,7 @@ async fn image_generation_events_preserve_transparent_background_metadata() {
             .ingest(
                 AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                     ItemCompletedNotification {
+                        started_at_ordinal: None,
                         thread_id: "thread-2".to_string(),
                         turn_id: "turn-2".to_string(),
                         completed_at_ms: 1_000,

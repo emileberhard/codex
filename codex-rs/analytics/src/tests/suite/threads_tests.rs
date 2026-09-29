@@ -821,6 +821,7 @@ async fn subagent_tool_items_inherit_parent_connection_metadata() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemStarted(
                 ItemStartedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-subagent".to_string(),
                     turn_id: "turn-subagent".to_string(),
                     started_at_ms: 1_000,
@@ -838,6 +839,7 @@ async fn subagent_tool_items_inherit_parent_connection_metadata() {
         .ingest(
             AnalyticsFact::Notification(Box::new(ServerNotification::ItemCompleted(
                 ItemCompletedNotification {
+                    started_at_ordinal: None,
                     thread_id: "thread-subagent".to_string(),
                     turn_id: "turn-subagent".to_string(),
                     completed_at_ms: 1_042,
