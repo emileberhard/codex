@@ -3,6 +3,7 @@ use codex_core::TurnInputRequest;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::ThreadSettingsAppliedEvent;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
@@ -61,6 +62,10 @@ async fn resume_includes_initial_messages_from_rollout_events() -> Result<()> {
     let mut builder = test_codex();
     let initial = builder.build(&server).await?;
     let codex = Arc::clone(&initial.codex);
+    let initial_settings = ThreadSettingsAppliedEvent {
+        thread_id: Some(initial.session_configured.thread_id),
+        thread_settings: codex.thread_settings_snapshot().await,
+    };
 
     let initial_sse = sse(vec![
         ev_response_created("resp-initial"),
@@ -91,11 +96,13 @@ async fn resume_includes_initial_messages_from_rollout_events() -> Result<()> {
     match initial_messages.as_slice() {
         [
             EventMsg::TurnStarted(started),
+            EventMsg::ThreadSettingsApplied(settings),
             EventMsg::UserMessage(first_user),
             EventMsg::AgentMessage(assistant_message),
             EventMsg::TokenCount(_),
             EventMsg::TurnComplete(completed),
         ] => {
+            assert_eq!(settings, &initial_settings);
             assert_eq!(first_user.message, "Record some messages");
             assert_eq!(first_user.text_elements, text_elements);
             assert_eq!(assistant_message.message, "Completed first turn");
@@ -147,6 +154,10 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
     });
     let initial = builder.build(&server).await?;
     let codex = Arc::clone(&initial.codex);
+    let initial_settings = ThreadSettingsAppliedEvent {
+        thread_id: Some(initial.session_configured.thread_id),
+        thread_settings: codex.thread_settings_snapshot().await,
+    };
 
     let initial_sse = sse(vec![
         ev_response_created("resp-initial"),
@@ -172,6 +183,7 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
     match initial_messages.as_slice() {
         [
             EventMsg::TurnStarted(started),
+            EventMsg::ThreadSettingsApplied(settings),
             EventMsg::UserMessage(first_user),
             EventMsg::AgentReasoning(reasoning),
             EventMsg::AgentReasoningRawContent(raw),
@@ -179,6 +191,7 @@ async fn resume_includes_initial_messages_from_reasoning_events() -> Result<()> 
             EventMsg::TokenCount(_),
             EventMsg::TurnComplete(completed),
         ] => {
+            assert_eq!(settings, &initial_settings);
             assert_eq!(first_user.message, "Record reasoning messages");
             assert_eq!(reasoning.text, "Summarized step");
             assert_eq!(raw.text, "raw detail");

@@ -23,6 +23,10 @@ struct TestDaemon {
 impl TestDaemon {
     fn new() -> Result<Self> {
         let home = tempfile::Builder::new().tempdir_in("/tmp")?;
+        std::fs::write(
+            home.path().join("config.toml"),
+            "[features]\nrespect_system_proxy = false\nsystem_proxy_fallback = false\n",
+        )?;
         let codex = codex_utils_cargo_bin::cargo_bin("codex")?;
         let codex_source = std::fs::canonicalize(&codex)?;
         let target = if cfg!(target_os = "macos") {
@@ -57,7 +61,22 @@ impl TestDaemon {
 
     fn command(&self) -> Command {
         let mut command = Command::new(&self.codex);
-        command.env("CODEX_HOME", self.home.path());
+        command
+            .env("CODEX_HOME", self.home.path())
+            .env("CODEX_INSTALL_DIR", self.home.path().join("install-bin"));
+        for variable in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            command.env(variable, "http://127.0.0.1:1");
+        }
+        for variable in ["NO_PROXY", "no_proxy"] {
+            command.env(variable, "127.0.0.1,localhost");
+        }
         command
     }
 
@@ -212,6 +231,26 @@ fn managed_identity_survives_locale_and_timezone_changes() -> Result<()> {
         }
     }
     assert!(!pid_file.exists());
+    Ok(())
+}
+
+#[test]
+fn managed_updater_cannot_fetch_an_external_installation() -> Result<()> {
+    let daemon = TestDaemon::new()?;
+    let current = daemon.home.path().join("packages/standalone/current");
+    let selected_release = std::fs::read_link(&current)?;
+    assert_eq!(daemon.lifecycle("start")?["status"], "started");
+    let output = daemon
+        .command()
+        .args(["app-server", "daemon", "update"])
+        .output()?;
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("failed to fetch standalone Codex updater")
+    );
+    assert_eq!(std::fs::read_link(current)?, selected_release);
+    assert!(!daemon.home.path().join("install-bin").exists());
     Ok(())
 }
 
