@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "codex-agent-message-board-client"
-version = "0.0.0"
+version = "0.159.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -3049,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "codex-core-plugin-common"
-version = "0.0.0"
+version = "0.159.0"
 dependencies = [
  "codex-utils-absolute-path",
  "semver",
