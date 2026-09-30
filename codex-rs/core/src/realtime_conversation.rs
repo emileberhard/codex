@@ -1296,7 +1296,10 @@ impl RealtimeConversationManager {
     async fn clear_active_handoff_if(&self, handoff_id: &str) {
         let handoff = {
             let guard = self.state.lock().await;
-            guard.conversation.as_ref().map(|state| state.handoff.clone())
+            guard
+                .conversation
+                .as_ref()
+                .map(|state| state.handoff.clone())
         };
         let Some(handoff) = handoff else {
             return;
