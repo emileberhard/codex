@@ -79,6 +79,7 @@ mod sender_context;
 mod service_tier;
 mod spawn;
 mod spawn_guard;
+mod spawn_telemetry;
 mod target;
 mod user_authorization;
 mod watch;

@@ -10,6 +10,7 @@ use crate::migrations::repair_legacy_recency_migration_version;
 use crate::runtime::RuntimeDbInitError;
 use crate::telemetry;
 use crate::telemetry::DbKind;
+use crate::thread_history_migration_repair::repair_legacy_private_thread_history_versions;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use log::LevelFilter;
 use sqlx::ConnectOptions;
@@ -274,6 +275,9 @@ impl SqliteConfig {
         let migrate_result = async {
             if matches!(spec.kind, DbKind::State) {
                 repair_legacy_recency_migration_version(&pool, migrator).await?;
+            }
+            if matches!(spec.kind, DbKind::ThreadHistory) {
+                repair_legacy_private_thread_history_versions(&pool, migrator).await?;
             }
             migrator.run(&pool).await.map_err(anyhow::Error::from)
         }

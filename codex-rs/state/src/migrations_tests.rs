@@ -1027,7 +1027,7 @@ async fn observation_turn_versions_preserve_backfill_and_older_writers() {
             THREAD_HISTORY_MIGRATOR
                 .migrations
                 .iter()
-                .filter(|migration| migration.version < 8)
+                .filter(|migration| migration.version < 1_000_002)
                 .cloned()
                 .collect(),
         ),

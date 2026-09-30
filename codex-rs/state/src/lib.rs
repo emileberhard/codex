@@ -18,7 +18,9 @@ mod paths;
 mod runtime;
 mod sqlite;
 mod telemetry;
+mod thread_history_migration_repair;
 
+pub use log_db::LogWriteFailureReporter;
 pub use model::CreatedProject;
 pub use model::LogEntry;
 pub use model::LogQuery;

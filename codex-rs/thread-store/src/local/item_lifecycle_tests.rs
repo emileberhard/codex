@@ -1,6 +1,7 @@
 use super::*;
 use crate::ItemSortKey;
 use crate::ListItemsParams;
+use crate::ListItemsPosition;
 use codex_protocol::protocol::ItemStartedEvent;
 use pretty_assertions::assert_eq;
 
@@ -42,7 +43,7 @@ async fn incomplete_item_is_pageable_and_completion_never_moves_it_behind_a_curs
         turn_id: Some("turn-1".to_string()),
         item_id: None,
         include_archived: true,
-        cursor: None,
+        position: None,
         page_size: 1,
         sort_direction: SortDirection::Asc,
         sort_key: ItemSortKey::CreatedAtOrdinal,
@@ -69,7 +70,7 @@ async fn incomplete_item_is_pageable_and_completion_never_moves_it_behind_a_curs
         .expect("flush completion");
     let next = store
         .list_items(ListItemsParams {
-            cursor: first_page.next_cursor,
+            position: first_page.next_cursor.map(ListItemsPosition::Cursor),
             ..params.clone()
         })
         .await
@@ -202,7 +203,7 @@ async fn fork_prefix_preserves_the_item_snapshot_before_later_completion_and_upd
                 turn_id: Some("turn".to_string()),
                 item_id: None,
                 include_archived: true,
-                cursor: None,
+                position: None,
                 page_size: 10,
                 sort_direction: SortDirection::Asc,
                 sort_key: ItemSortKey::CreatedAtOrdinal,

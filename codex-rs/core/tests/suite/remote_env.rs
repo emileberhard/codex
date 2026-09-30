@@ -1,3 +1,6 @@
+#[path = "guardian_environments_tests.rs"]
+mod guardian_environments;
+
 use anyhow::Context;
 use anyhow::Result;
 use base64::Engine;
@@ -19,7 +22,7 @@ use codex_exec_server::CopyOptions;
 use codex_exec_server::CreateDirectoryOptions;
 use codex_exec_server::EnvironmentReadyInfo;
 use codex_exec_server::ExecServerError;
-use codex_exec_server::ExecServerRuntimePaths;
+use codex_exec_server::ExecServerRuntimeOptions;
 use codex_exec_server::FileSystemSandboxContext;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
 use codex_exec_server::NoiseChannelPublicKey;
@@ -621,6 +624,7 @@ async fn environment_permissions_follow_configuration_ownership() -> Result<()> 
                 permission_profile: Some(PermissionProfile::workspace_write()),
                 ..Default::default()
             },
+            reply: None,
         })
         .await?;
     let persisted_settings = wait_for_event_match(&test.codex, |event| match event {
@@ -2400,7 +2404,7 @@ async fn ready_before_selection_resolves_resumed_thread_capability_root_after_wa
         .mount(&registry)
         .await;
 
-    let runtime_paths = ExecServerRuntimePaths::new(
+    let runtime_paths = ExecServerRuntimeOptions::new(
         std::env::current_exe()?,
         /*codex_linux_sandbox_exe*/ None,
     )?;

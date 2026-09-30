@@ -1065,6 +1065,7 @@ async fn repeated_turn_reopens_after_abort_and_projects_final_completion() {
                 RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
                     turn_id: Some("turn-recovered".to_string()),
                     reason: TurnAbortReason::Replaced,
+                    error: None,
                     started_at: Some(10),
                     completed_at: Some(20),
                     duration_ms: Some(10_000),
@@ -3540,7 +3541,7 @@ async fn legacy_projection_sqlite_checkpoint_reopens_and_preserves_frozen_source
         thread_id,
         turn_id: None,
         include_archived: false,
-        cursor: cursors.items,
+        position: cursors.items.map(crate::ListItemsPosition::Cursor),
         page_size: 10,
         sort_direction: SortDirection::Desc,
         sort_key: crate::ItemSortKey::CreatedAtOrdinal,
@@ -3570,7 +3571,7 @@ async fn legacy_projection_sqlite_checkpoint_reopens_and_preserves_frozen_source
     let store = projection_store(home.path()).await;
     let after = store
         .list_items(crate::ListItemsParams {
-            cursor: None,
+            position: None,
             ..item_params.clone()
         })
         .await

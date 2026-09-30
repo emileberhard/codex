@@ -18,7 +18,6 @@ use crate::config::ConfigBuilder;
 use crate::config::ConfigOverrides;
 use crate::context::ContextualUserFragment;
 use crate::context::DeveloperInstructions;
-use crate::context::GuardianContextMode;
 use crate::context::TurnAborted;
 use crate::environment_selection::EnvironmentConfigOrigin;
 use crate::environment_selection::ThreadEnvironments;
@@ -26,6 +25,7 @@ use crate::environment_selection::TurnEnvironmentState;
 use crate::function_tool::FunctionCallError;
 use crate::hook_mcp_executor::CoreHookMcpExecutor;
 use crate::plugins::plugins_manager_for_config;
+use crate::realtime_conversation::RealtimeConversationSnapshot;
 use crate::session::step_context::StepContext;
 use crate::shell::default_user_shell;
 use crate::shell_snapshot::ShellSnapshot;
@@ -268,6 +268,11 @@ impl StepContext {
         });
         settings.service_tier = turn.config.service_tier.clone();
         Arc::new(Self {
+            preempt: turn
+                .config
+                .features
+                .enabled(Feature::InstantInterrupt)
+                .then(tokio_util::sync::CancellationToken::new),
             token_budget: token_budget::resolve_token_budget(
                 turn.configured_token_budget.as_ref(),
                 turn.use_model_token_budget_defaults,
@@ -275,6 +280,10 @@ impl StepContext {
             ),
             settings: Arc::new(settings),
             session_telemetry: turn.session_telemetry.clone(),
+            realtime: RealtimeConversationSnapshot {
+                active: turn.realtime_active,
+                mode_instructions: None,
+            },
             turn: Arc::clone(&turn),
             environments,
             selected_capability_roots: Vec::new(),
@@ -612,7 +621,7 @@ async fn regular_turn_emits_turn_started_with_trace_id_without_waiting_for_start
     });
 
     sess.set_session_startup_prewarm(
-        crate::session_startup_prewarm::SessionStartupPrewarmHandle::new(
+        crate::session::startup_prewarm::SessionStartupPrewarmHandle::new(
             handle,
             std::time::Instant::now(),
             crate::client::WEBSOCKET_CONNECT_TIMEOUT,
@@ -768,7 +777,7 @@ async fn interrupting_regular_turn_waiting_on_startup_prewarm_emits_turn_aborted
     });
 
     sess.set_session_startup_prewarm(
-        crate::session_startup_prewarm::SessionStartupPrewarmHandle::new(
+        crate::session::startup_prewarm::SessionStartupPrewarmHandle::new(
             handle,
             std::time::Instant::now(),
             crate::client::WEBSOCKET_CONNECT_TIMEOUT,
@@ -806,6 +815,7 @@ async fn interrupting_regular_turn_waiting_on_startup_prewarm_emits_turn_aborted
     let EventMsg::TurnAborted(TurnAbortedEvent {
         turn_id,
         reason,
+        error: _,
         started_at,
         completed_at,
         duration_ms,
@@ -842,6 +852,7 @@ fn test_model_client_session() -> crate::client::ModelClientSession {
         codex_model_provider::WorkspaceRoutingContext::new(
             "https://chatgpt.com/backend-api".into(),
         ),
+        Vec::new(),
     )
     .new_session()
 }
@@ -2447,6 +2458,131 @@ async fn subagent_activity_emits_matching_start_and_completion() {
 }
 
 #[tokio::test]
+async fn inter_agent_communication_waits_for_confirmed_delivery_persistence() {
+    let (mut session, turn_context) = make_session_and_context().await;
+    let turn_context = Arc::new(turn_context);
+    let rollout_path = attach_thread_persistence(&mut session).await;
+    let session = Arc::new(session);
+    let checkpoint = thread_settings::acquire_persistence_lock(&session).await;
+    let message = codex_history::RetainedUserMessage {
+        origin: codex_history::UserInputOrigin::User,
+        turn_id: turn_context.sub_id.clone(),
+        message_id: Some("send".to_owned()),
+        text: "May I publish?".to_owned(),
+        complete: true,
+        phase: None,
+    };
+    let (recording, _) = session.record_delivered_assistant_message(message.clone());
+    let communication = InterAgentCommunication::new(
+        AgentPath::root().join("worker").expect("worker path"),
+        AgentPath::root(),
+        Vec::new(),
+        "child done".to_owned(),
+        /*trigger_turn*/ false,
+    );
+    let communication_session = Arc::clone(&session);
+    let replay_turn = Arc::clone(&turn_context);
+    let mut communication_task = tokio::spawn(async move {
+        communication_session
+            .record_inter_agent_communication(
+                &turn_context,
+                turn_context.model_info(),
+                communication,
+            )
+            .await;
+    });
+    assert!(
+        tokio::time::timeout(
+            std::time::Duration::from_millis(/*millis*/ 100),
+            &mut communication_task,
+        )
+        .await
+        .is_err()
+    );
+    // Confirm another send while communication waits for the earlier delivery.
+    let (later, _) =
+        session.record_delivered_assistant_message(codex_history::RetainedUserMessage {
+            message_id: Some("later".to_owned()),
+            text: "Actually, wait.".to_owned(),
+            ..message.clone()
+        });
+    drop(checkpoint);
+    recording.await.expect("confirmed delivery persisted");
+    communication_task
+        .await
+        .expect("communication persisted after delivery");
+    later.await.expect("later delivery persisted");
+    session.flush_rollout().await.expect("rollout flushed");
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    let boundaries = resumed
+        .history
+        .iter()
+        .filter_map(|item| match item {
+            RolloutItem::RetainedContext(
+                codex_history::RetainedContextEvent::DeliveredAssistantMessage {
+                    acceptance_order,
+                    ..
+                },
+            ) => Some(("delivery", Some(*acceptance_order))),
+            RolloutItem::ResponseItem(ResponseItemEnvelope {
+                item: ResponseItem::AgentMessage { .. },
+                metadata: Some(metadata),
+            }) => Some(("communication", metadata.user_input_order)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        boundaries,
+        vec![
+            ("delivery", Some(0)),
+            ("communication", Some(1)),
+            ("delivery", Some(2)),
+        ]
+    );
+    let live = session.clone_history().await;
+    let communication = live
+        .annotated_items()
+        .iter()
+        .find(|item| matches!(item.item, ResponseItem::AgentMessage { .. }))
+        .expect("live communication");
+    assert_eq!(
+        communication.metadata.as_ref().unwrap().user_input_order,
+        Some(1)
+    );
+    let mut compacted: CompactedItem =
+        serde_json::from_value(json!({"message": "compacted"})).unwrap();
+    compacted.replacement_history = Some(live.annotated_items().to_vec());
+    compacted.retained_context = Some(live.retained_context().clone());
+    let mut history = resumed.history.as_ref().clone();
+    history.extend([
+        RolloutItem::Compacted(compacted),
+        RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
+            codex_protocol::protocol::ThreadRolledBackEvent { num_turns: 1 },
+        )),
+    ]);
+    let replayed = session
+        .reconstruct_history_from_rollout(&replay_turn, &history)
+        .await;
+    let messages = replayed
+        .retained_context
+        .ordered_entries()
+        .filter_map(|(_, entry)| {
+            if let codex_history::RetainedContextEntry::AssistantMessage(message) = entry {
+                Some(message.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(messages, vec![message]);
+}
+
+#[tokio::test]
 async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
     let (mut session, turn_context) = make_session_and_context().await;
     let rollout_path = attach_thread_persistence(&mut session).await;
@@ -2502,7 +2638,13 @@ async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
         RolloutItem::InterAgentCommunicationMetadata {
             trigger_turn: false,
         },
-        RolloutItem::ResponseItem(expected_item.clone().into()),
+        RolloutItem::ResponseItem(ResponseItemEnvelope {
+            item: expected_item.clone(),
+            metadata: Some(CodexHarnessMetadata {
+                user_input_order: Some(0),
+                ..Default::default()
+            }),
+        }),
     ];
     assert_eq!(
         strip_response_item_ids_from_json(serde_json::to_value(persisted_items).unwrap()),
@@ -2517,6 +2659,7 @@ async fn record_inter_agent_communication_sets_turn_id_in_rollout_and_resume() {
         strip_response_item_ids(&raw_history_items(&resumed_session.clone_history().await)),
         strip_response_item_ids(std::slice::from_ref(&expected_item))
     );
+    assert_eq!(resumed_session.reserve_user_input_order().await, 1);
 }
 
 #[tokio::test]
@@ -3903,7 +4046,7 @@ async fn fork_startup_context_then_first_turn_diff_snapshot() -> anyhow::Result<
         codex_config::Constrained::allow_any(AskForApproval::UnlessTrusted);
     let forked = initial
         .thread_manager
-        .fork_thread(
+        .fork_legacy_thread(
             usize::MAX,
             core_test_support::test_codex::StartThreadOptions::new(fork_config.clone()),
             rollout_path,
@@ -4035,6 +4178,7 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
         Some(PreviousTurnSettings {
             model: previous_model.to_string(),
             comp_hash: None,
+            cyber_access_program: None,
             realtime_active: Some(turn_context.realtime_active),
         })
     );
@@ -5634,6 +5778,7 @@ async fn mcp_attribution_checkpoints_cover_batch_prefixes_compaction_and_restore
         .record_mcp_source(source.clone());
     let expected = McpAttribution {
         status: McpAttributionStatus::Complete,
+        error_reason: None,
         sources: vec![source],
     };
     session
@@ -5713,7 +5858,7 @@ async fn mcp_attribution_checkpoints_cover_batch_prefixes_compaction_and_restore
 
 #[tokio::test]
 async fn standalone_settings_invalidate_continuation_before_delivering_acceptance() {
-    let (mut session, _) = make_session_and_context().await;
+    let (mut session, turn_context) = make_session_and_context().await;
     let (tx, rx) = async_channel::bounded(1);
     session.tx_event = tx;
     session.state.lock().await.last_started_turn_id = Some("superseded-turn".into());
@@ -5731,18 +5876,45 @@ async fn standalone_settings_invalidate_continuation_before_delivering_acceptanc
         .await
         .expect("fill event channel");
     let session = Arc::new(session);
-    let mut update = Box::pin(tokio::task::unconstrained(thread_settings::update(
-        &session,
-        "settings".into(),
-        codex_protocol::protocol::ThreadSettingsOverrides::default(),
+    let (reply, mut accepted) = tokio::sync::oneshot::channel();
+    let (tx_sub, rx_sub) = async_channel::bounded(1);
+    tx_sub
+        .send(Submission {
+            id: "settings".into(),
+            op: Op::ThreadSettings {
+                thread_settings: codex_protocol::protocol::ThreadSettingsOverrides::default(),
+                reply: Some(reply),
+            },
+            trace: None,
+            parent_turn_id: None,
+            root_turn_id: None,
+            residency_guard: None,
+            new_work_admission: None,
+        })
+        .await
+        .expect("submit settings");
+    let mut submissions = Box::pin(tokio::task::unconstrained(submission_loop(
+        Arc::clone(&session),
+        turn_context.config,
+        rx_sub,
     )));
-    assert!(futures::poll!(update.as_mut()).is_pending());
+    assert!(futures::poll!(submissions.as_mut()).is_pending());
     assert_eq!(session.state.lock().await.last_started_turn_id, None);
+    accepted
+        .try_recv()
+        .expect("receive acceptance before the event is delivered")
+        .expect("settings accepted");
     let mut checkpoint = Box::pin(session.checkpoint_thread_settings());
     assert!(futures::poll!(checkpoint.as_mut()).is_pending());
     rx.recv().await.expect("release event delivery");
-    update.await;
+    assert!(futures::poll!(submissions.as_mut()).is_pending());
     checkpoint.await.expect("checkpoint after settings update");
+    assert!(matches!(
+        rx.recv().await.expect("receive settings event").msg,
+        EventMsg::ThreadSettingsApplied(_)
+    ));
+    drop(tx_sub);
+    submissions.await;
 }
 
 #[tokio::test]
@@ -5755,6 +5927,7 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
     let previous_turn_settings = PreviousTurnSettings {
         model: "previous-model".to_string(),
         comp_hash: Some("comp-hash".to_string()),
+        cyber_access_program: None,
         realtime_active: Some(true),
     };
     session
@@ -6290,6 +6463,7 @@ async fn response_metadata_builders_capture_fresh_mcp_attribution() {
         .await;
     let expected = Some(McpAttribution {
         status: McpAttributionStatus::Complete,
+        error_reason: None,
         sources: vec![source],
     });
     assert_eq!(before.mcp_attribution, Some(McpAttribution::default()));
@@ -6397,10 +6571,8 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
     );
 
     let mut state = SessionState::new(session_configuration.clone());
-    state.history = ContextManager::with_guardian_context_mode(
-        GuardianContextMode::from_features(&config.features),
-        &session_configuration.session_source,
-    );
+    state.history =
+        ContextManager::for_session(&session_configuration.session_source, &config.features);
     let (environment_manager, resolved_environments) =
         resolved_environments_for_configuration(&session_configuration, &default_environments)
             .await;
@@ -6524,6 +6696,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
             /*attestation_provider*/ None,
             config.http_client_factory(),
             config.workspace_routing_context(),
+            Vec::new(),
         ),
         executed_tool_calls: executed_tool_calls.clone(),
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
@@ -6544,9 +6717,10 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
         initial_settings_checkpoint: None,
+        code_mode_message_tasks: Default::default(),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
         features: config.features.clone(),
-        guardian_context_mode: GuardianContextMode::from_features(&config.features),
+
         isolation: codex_extension_api::SessionIsolation::Inherit,
         tool_policy: Arc::default(),
         windows_sandbox_proxy_settings_mode:
@@ -8173,7 +8347,7 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
         sess.spawn_task(
             Arc::clone(&tc),
             vec![TurnInput::UserInput {
-                acceptance_order: None,
+                metadata: Default::default(),
                 content: vec![UserInput::Text {
                     text: "hello".to_string(),
                     text_elements: Vec::new(),
@@ -8293,6 +8467,12 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
     assert!(session.async_hook_results.is_closed());
     assert!(session.async_hook_results.is_empty());
     assert!(result_sender.is_closed());
+
+    assert!(session.services.model_client.responses_websocket_enabled());
+    session
+        .schedule_startup_prewarm(super::startup_prewarm::PrewarmInput::Base)
+        .await;
+    assert!(session.state.lock().await.startup_prewarm.is_none());
 
     assert_eq!(
         codex_thread_store::InMemoryThreadStoreCalls {
@@ -8673,10 +8853,8 @@ where
     );
 
     let mut state = SessionState::new(session_configuration.clone());
-    state.history = ContextManager::with_guardian_context_mode(
-        GuardianContextMode::from_features(&config.features),
-        &session_configuration.session_source,
-    );
+    state.history =
+        ContextManager::for_session(&session_configuration.session_source, &config.features);
     let (environment_manager, resolved_turn_environments) =
         resolved_environments_for_configuration(&session_configuration, &default_environments)
             .await;
@@ -8799,6 +8977,7 @@ where
             /*attestation_provider*/ None,
             config.http_client_factory(),
             config.workspace_routing_context(),
+            Vec::new(),
         ),
         executed_tool_calls: executed_tool_calls.clone(),
         code_mode_service: crate::tools::code_mode::CodeModeService::new(
@@ -8819,9 +8998,10 @@ where
         state: Mutex::new(state),
         thread_settings_persistence: Semaphore::new(/*permits*/ 1),
         initial_settings_checkpoint: None,
+        code_mode_message_tasks: Default::default(),
         managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),
         features: config.features.clone(),
-        guardian_context_mode: GuardianContextMode::from_features(&config.features),
+
         isolation: codex_extension_api::SessionIsolation::Inherit,
         tool_policy: Arc::default(),
         windows_sandbox_proxy_settings_mode:
@@ -9676,7 +9856,9 @@ async fn step_context_keeps_its_mcp_runtime_for_tools() -> anyhow::Result<()> {
             environment_id: DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
             enabled: true,
             required: false,
+            startup_readiness: Default::default(),
             supports_parallel_tool_calls: false,
+            tool_input_schema_max_bytes: None,
             omit_tools_from: None,
             disabled_reason: None,
             startup_timeout_sec: None,
@@ -9730,7 +9912,7 @@ async fn spawn_task_does_not_update_previous_turn_settings_for_non_run_turn_task
     sess.set_previous_turn_settings(/*previous_turn_settings*/ None)
         .await;
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "hello".to_string(),
             text_elements: Vec::new(),
@@ -10482,6 +10664,7 @@ async fn build_initial_context_restates_realtime_start_when_reference_context_is
     let previous_turn_settings = PreviousTurnSettings {
         model: turn_context.model_info().slug.clone(),
         comp_hash: None,
+        cyber_access_program: None,
         realtime_active: Some(true),
     };
 
@@ -10845,6 +11028,7 @@ async fn build_initial_context_uses_retained_step_after_model_change() {
         .set_previous_turn_settings(Some(PreviousTurnSettings {
             model: "base-model".to_string(),
             comp_hash: None,
+            cyber_access_program: None,
             realtime_active: None,
         }))
         .await;
@@ -10926,6 +11110,7 @@ async fn build_initial_context_prepends_model_switch_message() {
     let previous_turn_settings = PreviousTurnSettings {
         model: "previous-regular-model".to_string(),
         comp_hash: None,
+        cyber_access_program: None,
         realtime_active: None,
     };
 
@@ -10981,6 +11166,7 @@ async fn record_context_updates_and_set_reference_context_item_persists_full_rei
         .set_previous_turn_settings(Some(PreviousTurnSettings {
             model: previous_context.model_info().slug.clone(),
             comp_hash: None,
+            cyber_access_program: None,
             realtime_active: Some(previous_context.realtime_active),
         }))
         .await;
@@ -11299,6 +11485,7 @@ impl SessionTask for ExtensionInterruptedTask {
                 EventMsg::Warning(codex_protocol::protocol::WarningEvent {
                     message: "extension interrupted this turn".into(),
                 }),
+                /*error*/ None,
             )
             .await;
 
@@ -11550,6 +11737,7 @@ async fn interrupting_compaction_fallback_retains_last_known_step_context() {
         .set_previous_turn_settings(Some(PreviousTurnSettings {
             model: "gpt-5.4".to_string(),
             comp_hash: Some("old".to_string()),
+            cyber_access_program: None,
             realtime_active: Some(turn.realtime_active),
         }))
         .await;
@@ -11648,7 +11836,7 @@ async fn extension_interrupt_emits_thread_idle() {
 async fn extension_interrupt_survives_the_calling_runtime() {
     let (sess, tc, rx) = make_session_and_context_with_rx().await;
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "keep turn active for extension interruption".to_string(),
             text_elements: Vec::new(),
@@ -11678,6 +11866,7 @@ async fn extension_interrupt_survives_the_calling_runtime() {
                     EventMsg::Warning(codex_protocol::protocol::WarningEvent {
                         message: "extension interrupted this turn".into(),
                     }),
+                    /*error*/ None,
                 )
                 .await;
         });
@@ -11712,7 +11901,7 @@ async fn turn_complete_flushes_terminal_event_after_delivery() {
     .await;
 
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "complete normally".to_string(),
             text_elements: Vec::new(),
@@ -11740,7 +11929,7 @@ async fn turn_aborted_flushes_terminal_event_after_delivery() {
     .await;
 
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "interrupt me".to_string(),
             text_elements: Vec::new(),
@@ -11783,7 +11972,7 @@ async fn turn_aborted_flushes_terminal_event_after_delivery() {
 async fn abort_regular_task_emits_marker_before_turn_aborted() {
     let (sess, tc, rx) = make_session_and_context_with_rx().await;
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "hello".to_string(),
             text_elements: Vec::new(),
@@ -11825,7 +12014,7 @@ async fn abort_regular_task_emits_marker_before_turn_aborted() {
 async fn abort_gracefully_emits_marker_before_turn_aborted() {
     let (sess, tc, rx) = make_session_and_context_with_rx().await;
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "hello".to_string(),
             text_elements: Vec::new(),
@@ -11902,7 +12091,7 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
         },
     );
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "hello".to_string(),
             text_elements: Vec::new(),
@@ -12375,7 +12564,10 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
         (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
         vec![
             TurnInput::UserInput {
-                acceptance_order: Some(0),
+                metadata: crate::session::UserInputMetadata {
+                    acceptance_order: Some(0),
+                    ..Default::default()
+                },
                 content: vec![UserInput::Text {
                     text: "follow up".to_string(),
                     text_elements: Vec::new(),
@@ -12432,7 +12624,10 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
         (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
         vec![
             TurnInput::UserInput {
-                acceptance_order: Some(0),
+                metadata: crate::session::UserInputMetadata {
+                    acceptance_order: Some(0),
+                    ..Default::default()
+                },
                 content: vec![UserInput::Text {
                     text: "follow up".to_string(),
                     text_elements: Vec::new(),
@@ -12504,7 +12699,7 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
 async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
     let (sess, tc, rx) = make_session_and_context_with_rx().await;
     let input = vec![TurnInput::UserInput {
-        acceptance_order: None,
+        metadata: Default::default(),
         content: vec![UserInput::Text {
             text: "start review".to_string(),
             text_elements: Vec::new(),

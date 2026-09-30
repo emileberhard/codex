@@ -27,7 +27,7 @@ pub(crate) async fn attach(
             turn_id: Some(turn_id),
             item_id: Some(item_id.clone()),
             include_archived: true,
-            cursor: None,
+            position: None,
             page_size: 1,
             sort_direction: SortDirection::Asc,
             sort_key: ItemSortKey::CreatedAtOrdinal,
