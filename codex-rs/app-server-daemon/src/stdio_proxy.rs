@@ -1,5 +1,10 @@
 use std::collections::HashSet;
+use std::io::ErrorKind;
+use std::io::Read;
 use std::path::Path;
+use std::pin::Pin;
+use std::task::Poll;
+use std::task::ready;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -13,6 +18,8 @@ use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
+use tokio::io::ReadBuf;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio::time::sleep_until;
 use tokio_tungstenite::WebSocketStream;
@@ -21,12 +28,76 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::client;
 
 const EOF_DRAIN_TIMEOUT: Duration = Duration::from_secs(30);
+const INPUT_CHUNK_BYTES: usize = 64 * 1024;
+const INPUT_QUEUE_CHUNKS: usize = 16;
 
 /// Relays newline-delimited JSON-RPC between stdio and the app-server's
 /// WebSocket control socket.
 pub async fn proxy_stdio(socket_path: &Path) -> Result<()> {
     let websocket = client::connect(socket_path).await?;
-    proxy_streams(websocket, tokio::io::stdin(), tokio::io::stdout()).await
+    proxy_streams(
+        websocket,
+        DetachedInput::spawn(std::io::stdin()),
+        tokio::io::stdout(),
+    )
+    .await
+}
+
+struct DetachedInput {
+    chunks: mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    chunk: Vec<u8>,
+    offset: usize,
+}
+
+impl DetachedInput {
+    fn spawn(mut source: impl Read + Send + 'static) -> Self {
+        let (sender, chunks) = mpsc::channel(INPUT_QUEUE_CHUNKS);
+        std::thread::spawn(move || {
+            let mut buffer = vec![0; INPUT_CHUNK_BYTES];
+            loop {
+                let chunk = match source.read(&mut buffer) {
+                    Ok(0) => return,
+                    Ok(read) => Ok(buffer[..read].to_vec()),
+                    Err(error) if error.kind() == ErrorKind::Interrupted => continue,
+                    Err(error) => Err(error),
+                };
+                let failed = chunk.is_err();
+                if sender.blocking_send(chunk).is_err() || failed {
+                    return;
+                }
+            }
+        });
+        Self {
+            chunks,
+            chunk: Vec::new(),
+            offset: 0,
+        }
+    }
+}
+
+impl AsyncRead for DetachedInput {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let input = self.get_mut();
+        while input.offset == input.chunk.len() {
+            match ready!(input.chunks.poll_recv(cx)) {
+                Some(Ok(chunk)) => {
+                    input.chunk = chunk;
+                    input.offset = 0;
+                }
+                Some(Err(error)) => return Poll::Ready(Err(error)),
+                None => return Poll::Ready(Ok(())),
+            }
+        }
+        let available = &input.chunk[input.offset..];
+        let count = available.len().min(buf.remaining());
+        buf.put_slice(&available[..count]);
+        input.offset += count;
+        Poll::Ready(Ok(()))
+    }
 }
 
 async fn proxy_streams<S, R, W>(
@@ -209,6 +280,42 @@ mod tests {
 
         timeout(Duration::from_secs(1), server).await???;
         timeout(Duration::from_secs(1), proxy).await???;
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_shuts_down_while_detached_input_is_still_open() -> Result<()> {
+        let (input, _input_writer) = std::io::pipe()?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async {
+            let temp_dir = TempDir::new()?;
+            let socket_path = temp_dir.path().join("app-server.sock");
+            let mut listener = UnixListener::bind(&socket_path).await?;
+            let server = tokio::spawn(async move {
+                let stream = listener.accept().await?;
+                let mut websocket = accept_async(stream).await?;
+                websocket.close(None).await?;
+                anyhow::Ok(())
+            });
+
+            let websocket = client::connect(&socket_path).await?;
+            timeout(
+                Duration::from_secs(1),
+                proxy_streams(websocket, DetachedInput::spawn(input), tokio::io::sink()),
+            )
+            .await??;
+            timeout(Duration::from_secs(1), server).await???;
+            anyhow::Ok(())
+        })?;
+
+        let (shut_down, shutdown) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            drop(runtime);
+            shut_down.send(()).ok();
+        });
+        shutdown.recv_timeout(Duration::from_secs(5))?;
         Ok(())
     }
 }
