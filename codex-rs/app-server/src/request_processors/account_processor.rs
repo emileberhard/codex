@@ -6,6 +6,7 @@ use super::*;
 use crate::auth_mode::auth_mode_to_api;
 use crate::external_auth::ExternalAuthBridge;
 use crate::outgoing_message::AccountNotification;
+use crate::outgoing_message::ConnectionId;
 use chrono::DateTime;
 use codex_app_server_protocol::DesktopOnboardingEntrypoint;
 use codex_app_server_protocol::GetAccountRateLimitsParams;
@@ -816,7 +817,12 @@ impl AccountRequestProcessor {
         chatgpt_plan_type: Option<String>,
     ) {
         let result = self
-            .login_chatgpt_auth_tokens_response(access_token, chatgpt_account_id, chatgpt_plan_type)
+            .login_chatgpt_auth_tokens_response(
+                request_id.connection_id,
+                access_token,
+                chatgpt_account_id,
+                chatgpt_plan_type,
+            )
             .await;
         let logged_in = result.is_ok();
         self.outgoing.send_result(request_id, result).await;
@@ -829,6 +835,7 @@ impl AccountRequestProcessor {
 
     async fn login_chatgpt_auth_tokens_response(
         &self,
+        connection_id: ConnectionId,
         access_token: String,
         chatgpt_account_id: String,
         chatgpt_plan_type: Option<String>,
@@ -868,6 +875,7 @@ impl AccountRequestProcessor {
             .set_external_auth(Arc::new(ExternalAuthBridge::new(
                 Arc::clone(&self.outgoing),
                 auth,
+                connection_id,
             )))
             .await
             .map_err(|err| internal_error(format!("failed to set external auth: {err}")))?;

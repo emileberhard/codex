@@ -51,6 +51,8 @@ mod experimental_api;
 mod experimental_feature_list;
 mod external_agent_config;
 mod external_agent_import_sync;
+#[path = "external_auth_ownership_tests.rs"]
+mod external_auth_ownership;
 mod feedback;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod file_descriptor_pressure;

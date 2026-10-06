@@ -129,6 +129,7 @@ pub(crate) enum OutgoingEnvelope {
 pub(crate) struct OutgoingMessageSender {
     verification_auth: OnceLock<Arc<codex_login::AuthManager>>,
     verification_connections: Mutex<HashSet<ConnectionId>>,
+    connected_connections: Mutex<HashSet<ConnectionId>>,
     next_server_request_id: AtomicI64,
     sender: mpsc::Sender<OutgoingEnvelope>,
     request_id_to_callback: Mutex<HashMap<RequestId, PendingCallbackEntry>>,
@@ -153,6 +154,7 @@ pub(crate) struct ThreadScopedOutgoingMessageSender {
 }
 
 struct PendingCallbackEntry {
+    external_auth_owner: Option<ConnectionId>,
     verification_owner: Option<ConnectionId>,
     verification_auth_revision: Option<u64>,
     verification_identity: Option<user_verification_auth::Identity>,
@@ -254,6 +256,7 @@ impl OutgoingMessageSender {
         Self {
             verification_auth: OnceLock::new(),
             verification_connections: Mutex::new(HashSet::new()),
+            connected_connections: Mutex::new(HashSet::new()),
             next_server_request_id: AtomicI64::new(0),
             sender,
             request_id_to_callback: Mutex::new(HashMap::new()),
@@ -281,9 +284,30 @@ impl OutgoingMessageSender {
         }
     }
 
+    pub(crate) async fn connection_initialized(&self, connection_id: ConnectionId) {
+        self.connected_connections
+            .lock()
+            .await
+            .insert(connection_id);
+    }
+
+    pub(crate) async fn disconnect_connection(&self, connection_id: ConnectionId) {
+        self.connected_connections
+            .lock()
+            .await
+            .remove(&connection_id);
+        self.verification_connections
+            .lock()
+            .await
+            .remove(&connection_id);
+        self.request_id_to_callback.lock().await.retain(|_, entry| {
+            entry.external_auth_owner != Some(connection_id)
+                && entry.verification_owner != Some(connection_id)
+        });
+    }
+
     pub(crate) async fn connection_closed(&self, connection_id: ConnectionId) {
-        self.disconnect_user_verification_connection(connection_id)
-            .await;
+        self.disconnect_connection(connection_id).await;
         let mut request_contexts = self.request_contexts.lock().await;
         request_contexts.retain(|request_id, _| request_id.connection_id != connection_id);
     }
@@ -322,16 +346,6 @@ impl OutgoingMessageSender {
         self.request_contexts.lock().await.len()
     }
 
-    pub(crate) async fn send_request(
-        &self,
-        request: ServerRequestPayload,
-    ) -> (RequestId, oneshot::Receiver<ClientRequestResult>) {
-        self.send_request_to_connections(
-            /*connection_ids*/ None, request, /*thread_id*/ None,
-        )
-        .await
-    }
-
     fn next_request_id(&self) -> RequestId {
         RequestId::Integer(self.next_server_request_id.fetch_add(1, Ordering::Relaxed))
     }
@@ -345,6 +359,20 @@ impl OutgoingMessageSender {
         let id = self.next_request_id();
         let outgoing_message_id = id.clone();
         let request = request.request_with_id(outgoing_message_id.clone());
+        let external_auth_owner =
+            if matches!(&request, ServerRequest::ChatgptAuthTokensRefresh { .. }) {
+                let Some([owner]) = connection_ids else {
+                    let (_sender, receiver) = oneshot::channel();
+                    return (outgoing_message_id, receiver);
+                };
+                if !self.connected_connections.lock().await.contains(owner) {
+                    let (_sender, receiver) = oneshot::channel();
+                    return (outgoing_message_id, receiver);
+                }
+                Some(*owner)
+            } else {
+                None
+            };
         let user_verification = matches!(
             &request,
             ServerRequest::McpServerElicitationRequest { params, .. }
@@ -386,6 +414,7 @@ impl OutgoingMessageSender {
             request_id_to_callback.insert(
                 id,
                 PendingCallbackEntry {
+                    external_auth_owner,
                     verification_owner,
                     verification_auth_revision,
                     verification_identity: verification_identity.clone(),
@@ -407,6 +436,16 @@ impl OutgoingMessageSender {
                     .remove(&outgoing_message_id);
                 return (outgoing_message_id, rx_approve);
             }
+        }
+
+        if let Some(owner) = external_auth_owner
+            && !self.connected_connections.lock().await.contains(&owner)
+        {
+            self.request_id_to_callback
+                .lock()
+                .await
+                .remove(&outgoing_message_id);
+            return (outgoing_message_id, rx_approve);
         }
 
         let outgoing_message = OutgoingMessage::Request(request.clone());
@@ -574,6 +613,11 @@ impl OutgoingMessageSender {
     ) -> Option<(RequestId, PendingCallbackEntry)> {
         let mut callbacks = self.request_id_to_callback.lock().await;
         let entry = callbacks.get(id)?;
+        if let Some(owner) = entry.external_auth_owner
+            && owner != connection_id
+        {
+            return None;
+        }
         if let Some(owner) = entry.verification_owner {
             if owner != connection_id {
                 return None;
@@ -918,6 +962,10 @@ mod user_verification_ownership_tests;
 #[cfg(test)]
 #[path = "user_verification_cancel_context_tests.rs"]
 mod user_verification_cancel_context_tests;
+
+#[cfg(test)]
+#[path = "external_auth_registration_tests.rs"]
+mod external_auth_registration_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1486,15 +1534,17 @@ mod tests {
             OutgoingMessageSender::new(tx, codex_analytics::AnalyticsEventsClient::disabled());
 
         let (request_id, wait_for_result) = outgoing
-            .send_request(ServerRequestPayload::ApplyPatchApproval(
-                ApplyPatchApprovalParams {
+            .send_request_to_connections(
+                /*connection_ids*/ None,
+                ServerRequestPayload::ApplyPatchApproval(ApplyPatchApprovalParams {
                     conversation_id: ThreadId::new(),
                     call_id: "call-id".to_string(),
                     file_changes: HashMap::new(),
                     reason: None,
                     grant_root: None,
-                },
-            ))
+                }),
+                /*thread_id*/ None,
+            )
             .await;
 
         let error = internal_error("refresh failed");

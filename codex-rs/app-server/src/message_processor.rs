@@ -849,6 +849,7 @@ impl MessageProcessor {
         connection_id: ConnectionId,
         request_attestation: bool,
     ) {
+        self.outgoing.connection_initialized(connection_id).await;
         self.account_processor
             .notify_workspace_routing_to_connection(connection_id);
         self.thread_processor
@@ -903,12 +904,10 @@ impl MessageProcessor {
         session_state: &ConnectionSessionState,
     ) {
         session_state.rpc_gate.close().await;
+        self.outgoing.disconnect_connection(connection_id).await;
         self.account_processor
             .gateway_connection_closed(connection_id);
         self.request_serialization_queues.discard_closed().await;
-        self.outgoing
-            .disconnect_user_verification_connection(connection_id)
-            .await;
         session_state.mcp_event_streams.clear().await;
         if timeout(
             CONNECTION_RPC_DRAIN_TIMEOUT,

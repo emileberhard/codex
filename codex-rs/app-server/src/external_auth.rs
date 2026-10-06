@@ -13,6 +13,7 @@ use codex_login::auth::ExternalAuthRefreshReason;
 use tokio::time::Duration;
 use tokio::time::timeout;
 
+use crate::outgoing_message::ConnectionId;
 use crate::outgoing_message::OutgoingMessageSender;
 
 const EXTERNAL_AUTH_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -20,13 +21,19 @@ const EXTERNAL_AUTH_REFRESH_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) struct ExternalAuthBridge {
     outgoing: Arc<OutgoingMessageSender>,
     auth: RwLock<CodexAuth>,
+    connection_id: ConnectionId,
 }
 
 impl ExternalAuthBridge {
-    pub(crate) fn new(outgoing: Arc<OutgoingMessageSender>, auth: CodexAuth) -> Self {
+    pub(crate) fn new(
+        outgoing: Arc<OutgoingMessageSender>,
+        auth: CodexAuth,
+        connection_id: ConnectionId,
+    ) -> Self {
         Self {
             outgoing,
             auth: RwLock::new(auth),
+            connection_id,
         }
     }
 
@@ -41,7 +48,11 @@ impl ExternalAuthBridge {
 
         let (request_id, rx) = self
             .outgoing
-            .send_request(ServerRequestPayload::ChatgptAuthTokensRefresh(params))
+            .send_request_to_connections(
+                Some(&[self.connection_id]),
+                ServerRequestPayload::ChatgptAuthTokensRefresh(params),
+                /*thread_id*/ None,
+            )
             .await;
         let result = match timeout(EXTERNAL_AUTH_REFRESH_TIMEOUT, rx).await {
             Ok(result) => {

@@ -587,3 +587,37 @@ and out-of-scope item IDs return invalid params (`-32602`) with
 Omitted or null cursors preserve normal first-page behavior. Continue anchored
 pages with the returned opaque string `nextCursor`; response fields and
 `backwardsCursor` semantics are unchanged.
+
+# External ChatGPT refresh ownership
+
+`account/login/start` with `chatgptAuthTokens` binds token refresh to that
+connection. Only it receives and may answer `account/chatgptAuthTokens/refresh`.
+Disconnect cancels pending refresh and makes later refresh fail immediately.
+Reconnect requires a new external-token login; another subscriber cannot take
+ownership by answering an old request. Other server requests retain their
+existing routing.
+
+RemoteCoder needs this because several app and launcher clients share a daemon,
+and clients without an auth lifecycle reject unknown server requests. Remove
+this patch when upstream enforces the same delivery, response and disconnect
+contract.
+
+## Upstream proposal draft
+
+**Title:** Route external ChatGPT token refresh to the login connection
+
+External-token authentication delegates renewal to the host that supplied the
+token, but refresh currently broadcasts to all initialized app-server clients
+and accepts the first reply. An unrelated client returning `-32601` can fail
+the host's renewal and its active turn.
+
+Capture the connection from the successful `chatgptAuthTokens` login. Send
+refresh only there, reject replies from other connections, and cancel pending
+refresh when that owner disconnects. Subsequent refresh should fail immediately
+until a connection installs external tokens again. Preserve the existing
+10-second timeout for a connected owner and the public protocol shapes.
+
+The regression cases use synthetic tokens and local mock backends: two
+connections with an unrelated error reply, owner absent before refresh,
+disconnect during refresh, and disconnect racing with callback registration.
+No upstream issue or PR has been submitted.

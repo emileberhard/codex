@@ -19,21 +19,6 @@ impl OutgoingMessageSender {
             .insert(connection_id);
     }
 
-    /// Stop routing ceremonies immediately, without waiting for unrelated RPCs to drain.
-    pub(crate) async fn disconnect_user_verification_connection(
-        &self,
-        connection_id: ConnectionId,
-    ) {
-        self.verification_connections
-            .lock()
-            .await
-            .remove(&connection_id);
-        self.request_id_to_callback
-            .lock()
-            .await
-            .retain(|_, entry| entry.verification_owner != Some(connection_id));
-    }
-
     pub(crate) fn watch_user_verification_auth(self: &Arc<Self>, auth_manager: Arc<AuthManager>) {
         let mut changes = auth_manager.auth_change_receiver();
         if self.verification_auth.set(auth_manager).is_err() {
