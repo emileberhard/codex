@@ -1,3 +1,4 @@
+use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use app_test_support::ChatGptIdTokenClaims;
@@ -12,7 +13,6 @@ use serde_json::json;
 use tempfile::TempDir;
 use test_case::test_case;
 use tokio::time::Duration;
-use tokio::time::Instant;
 use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 use wiremock::Mock;
@@ -172,7 +172,6 @@ async fn external_auth_refresh_connection_ownership(owner_state: &str) -> Result
             })?.into())).await?;
         }
     }
-    let started = Instant::now();
     let completed = timeout(Duration::from_secs(5), async {
         loop {
             match read_jsonrpc_message(&mut consumer).await? {
@@ -182,7 +181,7 @@ async fn external_auth_refresh_connection_ownership(owner_state: &str) -> Result
                 JSONRPCMessage::Notification(notification)
                     if notification.method == "turn/completed" =>
                 {
-                    return Ok::<_, anyhow::Error>(notification.params.unwrap());
+                    return notification.params.context("turn/completed params");
                 }
                 _ => {}
             }
@@ -197,7 +196,6 @@ async fn external_auth_refresh_connection_ownership(owner_state: &str) -> Result
             "failed"
         }
     );
-    assert!(started.elapsed() < Duration::from_secs(5));
     assert_eq!(
         requests.requests().len(),
         if owner_state == "connected" { 2 } else { 1 }
