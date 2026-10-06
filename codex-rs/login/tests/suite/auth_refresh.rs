@@ -1288,6 +1288,63 @@ async fn refresh_token_preserves_credentials_on_server_or_decode_failure() -> Re
 
 #[serial_test::serial(auth_env)]
 #[tokio::test]
+async fn refresh_token_timeout_preserves_credentials() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/oauth/token"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(StdDuration::from_secs(30))
+                .set_body_json(json!({
+                    "access_token": "late-access-token",
+                    "refresh_token": "late-refresh-token"
+                })),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let ctx = RefreshTokenTestContext::new(&server).await?;
+    let initial_tokens = build_tokens(INITIAL_ACCESS_TOKEN, INITIAL_REFRESH_TOKEN);
+    let initial_auth = AuthDotJson {
+        auth_mode: Some(AuthMode::Chatgpt),
+        openai_api_key: None,
+        tokens: Some(initial_tokens.clone()),
+        last_refresh: Some(Utc::now() - Duration::days(1)),
+        agent_identity: None,
+        personal_access_token: None,
+        bedrock_api_key: None,
+        bedrock_access_keys: None,
+    };
+    ctx.write_auth(&initial_auth).await?;
+
+    let started = std::time::Instant::now();
+    let error = tokio::time::timeout(
+        StdDuration::from_secs(25),
+        ctx.auth_manager.refresh_token_from_authority(),
+    )
+    .await
+    .context("refresh request should time out before the outer deadline")?
+    .expect_err("stalled refresh should fail");
+    assert!(started.elapsed() >= StdDuration::from_secs(19));
+    assert!(matches!(error, RefreshTokenError::Transient(_)));
+    assert_eq!(error.failed_reason(), None);
+    assert!(!format!("{error} {error:?}").contains(INITIAL_REFRESH_TOKEN));
+    assert_eq!(ctx.load_auth()?, initial_auth);
+    let cached_auth = ctx
+        .auth_manager
+        .auth_cached()
+        .context("auth should remain cached")?;
+    assert_eq!(cached_auth.get_token_data()?, initial_tokens);
+
+    server.verify().await;
+    Ok(())
+}
+
+#[serial_test::serial(auth_env)]
+#[tokio::test]
 async fn unauthorized_recovery_reloads_then_refreshes_tokens() -> Result<()> {
     skip_if_no_network!(Ok(()));
 

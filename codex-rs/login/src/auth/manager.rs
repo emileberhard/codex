@@ -1635,7 +1635,7 @@ async fn request_chatgpt_token_refresh(
             url: &endpoint,
             client_id: &client_id,
             encoding: TokenEncoding::Json,
-            timeout: None,
+            timeout: Some(Duration::from_secs(/*secs*/ 20)),
             error_body_limit: ErrorBodyLimit::Unlimited,
         },
     );
