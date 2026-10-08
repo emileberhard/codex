@@ -4,6 +4,7 @@
 use super::session::Session;
 use super::session::SessionSettingsUpdate;
 use super::step_settings::StepSettingsUpdate;
+use crate::WithTurnExtensionData;
 use crate::config::ConstraintResult;
 use codex_history::RolloutItem;
 use codex_protocol::protocol::Event;
@@ -41,7 +42,7 @@ impl Session {
 /// Applies standalone thread settings. The caller holds the persistence permit through notification.
 pub(super) async fn update(
     session: &Session,
-    overrides: ThreadSettingsOverrides,
+    overrides: impl Into<WithTurnExtensionData<ThreadSettingsOverrides>>,
 ) -> ConstraintResult<ThreadSettingsSnapshot> {
     let updates = prepare_update(overrides);
     let commit = session.update_settings(updates).await?;
@@ -51,7 +52,13 @@ pub(super) async fn update(
 }
 
 /// Converts protocol overrides into the internal settings update shape.
-pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSettingsUpdate {
+pub(super) fn prepare_update(
+    overrides: impl Into<WithTurnExtensionData<ThreadSettingsOverrides>>,
+) -> SessionSettingsUpdate {
+    let WithTurnExtensionData {
+        request: overrides,
+        turn_extension_init,
+    } = overrides.into();
     let ThreadSettingsOverrides {
         environments,
         runtime_workspace_roots,
@@ -71,6 +78,7 @@ pub(super) fn prepare_update(overrides: ThreadSettingsOverrides) -> SessionSetti
         disabled_plugin_ids,
     } = overrides;
     SessionSettingsUpdate {
+        turn_extension_init,
         step_settings: StepSettingsUpdate {
             model,
             effort,

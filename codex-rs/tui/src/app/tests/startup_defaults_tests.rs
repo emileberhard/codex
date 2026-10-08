@@ -175,21 +175,50 @@ async fn run_until_thread_start(
 
 #[tokio::test]
 async fn fresh_startup_uses_server_defaults_with_explicit_and_managed_precedence() -> Result<()> {
-    for (choice, managed, expected_model, expected_effort) in [
-        ("saved", false, "server-model", "high"),
-        ("cli_model", true, "cli-model", "high"),
-        ("cli_effort", true, "server-model", "low"),
-        ("profile_model", false, "profile-model", "high"),
-        ("profile_effort", false, "server-model", "low"),
-        ("profile_model", true, "profile-model", "high"),
-        ("profile_effort", true, "server-model", "low"),
-        ("managed", true, "managed-model", "medium"),
+    for (choice, managed, expected_model, expected_effort, expected_provider) in [
+        ("saved", false, None, None, None),
+        ("cli_model", true, Some("cli-model"), None, None),
+        ("kv_model", false, Some("kv-model"), None, None),
+        (
+            "migration",
+            false,
+            Some("upgraded-model"),
+            Some("high"),
+            None,
+        ),
+        ("cli_effort", true, None, Some("low"), None),
+        ("cli_provider", false, None, None, Some("openai")),
+        ("kv_provider", false, None, None, Some("openai")),
+        (
+            "profile_model",
+            false,
+            Some("profile-model"),
+            Some("high"),
+            None,
+        ),
+        (
+            "profile_effort",
+            false,
+            Some("server-model"),
+            Some("low"),
+            None,
+        ),
+        ("managed", true, None, None, None),
     ] {
         let client_home = tempdir()?;
         let server_home = tempdir()?;
         std::fs::write(
             client_home.path().join("config.toml"),
-            "model = \"client-model\"\nmodel_reasoning_effort = \"low\"\n",
+            r#"
+model = "client-model"
+model_reasoning_effort = "low"
+model_provider = "client-provider"
+[model_providers.client-provider]
+name = "Client provider"
+base_url = "http://127.0.0.1:9/v1"
+wire_api = "responses"
+requires_openai_auth = false
+"#,
         )?;
         std::fs::write(
             server_home.path().join("config.toml"),
@@ -206,6 +235,13 @@ async fn fresh_startup_uses_server_defaults_with_explicit_and_managed_precedence
         let mut loader_overrides = LoaderOverrides::without_managed_config_for_tests();
         match choice {
             "cli_model" => harness_overrides.model = Some("cli-model".to_string()),
+            "kv_model" => cli_kv_overrides.extend([
+                ("model".into(), "earlier-model".into()),
+                ("model".into(), "kv-model".into()),
+            ]),
+            "migration" => harness_overrides.model = Some("old-model".into()),
+            "cli_provider" => harness_overrides.model_provider = Some("openai".into()),
+            "kv_provider" => cli_kv_overrides.push(("model_provider".into(), "openai".into())),
             "cli_effort" => cli_kv_overrides.push((
                 "model_reasoning_effort".to_string(),
                 TomlValue::String("low".to_string()),
@@ -225,6 +261,11 @@ async fn fresh_startup_uses_server_defaults_with_explicit_and_managed_precedence
             }
             _ => {}
         }
+        let mut launch_choices = crate::app_server_session::StartupLaunchChoices::from_launch(
+            &cli_kv_overrides,
+            &harness_overrides,
+            &loader_overrides,
+        );
         let mut config = ConfigBuilder::default()
             .codex_home(client_home.path().to_path_buf())
             .loader_overrides(loader_overrides)
@@ -249,44 +290,62 @@ async fn fresh_startup_uses_server_defaults_with_explicit_and_managed_precedence
         )
         .await?;
         server = server.with_remote_cwd_override(Some(server_config.cwd.to_path_buf()));
-        let bootstrap = server.bootstrap(&config).await?;
+        server.bootstrap(&config).await?;
         assert!(
             prepare_fresh_startup_config(
                 &mut config,
                 &server,
                 &cli_kv_overrides,
                 &harness_overrides,
+                &EnvironmentManager::default_for_tests()
             )
             .await?
+            .server_defaults_read
         );
-        let selected_model = startup_model(&config, &bootstrap, /*server_defaults_read*/ true);
-        let started = crate::app_server_session::start_thread_with_request_handle(
+        if choice == "migration" {
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            apply_accepted_model_migration(
+                &mut config,
+                &mut launch_choices,
+                &AppEventSender::new(tx),
+                "old-model".into(),
+                "upgraded-model".into(),
+                ReasoningEffortConfig::High,
+            );
+        }
+        crate::app_server_session::start_thread_with_request_handle(
             server.request_handle(),
             &crate::local_settings::LocalSettings::from(&config),
             config,
             server.thread_params_mode(),
             server.remote_cwd_override().map(Path::to_path_buf),
             server.thread_tool_transport(),
+            launch_choices,
         )
         .await?;
-        assert_eq!(selected_model, expected_model, "{choice}");
         let starts = recorded_params(&requests, "thread/start");
         assert_eq!(starts.len(), 1, "{choice}");
         assert_eq!(
             (
-                &starts[0]["model"],
-                &starts[0]["config"]["model_reasoning_effort"]
+                starts[0]["model"].clone(),
+                starts[0]["config"].get("model_reasoning_effort").cloned(),
+                starts[0]["modelProvider"].clone()
             ),
             (
-                &serde_json::json!(expected_model),
-                &serde_json::json!(expected_effort)
+                serde_json::json!(expected_model),
+                expected_effort.map(serde_json::Value::from),
+                serde_json::json!(expected_provider),
             ),
             "{choice}"
         );
-        assert_eq!(started.session.model, expected_model, "{choice}");
         assert_eq!(
-            recorded_params(&requests, "config/read"),
-            vec![serde_json::json!({"cwd": server_config.cwd.display().to_string()})],
+            recorded_params(&requests, "config/read")
+                .into_iter()
+                .filter(|params| !params["cwd"].is_null())
+                .collect::<Vec<_>>(),
+            vec![
+                serde_json::json!({"cwd": server_config.cwd.display().to_string(), "includeLayers": true})
+            ],
         );
         server.shutdown().await?;
         proxy.await??;
@@ -307,7 +366,7 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         )?;
         std::fs::write(
             server_home.path().join("config.toml"),
-            "model_reasoning_effort = \"high\"\n",
+            "model_reasoning_effort = \"high\"\nsandbox_mode = \"read-only\"\n",
         )?;
         let mut config = ConfigBuilder::default()
             .codex_home(client_home.path().to_path_buf())
@@ -341,14 +400,21 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         if override_cwd {
             server = server.with_remote_cwd_override(Some(launch_cwd.path().to_path_buf()));
         }
+        assert!(config.config_layer_stack.is_projectless());
         let bootstrap = server.bootstrap(&config).await?;
         assert_eq!(bootstrap.default_model, "stale-client-model");
-        let defaults_read =
-            prepare_fresh_startup_config(&mut config, &server, &[], &ConfigOverrides::default())
-                .await?;
-        assert!(defaults_read);
+        let defaults_read = prepare_fresh_startup_config(
+            &mut config,
+            &server,
+            &[],
+            &ConfigOverrides::default(),
+            &EnvironmentManager::default_for_tests(),
+        )
+        .await?;
+        assert!(defaults_read.server_defaults_read);
+        assert!(!defaults_read.prompt_windows_sandbox);
         assert_eq!(config.model, None);
-        let selected_model = startup_model(&config, &bootstrap, defaults_read);
+        let selected_model = startup_model(&config, &bootstrap, defaults_read.server_defaults_read);
         assert_ne!(selected_model, "stale-client-model");
         let started = crate::app_server_session::start_thread_with_request_handle(
             server.request_handle(),
@@ -357,13 +423,24 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
             server.thread_params_mode(),
             server.remote_cwd_override().map(Path::to_path_buf),
             server.thread_tool_transport(),
+            crate::app_server_session::StartupLaunchChoices::default(),
         )
         .await?;
         assert_eq!(started.session.model, selected_model);
+        assert!(
+            !started
+                .session
+                .permission_profile
+                .file_system_sandbox_policy()
+                .can_write_local_path_with_cwd(
+                    started.session.cwd.as_path(),
+                    started.session.cwd.as_path()
+                )
+        );
         let starts = recorded_params(&requests, "thread/start");
         assert_eq!(starts.len(), 1);
         assert_eq!(starts[0]["model"], serde_json::Value::Null);
-        assert_eq!(starts[0]["config"]["model_reasoning_effort"], "high");
+        assert!(starts[0]["config"].get("model_reasoning_effort").is_none());
         let (mut app, _, _) = make_test_app_with_channels().await;
         app.chat_widget.handle_thread_session_quiet(started.session);
         if !remote {
@@ -382,9 +459,14 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         } else {
             ".".to_string()
         };
-        assert_eq!(
-            recorded_params(&requests, "config/read"),
-            vec![serde_json::json!({"cwd": expected_cwd})]
+        let reads = recorded_params(&requests, "config/read")
+            .into_iter()
+            .filter(|params| !params["cwd"].is_null())
+            .collect::<Vec<_>>();
+        assert!(!reads.is_empty());
+        assert!(
+            reads.iter().all(|params| params["cwd"] == expected_cwd),
+            "{reads:?}"
         );
         server.shutdown().await?;
         proxy.await??;
@@ -426,10 +508,7 @@ async fn fresh_startup_falls_back_only_for_unsupported_config_read() -> Result<(
                 &starts[0]["model"],
                 &starts[0]["config"]["model_reasoning_effort"]
             ),
-            (
-                &serde_json::json!("client-model"),
-                &serde_json::json!("low")
-            )
+            (&serde_json::Value::Null, &serde_json::Value::Null)
         );
         tokio::time::timeout(Duration::from_secs(/*secs*/ 15), proxy).await???;
     }
@@ -489,10 +568,7 @@ async fn startup_reads_server_defaults_before_starting_thread() -> Result<()> {
             &starts[0]["model"],
             &starts[0]["config"]["model_reasoning_effort"]
         ),
-        (
-            &serde_json::json!("server-model"),
-            &serde_json::json!("high")
-        ),
+        (&serde_json::Value::Null, &serde_json::Value::Null),
     );
     tokio::time::timeout(Duration::from_secs(/*secs*/ 15), proxy).await???;
     Ok(())

@@ -326,7 +326,9 @@ pub(super) async fn validate_thread_for_paginated_reads(
                 &resolved.path,
             )
             .await?;
-            return store.resolve_rollout_lineage(thread_id).await;
+            return store
+                .resolve_rollout_lineage(thread_id, /*initial_path*/ None)
+                .await;
         }
         materialize_paginated_rollout(
             store,
@@ -335,7 +337,9 @@ pub(super) async fn validate_thread_for_paginated_reads(
             ProjectionTarget::Current,
         )
         .await?;
-        store.resolve_rollout_lineage(thread_id).await?
+        store
+            .resolve_rollout_lineage(thread_id, /*initial_path*/ None)
+            .await?
     };
 
     // Imported ancestors have canonical JSONL but may have no local SQLite projection. Read

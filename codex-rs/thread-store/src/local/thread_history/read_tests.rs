@@ -1674,7 +1674,7 @@ async fn inherited_projection_re_resolves_moved_path_and_rejects_missing_bytes()
         /*next_ordinal*/ 2,
     );
     let lineage = store
-        .resolve_rollout_lineage(child_id)
+        .resolve_rollout_lineage(child_id, /*initial_path*/ None)
         .await
         .expect("resolve active ancestor");
     assert_eq!(lineage.segments()[0].rollout_path, active_path);

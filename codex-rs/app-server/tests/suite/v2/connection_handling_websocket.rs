@@ -512,6 +512,7 @@ pub(super) async fn spawn_websocket_server_with_args(
         .stderr(Stdio::piped())
         .env("CODEX_HOME", codex_home)
         .env("RUST_LOG", "warn")
+        .env("OTEL_METRIC_EXPORT_INTERVAL", "200")
         .envs(environment.iter().copied());
 
     let mut process = cmd

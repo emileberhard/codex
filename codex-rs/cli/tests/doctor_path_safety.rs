@@ -86,15 +86,10 @@ wire_api = "responses"
         ] {
             #[cfg(unix)]
             {
-                use std::os::unix::fs::PermissionsExt;
                 let executable = bin.join(name);
-                std::fs::write(
+                codex_utils_cargo_bin::write_executable(
                     &executable,
                     "#!/bin/sh\nprintf 'helper ran\\n' >> \"$CODEX_TEST_HELPER_MARKER\"\nexit 0\n",
-                )?;
-                std::fs::set_permissions(
-                    executable,
-                    std::fs::Permissions::from_mode(/*mode*/ 0o755),
                 )?;
             }
             #[cfg(windows)]
@@ -497,6 +492,7 @@ fn filesystem_probe_does_not_load_configuration() -> Result<()> {
 #[tokio::test]
 async fn interactive_tmux_startup_does_not_execute_workspace_helpers() -> Result<()> {
     let fixture = Fixture::new()?;
+    std::fs::create_dir(fixture.workspace.join(".codex"))?;
     let command = fixture.command()?;
     let mut env: std::collections::HashMap<String, String> = std::env::vars().collect();
     for (key, value) in command.get_envs() {

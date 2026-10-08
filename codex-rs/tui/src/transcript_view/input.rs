@@ -20,6 +20,7 @@ pub(crate) enum ViewAction {
     Changed,
     Copy(String),
     CopyOnSelect(String),
+    PrimarySelection(String),
     CopyAndFollow(String),
     OpenLink(String),
 }
@@ -148,8 +149,11 @@ impl TranscriptView {
                 || (modifiers == KeyModifiers::NONE
                     && matches!(code, KeyCode::PageUp | KeyCode::PageDown));
         }
-        self.is_search_active()
-            && (matches!(code, KeyCode::Esc | KeyCode::Enter)
+        self.search.is_active()
+            && (code == KeyCode::Esc
+                || (code == KeyCode::Enter && self.is_search_editing())
+                || (modifiers == KeyModifiers::NONE
+                    && matches!(code, KeyCode::PageUp | KeyCode::PageDown))
                 || (modifiers == KeyModifiers::CONTROL
                     && matches!(code, KeyCode::Char('c' | 'n' | 'p'))))
     }
@@ -269,10 +273,13 @@ impl TranscriptView {
                 if let Some(link) = link {
                     return Some(ViewAction::OpenLink(link));
                 }
-                if self.copy_on_select
-                    && let Some(text) = selected.filter(|text| !text.is_empty())
-                {
-                    return Some(ViewAction::CopyOnSelect(text));
+                if let Some(text) = selected.filter(|text| !text.is_empty()) {
+                    if self.copy_on_select {
+                        return Some(ViewAction::CopyOnSelect(text));
+                    }
+                    if self.primary_selection {
+                        return Some(ViewAction::PrimarySelection(text));
+                    }
                 }
             }
             _ => return None,

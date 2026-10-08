@@ -15,7 +15,9 @@
 //! breaks, interior separators hang off the preceding row without changing the editable text.
 //! Visible web URLs carry their complete terminal hyperlink destination across wrapped rows;
 //! masked rendering never exposes hyperlink destinations.
-//! Mouse selection uses those same visual rows and keeps graphemes and elements atomic.
+//! Mouse selection and wheel browsing use those same visual rows and keep graphemes and elements
+//! atomic. Wheel browsing leaves the caret in place; moving or editing returns to caret following.
+//! The editing module resolves replacement targets shared by insertion and paste-context inspection.
 
 use crate::key_hint::KeyBindingListExt;
 use crate::key_hint::is_altgr;
@@ -50,12 +52,14 @@ use std::ops::Range;
 use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 
+mod editing;
 mod hyperlinks;
 mod mouse;
 mod vim;
 mod vim_commands;
 mod vim_search;
 mod wrapping;
+
 use self::vim::VimMode;
 use self::vim::VimMotion;
 use self::vim::VimOperator;
@@ -67,6 +71,7 @@ use self::vim_commands::VimCommandState;
 use self::vim_commands::VimEditTarget;
 use self::vim_commands::VimInsertPosition;
 pub(crate) use self::vim_commands::VimPersistentState;
+pub(crate) use editing::EditTarget;
 
 const WORD_SEPARATORS: &str = "`~!@#$%^&*()-=+[{]}\\|;:'\",.<>/?";
 
@@ -169,7 +174,15 @@ struct WrapCache {
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct TextAreaState {
     /// Index into wrapped lines of the first visible line.
-    scroll: u16,
+    pub(in crate::bottom_pane) scroll: u16,
+    /// Caret at the time of manual scrolling. A changed caret resumes following automatically.
+    manual_cursor: Option<usize>,
+}
+
+impl TextAreaState {
+    pub(crate) fn follow_cursor(&mut self) {
+        self.manual_cursor = None;
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -441,16 +454,6 @@ impl TextArea {
         &self.text
     }
 
-    pub fn insert_str(&mut self, text: &str) {
-        let replaced_selection = !text.is_empty() && self.delete_mouse_selection();
-        self.record_vim_inserted_text(text);
-        if self.is_vim_replace_mode() && !replaced_selection {
-            self.replace_vim_text(text);
-        } else {
-            self.insert_str_at(self.cursor_pos, text);
-        }
-    }
-
     pub fn insert_str_at(&mut self, pos: usize, text: &str) {
         self.mouse_selection = None;
         self.clear_vim_replace_recovery();
@@ -531,20 +534,18 @@ impl TextArea {
 
     /// Returns an on-screen cursor position within `area`, accounting for wrapping and scrolling.
     ///
-    /// Returns `None` when the viewport has no visible cells.
+    /// Returns `None` when the viewport or caret is not visible.
     pub fn cursor_pos_with_state(&self, area: Rect, state: TextAreaState) -> Option<(u16, u16)> {
         if area.is_empty() {
             return None;
         }
 
         let lines = self.wrapped_lines(area.width);
-        let effective_scroll = self.effective_scroll(area, &lines, state.scroll);
+        let effective_scroll = self.effective_scroll(area, &lines, state);
         let (i, col) = wrapping::cursor_position(&self.text, &lines, area.width, self.cursor_pos)?;
-        let screen_row = i
-            .saturating_sub(effective_scroll as usize)
-            .try_into()
-            .unwrap_or(0);
-        Some((area.x + col as u16, area.y + screen_row))
+        let screen_row = i.checked_sub(usize::from(effective_scroll))?;
+        (screen_row < usize::from(area.height))
+            .then(|| (area.x + col as u16, area.y + screen_row as u16))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1723,17 +1724,6 @@ impl TextArea {
         true
     }
 
-    pub fn insert_element(&mut self, text: &str) -> u64 {
-        self.delete_mouse_selection();
-        let start = self.clamp_pos_for_insertion(self.cursor_pos);
-        self.insert_str_at(start, text);
-        let end = start + text.len();
-        let id = self.add_element(start..end);
-        // Place cursor at end of inserted element
-        self.set_cursor(end);
-        id
-    }
-
     fn add_element(&mut self, range: Range<usize>) -> u64 {
         let id = self.next_element_id();
         self.elements.push(TextElement { id, range });
@@ -2111,10 +2101,10 @@ impl TextArea {
     /// Calculate the scroll offset that should be used to satisfy the
     /// invariants given the current area size and wrapped lines.
     ///
-    /// - Cursor is always on screen.
+    /// - Cursor is on screen unless the user scrolled away without moving it.
     /// - No scrolling if content fits in the area.
-    fn effective_scroll(&self, area: Rect, lines: &[Range<usize>], current_scroll: u16) -> u16 {
-        let total_lines = lines.len() as u16;
+    fn effective_scroll(&self, area: Rect, lines: &[Range<usize>], state: TextAreaState) -> u16 {
+        let total_lines = u16::try_from(lines.len()).unwrap_or(u16::MAX);
         if area.height >= total_lines {
             return 0;
         }
@@ -2124,7 +2114,10 @@ impl TextArea {
                 .map_or(0, |(row, _)| row) as u16;
 
         let max_scroll = total_lines.saturating_sub(area.height);
-        let mut scroll = current_scroll.min(max_scroll);
+        let mut scroll = state.scroll.min(max_scroll);
+        if state.manual_cursor == Some(self.cursor_pos) {
+            return scroll;
+        }
 
         // Ensure cursor is visible within [scroll, scroll + area_height)
         if cursor_line_idx < scroll {
@@ -2156,7 +2149,7 @@ impl StatefulWidgetRef for &TextArea {
     fn render_ref(&self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         self.rendered_area.set(area);
         let lines = self.wrapped_lines(area.width);
-        let scroll = self.effective_scroll(area, &lines, state.scroll);
+        let scroll = self.effective_scroll(area, &lines, *state);
         state.scroll = scroll;
 
         let start = scroll as usize;
@@ -2175,7 +2168,7 @@ impl TextArea {
     ) {
         self.rendered_area.set(area);
         let lines = self.wrapped_lines(area.width);
-        let scroll = self.effective_scroll(area, &lines, state.scroll);
+        let scroll = self.effective_scroll(area, &lines, *state);
         state.scroll = scroll;
 
         let start = scroll as usize;
@@ -2197,7 +2190,7 @@ impl TextArea {
     ) {
         self.rendered_area.set(area);
         let lines = self.wrapped_lines(area.width);
-        let scroll = self.effective_scroll(area, &lines, state.scroll);
+        let scroll = self.effective_scroll(area, &lines, *state);
         state.scroll = scroll;
 
         let start = scroll as usize;
@@ -4263,7 +4256,10 @@ mod tests {
         let area = Rect::new(2, 5, 20, 3);
         // Even if an absurd scroll is provided, when content fits the area the
         // effective scroll is 0 and the cursor position matches cursor_pos.
-        let bad_state = TextAreaState { scroll: 999 };
+        let bad_state = TextAreaState {
+            scroll: 999,
+            ..Default::default()
+        };
         let (x1, y1) = t.cursor_pos(area).unwrap();
         let (x2, y2) = t.cursor_pos_with_state(area, bad_state).unwrap();
         assert_eq!((x2, y2), (x1, y1));
@@ -4277,7 +4273,10 @@ mod tests {
         // Put cursor somewhere near the end so it's definitely below the first window.
         t.set_cursor(t.text().len().saturating_sub(2));
         let small_area = Rect::new(0, 0, wrap_width, 2);
-        let state = TextAreaState { scroll: 0 };
+        let state = TextAreaState {
+            scroll: 0,
+            ..Default::default()
+        };
         let (_x, y) = t.cursor_pos_with_state(small_area, state).unwrap();
         assert_eq!(y, small_area.y + small_area.height - 1);
 
@@ -4291,6 +4290,7 @@ mod tests {
         let area = Rect::new(0, 0, wrap_width, 3);
         let state = TextAreaState {
             scroll: lines.saturating_mul(2),
+            ..Default::default()
         };
         let (_x, y) = t.cursor_pos_with_state(area, state).unwrap();
         assert_eq!(y, area.y);
