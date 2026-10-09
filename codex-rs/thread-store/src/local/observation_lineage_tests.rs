@@ -406,20 +406,22 @@ async fn observation_migrates_e520_lifecycle_versions_from_canonical_history() {
     ))
     .await
     .unwrap();
+    let mut transaction = pool.begin().await.unwrap();
     sqlx::raw_sql(
         "DROP TRIGGER thread_observation_turn_insert; DROP TRIGGER thread_observation_turn_update;",
     )
-    .execute(&pool)
+    .execute(&mut *transaction)
     .await
     .unwrap();
     let old = include_str!(
         "../../../state/thread_history_migrations/1000002_thread_observation_versions.sql"
     );
     sqlx::raw_sql(&old[old.find("CREATE TRIGGER").unwrap()..])
-        .execute(&pool)
+        .execute(&mut *transaction)
         .await
         .unwrap();
-    sqlx::raw_sql("ALTER TABLE thread_item_versions DROP COLUMN started_at_ms; ALTER TABLE thread_turn_versions DROP COLUMN root_turn_id; ALTER TABLE thread_turns DROP COLUMN root_turn_id; DELETE FROM _sqlx_migrations WHERE version IN (8, 1000004);").execute(&pool).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE thread_item_versions DROP COLUMN started_at_ms; ALTER TABLE thread_turn_versions DROP COLUMN root_turn_id; ALTER TABLE thread_turns DROP COLUMN root_turn_id; DELETE FROM _sqlx_migrations WHERE version IN (8, 1000004);").execute(&mut *transaction).await.unwrap();
+    transaction.commit().await.unwrap();
     pool.close().await;
     let migrated = projection_store(home.path()).await;
     let after = migrated.list_items(items).await.unwrap();
