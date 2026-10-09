@@ -319,8 +319,6 @@ async fn v2_cold_mail_settles_before_restart_readiness(cancel: bool) {
     fixture.evict().await;
     let communication = message("racing_fence");
     let mut delivery = Box::pin(fixture.send(communication.clone()));
-    // Single-thread Tokio: the real delivery has spawned its owned checkpoint, but that
-    // task cannot run until this test yields. This is a deterministic preparation boundary.
     assert!(futures::poll!(delivery.as_mut()).is_pending());
     fixture.harness.manager.begin_new_work_fence();
     assert!(!fixture.harness.manager.poll_new_work_fence());
@@ -351,7 +349,6 @@ async fn v2_cold_mail_settles_before_restart_readiness(cancel: bool) {
 async fn v2_cold_mail_refuses_contended_writer_without_acknowledging() {
     let fixture = MailFixture::new().await;
     fixture.evict().await;
-    // A real native writer has won resume but has not published a loaded session yet.
     let writer = fixture.open_writer().await;
     let refusal = fixture
         .send(message("refused"))
@@ -382,8 +379,6 @@ async fn v2_failed_eviction_keeps_mail_and_refuses_restart_readiness() {
         .await
         .expect("loaded acknowledgement");
     fixture.queued().await;
-    // Remove the actual persistence owner while leaving the live registry intact.
-    // No mock supplies the durability or the restart outcome.
     fixture
         .child
         .session

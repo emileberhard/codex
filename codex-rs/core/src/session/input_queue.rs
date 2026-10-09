@@ -98,8 +98,6 @@ pub(crate) struct InputQueue {
     activity_tx: watch::Sender<InputQueueActivity>,
     controller: Option<(ThreadId, Arc<dyn AgentControl>, watch::Receiver<bool>)>,
     mailbox_pending_mails: Mutex<VecDeque<PendingMailboxCommunication>>,
-    /// A failed eviction checkpoint retains its process admission until the input owner
-    /// consumes or durably retries the unread mail. Restart must not advertise readiness.
     mailbox_restart_admission: std::sync::Mutex<Option<tokio::sync::OwnedRwLockReadGuard<()>>>,
 }
 

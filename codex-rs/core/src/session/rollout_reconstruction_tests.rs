@@ -348,7 +348,6 @@ async fn record_initial_history_consumes_checkpointed_native_mail_once() {
             conversation_id: ThreadId::default(),
             history: Arc::new(vec![
                 RolloutItem::InterAgentCommunication(checkpointed.clone()),
-                // The live owner consumed the same identified input after a failed checkpoint.
                 RolloutItem::ResponseItem(ResponseItemEnvelope::new(
                     checkpointed.to_model_input_item(),
                 )),

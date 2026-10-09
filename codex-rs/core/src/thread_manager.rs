@@ -466,8 +466,6 @@ impl NewWorkAdmission {
         Ok(admission)
     }
 
-    /// Residency teardown can also belong to an already-authorized restart recovery.
-    /// It creates no new thread/turn admission; those operations retain their own gate.
     pub(crate) fn acquire_residency_checkpoint(
         &self,
     ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {

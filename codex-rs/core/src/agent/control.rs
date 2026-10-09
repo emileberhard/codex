@@ -184,8 +184,6 @@ impl LocalAgentControl {
                 .await?;
             Some(admission)
         } else {
-            // Both delivery paths below hold process admission until either the loaded
-            // submission has dispatched or the unloaded input has been checkpointed.
             None
         };
         self.send_inter_agent_communication_after_capacity_check(
@@ -289,11 +287,7 @@ impl LocalAgentControl {
                 .get_or_insert_with(|| codex_protocol::ResponseItemId::new("amsg"));
             let communication_for_log =
                 crate::agent_communication::logging_enabled().then(|| communication.clone());
-            // The store serializes this checkpoint with resume under recipient writer
-            // ownership. If resume already won, refuse rather than acknowledge lost mail.
             let state = Arc::clone(state);
-            // Cancellation must not release process admission or publication exclusion
-            // while the native writer still owns an accepted checkpoint operation.
             return tokio::spawn(async move {
                 let _admission = admission;
                 let _membership = membership;

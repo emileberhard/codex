@@ -3,9 +3,6 @@ use crate::session::Session;
 use codex_protocol::protocol::InterAgentCommunication;
 
 impl InputQueue {
-    /// Consume idle native mail into canonical replay before residency drops its owner.
-    /// The residency write guard excludes delivery and the caller owns the operation through
-    /// cancellation. Failure leaves both input and restart admission with this queue.
     #[expect(
         clippy::await_holding_invalid_type,
         reason = "idle mailbox consumption is atomic with its durable checkpoint; the asynchronous queue lock excludes receivers and no storage operation calls back into this queue"
@@ -76,8 +73,6 @@ impl Session {
             }
         };
         if !mail.is_empty() {
-            // Preserve the live context too: a subsequent shutdown failure must not strand
-            // checkpointed mail outside the still-registered session's model history.
             let context = self.new_inject_items_context().await;
             let items: Vec<_> = mail
                 .iter()

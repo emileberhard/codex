@@ -182,8 +182,6 @@ pub(super) async fn checkpoint_unloaded_agent_mail(
             message: format!("thread {thread_id} has a mismatched canonical session header"),
         });
     }
-    // Resume does not rewrite the header. This uses the recipient's persisted environment,
-    // without creating a session, turn, user input, or metadata update from the sender.
     let config = RolloutConfig {
         codex_home: store.config.codex_home.clone(),
         sqlite: store.config.sqlite.clone(),
@@ -209,8 +207,6 @@ pub(super) async fn checkpoint_unloaded_agent_mail(
     .await
     .map_err(thread_store_io_error)?;
     let written = checkpoint_mail_to_recorder(store, thread_id, &recorder, mail).await;
-    // Shutdown is awaited even on failure: the background writer, rather than the caller,
-    // owns the cross-process lock until its queued commands finish.
     let closed = recorder.shutdown().await.map_err(thread_store_io_error);
     written?;
     closed?;
@@ -251,8 +247,6 @@ async fn checkpoint_mail_to_recorder(
             message: "agent checkpoints require identified queue-only mail".into(),
         });
     }
-    // Finish a previous partial batch before reading its receipt. Retrying must neither
-    // append buffered inputs again nor acknowledge an unresolved writer failure.
     recorder.flush().await.map_err(thread_store_io_error)?;
     let context =
         super::model_context::load_from_rollout_path(store, thread_id, recorder.rollout_path())
@@ -289,8 +283,6 @@ async fn checkpoint_mail_to_recorder(
                 });
             }
         } else if consumed.contains(&id) {
-            // An older model-visible record cannot prove the complete native envelope.
-            // Never acknowledge a new payload under an already consumed identity.
             return Err(ThreadStoreError::InvalidRequest {
                 message: format!("agent message identity {id} has already been consumed"),
             });

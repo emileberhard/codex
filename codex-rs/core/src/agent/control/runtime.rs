@@ -111,8 +111,6 @@ pub(crate) struct LocalAgentRuntime {
         Arc<OnceLock<Arc<dyn ThreadInstructionsProvider>>>,
     pub(super) registry: Arc<AgentRegistry>,
     pub(super) residency: Arc<V2Residency>,
-    // Native cold mail is checkpointed directly into canonical replay. Keep the controller's
-    // idle subscription alive; loaded sessions own their pending input in InputQueue.
     pub(super) mailbox_updates: Arc<tokio::sync::watch::Sender<bool>>,
     /// Shared by every session in this tree, including private delegates.
     pub(crate) shutdown: CancellationToken,

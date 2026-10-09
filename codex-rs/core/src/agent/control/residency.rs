@@ -206,8 +206,6 @@ impl V2Residency {
                     teardown.complete();
                     return false;
                 }
-                // Checkpoint I/O can yield to a newly admitted turn. Its native input is
-                // now durable, but an active recipient must keep its existing residency.
                 if !is_unloadable(candidate_thread.as_ref()).await {
                     teardown.complete();
                     return false;
@@ -219,8 +217,6 @@ impl V2Residency {
                     teardown.complete();
                     return false;
                 }
-                // Unread inputs are already canonical. Replay, rather than an additional
-                // in-memory mailbox, delivers them exactly once after lazy reload/restart.
                 let environments = candidate_thread.environment_selections().await;
                 let mut threads = manager.threads.write().await;
                 if threads
