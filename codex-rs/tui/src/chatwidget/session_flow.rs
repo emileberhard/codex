@@ -57,6 +57,7 @@ impl ChatWidget {
                 session.windows_sandbox_host
             };
         self.invalidate_permission_discovery();
+        self.permission_discovery = None;
         self.permission_profiles_menu_opened = false;
         self.transcript.reset_copy_history();
         let history_metadata = session.message_history.unwrap_or_default();
@@ -71,7 +72,8 @@ impl ChatWidget {
         let connector_scope_changed = previous_thread_id != Some(session.thread_id)
             || self.config.cwd.as_path() != session.cwd.as_path();
         self.thread_id = Some(session.thread_id);
-        self.daybreak_enabled = session.daybreak_enabled
+        self.daybreak_enabled = self.config.features.enabled(Feature::CliDaybreak)
+            && session.daybreak_enabled
             && !matches!(display, SessionConfiguredDisplay::SideConversation);
         #[cfg(target_os = "windows")]
         if self.windows_sandbox_local_server

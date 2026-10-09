@@ -76,7 +76,7 @@ pub(super) async fn page_turn_rows(
         if let Some(boundary) = cursor.as_ref().and_then(|cursor| cursor.boundary)
             && segment.rollout_id() == boundary.thread_id
         {
-            query.push("SELECT t.thread_id, t.turn_id, t.rollout_ordinal, v.status, v.error_json, v.started_at, v.completed_at, v.duration_ms, v.first_user_item_id, v.final_agent_item_id FROM thread_turns t JOIN thread_turn_versions v ON v.thread_id = t.thread_id AND v.turn_id = t.turn_id WHERE v.version_ordinal = (SELECT MAX(prior.version_ordinal) FROM thread_turn_versions prior WHERE prior.thread_id = t.thread_id AND prior.turn_id = t.turn_id AND prior.version_ordinal < ")
+            query.push("SELECT t.thread_id, t.turn_id, t.rollout_ordinal, v.root_turn_id, v.status, v.error_json, v.started_at, v.completed_at, v.duration_ms, v.first_user_item_id, v.final_agent_item_id FROM thread_turns t JOIN thread_turn_versions v ON v.thread_id = t.thread_id AND v.turn_id = t.turn_id WHERE v.version_ordinal = (SELECT MAX(prior.version_ordinal) FROM thread_turn_versions prior WHERE prior.thread_id = t.thread_id AND prior.turn_id = t.turn_id AND prior.version_ordinal < ")
                 .push_bind(sqlite_integer(boundary.end_ordinal_exclusive)?)
                 .push(")");
         } else {
@@ -89,25 +89,14 @@ pub(super) async fn page_turn_rows(
             query.push("), ");
         }
         query.push(if matches!(items_view, StoredTurnItemsView::Summary) {
-            r#"
-page_turns AS (
-SELECT
-    turn_id,
-    rollout_ordinal,
-    status,
-    error_json,
-    started_at,
-    completed_at,
-    duration_ms,
-    first_user_item_id,
-    final_agent_item_id
-FROM observation_turns AS thread_turns
-WHERE thread_id =
-            "#
+            "page_turns AS ("
         } else {
-            r#"
-SELECT
+            ""
+        });
+        query.push(
+            r#"SELECT
     turn_id,
+    root_turn_id,
     rollout_ordinal,
     status,
     error_json,
@@ -118,8 +107,8 @@ SELECT
     final_agent_item_id
 FROM observation_turns AS thread_turns
 WHERE thread_id =
-            "#
-        });
+            "#,
+        );
         query.push_bind(segment.rollout_id().to_string());
         push_segment_range(&mut query, segment)?;
         for newer_segment in &lineage.segments()[segment_index + 1..] {
@@ -515,7 +504,7 @@ fn push_visible_items(
 ) -> ThreadStoreResult<()> {
     if let Some(end) = segment.end_ordinal() {
         query.push(
-            "SELECT i.thread_id, i.turn_id, i.item_id, i.rollout_ordinal, i.created_at_ms, i.started_at_ms, v.rollout_ordinal AS updated_at_ordinal, v.item_json, v.is_complete, v.completed_at_ms FROM thread_items i JOIN thread_item_versions v ON v.thread_id = i.thread_id AND v.turn_id = i.turn_id AND v.item_id = i.item_id WHERE i.thread_id = ",
+            "SELECT i.thread_id, i.turn_id, i.item_id, i.rollout_ordinal, i.created_at_ms, v.started_at_ms, v.rollout_ordinal AS updated_at_ordinal, v.item_json, v.is_complete, v.completed_at_ms FROM thread_items i JOIN thread_item_versions v ON v.thread_id = i.thread_id AND v.turn_id = i.turn_id AND v.item_id = i.item_id WHERE i.thread_id = ",
         ).push_bind(segment.rollout_id().to_string())
             .push(" AND v.rollout_ordinal = (SELECT MAX(prior.rollout_ordinal) FROM thread_item_versions prior WHERE prior.thread_id = i.thread_id AND prior.turn_id = i.turn_id AND prior.item_id = i.item_id AND prior.rollout_ordinal < ")
             .push_bind(sqlite_integer(end)?).push(")");

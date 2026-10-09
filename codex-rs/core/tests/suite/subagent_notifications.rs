@@ -51,7 +51,7 @@ use core_test_support::responses::strip_metadata_from_json;
 use core_test_support::responses::strip_response_item_ids_from_json;
 use core_test_support::skip_if_no_network;
 use core_test_support::test_codex::TestCodex;
-use core_test_support::test_codex::local_selections;
+use core_test_support::test_codex::local_requests;
 use core_test_support::test_codex::test_codex;
 use core_test_support::test_codex::turn_permission_fields;
 use core_test_support::wait_for_event;
@@ -924,7 +924,7 @@ async fn subagent_stop_replaces_stop_and_skips_internal_subagents() -> Result<()
                 text_elements: Vec::new(),
             }])
             .with_thread_settings(ThreadSettingsOverrides {
-                environments: Some(local_selections(test.config.cwd.clone())),
+                environments: Some(local_requests(test.config.cwd.clone())),
                 approval_policy: Some(AskForApproval::Never),
                 sandbox_policy: Some(sandbox_policy),
                 permission_profile,
@@ -1200,16 +1200,13 @@ async fn submit_turn_with_trigger(test: &TestCodex, prompt: &str, trigger: &str)
 #[derive(Clone, Copy, Debug)]
 enum GrandchildParentContext {
     FullHistory,
-    LastTurn,
     NoHistory,
     Compacted,
 }
 
 #[test_case(GrandchildParentContext::FullHistory, ThreadHistoryMode::Legacy; "legacy full history")]
-#[test_case(GrandchildParentContext::LastTurn, ThreadHistoryMode::Legacy; "legacy last turn")]
 #[test_case(GrandchildParentContext::NoHistory, ThreadHistoryMode::Legacy; "legacy no history")]
 #[test_case(GrandchildParentContext::FullHistory, ThreadHistoryMode::Paginated; "paginated full history")]
-#[test_case(GrandchildParentContext::LastTurn, ThreadHistoryMode::Paginated; "paginated last turn")]
 #[test_case(GrandchildParentContext::NoHistory, ThreadHistoryMode::Paginated; "paginated no history")]
 #[test_case(GrandchildParentContext::Compacted, ThreadHistoryMode::Legacy; "legacy full history after compaction")]
 #[test_case(GrandchildParentContext::Compacted, ThreadHistoryMode::Paginated; "paginated full history after compaction")]
@@ -1233,7 +1230,6 @@ async fn grandchild_full_fork_preserves_context_baseline(
     let server = start_mock_server().await;
     let (parent_fork_turns, compact_parent) = match parent_context {
         GrandchildParentContext::FullHistory => ("all", false),
-        GrandchildParentContext::LastTurn => ("1", false),
         GrandchildParentContext::NoHistory => ("none", false),
         GrandchildParentContext::Compacted => ("all", true),
     };
@@ -1457,7 +1453,7 @@ async fn grandchild_full_fork_preserves_context_baseline(
 #[derive(Clone, Copy)]
 enum FullHistoryV2ModelSelection {
     ConfiguredDefault,
-    ExplicitOverride,
+    ExplicitOverride(&'static str),
     WorldStateIdentity,
     CurrentTimeReminders,
     MultiAgentModeInstructions,
@@ -1465,7 +1461,9 @@ enum FullHistoryV2ModelSelection {
 }
 
 #[test_case(FullHistoryV2ModelSelection::ConfiguredDefault; "configured default with omitted fork_turns")]
-#[test_case(FullHistoryV2ModelSelection::ExplicitOverride; "explicit override with fork_turns all")]
+#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("all"); "explicit override with fork_turns all")]
+#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("1"); "legacy one turn forks full history with explicit override")]
+#[test_case(FullHistoryV2ModelSelection::ExplicitOverride("3"); "legacy three turns forks full history with explicit override")]
 #[test_case(FullHistoryV2ModelSelection::WorldStateIdentity; "world state appends context window when agent identity changes")]
 #[test_case(FullHistoryV2ModelSelection::CurrentTimeReminders; "full fork drops inherited current-time reminders")]
 #[test_case(FullHistoryV2ModelSelection::MultiAgentModeInstructions; "full fork drops inherited multi-agent mode instructions")]
@@ -1500,11 +1498,11 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
             V2_DEFAULT_MODEL,
             V2_DEFAULT_REASONING_EFFORT,
         ),
-        FullHistoryV2ModelSelection::ExplicitOverride => (
+        FullHistoryV2ModelSelection::ExplicitOverride(fork_turns) => (
             json!({
                 "message": CHILD_PROMPT,
                 "task_name": "worker",
-                "fork_turns": "all",
+                "fork_turns": fork_turns,
                 "model": V2_REQUESTED_MODEL,
                 "reasoning_effort": V2_REQUESTED_REASONING_EFFORT,
             }),
@@ -1700,7 +1698,7 @@ async fn spawned_full_history_v2_child_uses_model_precedence_without_dropping_co
         builder =
             builder.with_external_time_provider(std::sync::Arc::new(FailFirstClockRead::default()));
     }
-    let test = builder.build(&server).await?;
+    let test = builder.build_with_auto_env(&server).await?;
     if matches!(selection, FullHistoryV2ModelSelection::WorldStateIdentity) {
         test.codex.submit(Op::Compact).await?;
         wait_for_event(&test.codex, |event| {
@@ -2796,8 +2794,12 @@ async fn plaintext_multi_agent_v2_completion_sends_agent_message(
     Ok(())
 }
 
+#[test_case(false; "live")]
+#[test_case(true; "reloaded_sleep")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> Result<()> {
+async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn(
+    reload_sleeping_worker: bool,
+) -> Result<()> {
     const SPAWN_WORKER_PROMPT: &str = "spawn the completion-routing worker";
     const SPAWN_REQUESTER_PROMPT: &str = "spawn the completion-routing requester";
     const READ_RESULT_PROMPT: &str = "read the completion-routing worker result";
@@ -2879,7 +2881,7 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
 
     submit_turn_with_trigger(&test, SPAWN_WORKER_PROMPT, "automation_cron_scheduled").await?;
     let worker_thread_id = created_threads.recv().await?;
-    let worker_thread = test.thread_manager.get_thread(worker_thread_id).await?;
+    let mut worker_thread = test.thread_manager.get_thread(worker_thread_id).await?;
     wait_for_event(worker_thread.as_ref(), |event| {
         matches!(event, EventMsg::TurnComplete(_))
     })
@@ -2997,7 +2999,7 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
     })
     .await;
 
-    let worker_followup_turn_id = worker_followup_request
+    let mut worker_followup_turn_id = worker_followup_request
         .requests()
         .into_iter()
         .find_map(|request| {
@@ -3019,6 +3021,52 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
             })
         })
         .expect("worker follow-up model request");
+    if reload_sleeping_worker {
+        worker_thread.shutdown_and_wait().await?;
+        test.thread_manager.remove_thread(&worker_thread_id).await;
+        test.thread_manager
+            .ensure_multi_agent_v2_child_loaded(worker_thread_id)
+            .await?;
+        worker_thread = test.thread_manager.get_thread(worker_thread_id).await?;
+        // Simulate the extension restoring durable sleep; Core owns the
+        // queue-only wake and completion routing exercised below.
+        worker_thread
+            .thread_extension_data()
+            .insert(codex_extension_items::sleep::SleepItem {
+                id: "peer-worker-sleep".to_string(),
+                duration_ms: 60_000,
+            });
+        let wake_request = mount_sse_once_match(
+            &server,
+            |request: &wiremock::Request| body_contains(request, "wake sleeping peer work"),
+            sse(vec![
+                ev_response_created("resp-peer-worker-wake"),
+                ev_assistant_message("msg-peer-worker-wake", "peer follow-up finished"),
+                ev_completed("resp-peer-worker-wake"),
+            ]),
+        )
+        .await;
+        worker_thread
+            .submit(Op::InterAgentCommunication {
+                communication: codex_protocol::protocol::InterAgentCommunication::new(
+                    codex_protocol::AgentPath::root(),
+                    codex_protocol::AgentPath::try_from("/root/worker").expect("worker path"),
+                    Vec::new(),
+                    "wake sleeping peer work".to_string(),
+                    /*trigger_turn*/ false,
+                ),
+                start_options: TurnStartOptions::default(),
+            })
+            .await?;
+        worker_followup_turn_id =
+            wait_for_event_match(worker_thread.as_ref(), |event| match event {
+                EventMsg::TurnComplete(completed) => Some(completed.turn_id.clone()),
+                _ => None,
+            })
+            .await;
+        let request = wake_request.single_request();
+        assert_parent_turn(&request.body_json(), Some(&requester_turn_id))?;
+    }
     let completed = timeout(
         Duration::from_secs(5),
         wait_for_event_match(requester_thread.as_ref(), |event| match event {
@@ -3028,6 +3076,7 @@ async fn multi_agent_v2_peer_followup_completion_notifies_initiating_turn() -> R
                     TurnItem::SubAgentActivity(activity)
                         if activity.kind == SubAgentActivityKind::Completed
                             && activity.agent_thread_id == worker_thread_id
+                            && activity.id == format!("subagent-completed-{worker_followup_turn_id}")
                 ) =>
             {
                 Some(completed.clone())

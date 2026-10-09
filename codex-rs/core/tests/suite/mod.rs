@@ -57,6 +57,8 @@ mod auth_recovery_policy;
 mod auto_review;
 #[path = "bedrock_multi_agent_tests.rs"]
 mod bedrock_multi_agent;
+#[path = "bedrock_service_tier_tests.rs"]
+mod bedrock_service_tier;
 mod catalog_permission_messages;
 mod cli_stream;
 mod client;
@@ -239,6 +241,7 @@ mod unstable_features_warning;
 mod user_notification;
 mod user_shell_cmd;
 mod view_image;
+mod wake_reservation;
 mod web_search;
 #[path = "web_search_system_proxy_tests.rs"]
 mod web_search_system_proxy;

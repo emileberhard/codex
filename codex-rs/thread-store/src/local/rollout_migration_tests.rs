@@ -190,7 +190,7 @@ fn rollout_response_item(item: ResponseItem) -> RolloutItem {
     RolloutItem::ResponseItem(item.into())
 }
 
-fn exec_completion(turn_id: &str, call_id: &str) -> RolloutItem {
+fn exec_completion(turn_id: &str, call_id: &str, output: &str) -> RolloutItem {
     serde_json::from_value(json!({
         "type": "event_msg",
         "payload": {
@@ -201,12 +201,12 @@ fn exec_completion(turn_id: &str, call_id: &str) -> RolloutItem {
             "cwd": "file:///tmp",
             "parsed_cmd": [],
             "source": "agent",
-            "stdout": "ok",
+            "stdout": output,
             "stderr": "",
-            "aggregated_output": "ok",
+            "aggregated_output": output,
             "exit_code": 0,
             "duration": {"secs": 0, "nanos": 0},
-            "formatted_output": "ok",
+            "formatted_output": output,
             "status": "completed"
         }
     }))
@@ -229,6 +229,7 @@ fn item_completed(turn_id: &str, item_id: &str) -> RolloutItem {
 
 fn started(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+        turn_attribution: None,
         turn_id: turn_id.to_string(),
         root_turn_id: None,
         trace_id: None,
@@ -257,6 +258,7 @@ fn compacted(replacement_history: Vec<ResponseItem>) -> RolloutItem {
 
 fn completed(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+        root_turn_id: None,
         turn_id: turn_id.to_string(),
         last_agent_message: None,
         error: None,
@@ -419,7 +421,8 @@ async fn migration_publishes_canonical_projected_history_and_is_idempotent() {
 async fn migration_projects_explicit_and_implicit_legacy_completed_items() {
     let home = TempDir::new().expect("create Codex home");
     let thread_id = ThreadId::new();
-    let exec = exec_completion("explicit", "call-1");
+    let output = format!("head\n{}\ntail", "x".repeat(128 * 1024));
+    let exec = exec_completion("explicit", "call-1", &output);
     let reasoning = serde_json::from_value(json!({
         "type": "event_msg",
         "payload": {"type": "agent_reasoning", "text": "summary"}
@@ -474,6 +477,13 @@ async fn migration_projects_explicit_and_implicit_legacy_completed_items() {
     let reasoning: serde_json::Value =
         serde_json::from_slice(&items.items[1].item_json).expect("parse projected reasoning");
     assert_eq!(command["type"], "commandExecution");
+    let aggregated_output = command["aggregatedOutput"]
+        .as_str()
+        .expect("migrated command output");
+    assert_eq!(aggregated_output.len(), 64 * 1024);
+    assert!(aggregated_output.starts_with("head\n"));
+    assert!(aggregated_output.ends_with("\ntail"));
+    assert!(aggregated_output.contains("command output truncated for persistence"));
     assert_eq!(reasoning["type"], "reasoning");
     assert_eq!(reasoning["summary"], json!(["summary"]));
     assert_eq!(reasoning["content"], json!(["raw"]));
@@ -550,7 +560,7 @@ async fn migration_keeps_late_completions_in_their_original_turn() {
             user_message("old question"),
             started("current"),
             user_message("current question"),
-            exec_completion("old", "call-old"),
+            exec_completion("old", "call-old", "ok"),
             serde_json::from_value(json!({
                 "type": "event_msg",
                 "payload": {
@@ -992,9 +1002,9 @@ async fn migration_keeps_late_completions_for_surviving_turns_across_rollback() 
             started("remove"),
             user_message("remove question"),
             completed("old"),
-            exec_completion("old", "call-old"),
+            exec_completion("old", "call-old", "ok"),
             item_completed("old", "reason-old"),
-            exec_completion("remove", "call-remove"),
+            exec_completion("remove", "call-remove", "ok"),
             completed("remove"),
             RolloutItem::EventMsg(EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
                 num_turns: 1,

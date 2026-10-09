@@ -146,23 +146,27 @@ impl ThreadRequestProcessor {
             .map_err(|error| {
                 internal_error(format!("failed to recover thread {thread_id}: {error}"))
             })?;
-        let turn_id = match submission {
-            StartIfIdleSubmission::Started { turn_id } => turn_id,
+        let (turn_id, root_turn_id) = match submission {
+            StartIfIdleSubmission::Started {
+                turn_id,
+                root_turn_id,
+            } => (turn_id, Some(root_turn_id)),
             StartIfIdleSubmission::NotSubmitted {
                 reason: NotSubmittedReason::NotIdle | NotSubmittedReason::PendingTriggerTurn,
             } => {
                 let thread_state = self.thread_state_manager.thread_state(thread_id).await;
-                let active_turn_id = thread_state
-                    .lock()
-                    .await
-                    .active_turn_snapshot()
-                    .map(|turn| turn.id);
-                if active_turn_id.as_deref() != Some(params.turn_id.as_str()) {
+                let active_turn = thread_state.lock().await.active_turn_snapshot();
+                if active_turn.as_ref().map(|turn| turn.id.as_str())
+                    != Some(params.turn_id.as_str())
+                {
                     return Err(invalid_request(format!(
                         "thread {thread_id} is running a different turn"
                     )));
                 }
-                params.turn_id
+                (
+                    params.turn_id,
+                    active_turn.and_then(|turn| turn.root_turn_id),
+                )
             }
             StartIfIdleSubmission::NotSubmitted { reason } => {
                 return Err(internal_error(format!(
@@ -175,7 +179,7 @@ impl ThreadRequestProcessor {
             .await;
         Ok(ThreadRestartRecoverResponse {
             generation_id,
-            turn: in_progress_turn(turn_id),
+            turn: in_progress_turn(turn_id, root_turn_id),
         })
     }
 
@@ -340,9 +344,10 @@ impl ThreadRequestProcessor {
     }
 }
 
-fn in_progress_turn(turn_id: String) -> Turn {
+fn in_progress_turn(turn_id: String, root_turn_id: Option<String>) -> Turn {
     Turn {
         id: turn_id,
+        root_turn_id,
         items: Vec::new(),
         items_view: TurnItemsView::NotLoaded,
         error: None,

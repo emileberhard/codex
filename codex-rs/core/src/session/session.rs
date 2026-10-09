@@ -14,7 +14,7 @@ use crate::config::ConstraintError;
 use crate::environment_selection::ThreadEnvironments;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::hook_mcp_executor::CoreHookMcpExecutor;
-use crate::mcp_tool_call::McpToolApprovalMetadata;
+use crate::mcp_tool_call::McpToolApprovalContext;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_metadata::CompactionTurnMetadata;
@@ -39,10 +39,10 @@ use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSpecialPath;
 use codex_protocol::protocol::EnvironmentConfig;
 use codex_protocol::protocol::HookCompletedEvent;
-use codex_protocol::protocol::McpInvocation;
 use codex_protocol::protocol::MultiAgentVersion;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadSource;
+use codex_protocol::protocol::TurnEnvironmentRequests;
 use codex_protocol::protocol::TurnEnvironmentSelections;
 use codex_sandboxing::SandboxType;
 use codex_skills::SkillError;
@@ -52,7 +52,7 @@ use std::sync::OnceLock;
 use tokio::sync::Semaphore;
 
 type McpToolApprovalMetadataMap =
-    HashMap<(String, String), std::sync::Weak<(Option<McpInvocation>, McpToolApprovalMetadata)>>;
+    HashMap<(String, String), std::sync::Weak<McpToolApprovalContext>>;
 
 /// Context for an initialized model agent
 ///
@@ -342,9 +342,12 @@ impl SessionConfiguration {
         environment_selections: Vec<TurnEnvironmentSelection>,
     ) -> CodexThreadSettingsOverrides {
         CodexThreadSettingsOverrides {
-            environments: Some(TurnEnvironmentSelections::new(
+            environments: Some(TurnEnvironmentRequests::new(
                 self.legacy_fallback_cwd.clone(),
-                environment_selections,
+                environment_selections
+                    .into_iter()
+                    .map(TurnEnvironmentSelection::into_request)
+                    .collect(),
             )),
             runtime_workspace_roots: Some(self.runtime_workspace_roots.clone()),
             profile_workspace_roots: Some(
@@ -1536,6 +1539,10 @@ impl Session {
                 ),
             );
             state.base_instructions_provenance = base_instructions_provenance.clone();
+            // Restore a provided effort baseline before startup prewarm can establish a new one.
+            if let Some(pin) = thread_extension_data.remove::<ReasoningEffortPin>() {
+                state.reasoning_effort_pin = pin.as_ref().clone();
+            }
             state.active_disabled_plugin_ids = session_configuration.disabled_plugin_ids.clone();
             let managed_network_requirements_configured = config
                 .config_layer_stack
@@ -1863,8 +1870,6 @@ impl Session {
                 *guard = Arc::downgrade(&sess);
             }
             // Dispatch the SessionConfiguredEvent first and then report any errors.
-            // If resuming, include converted initial messages in the payload so UIs can render them immediately.
-            let initial_messages = initial_history.get_event_msgs();
             let thread_config =
                 session_configuration.thread_config_snapshot(turn_environments.selections());
             let events = std::iter::once(Event {
@@ -1890,7 +1895,6 @@ impl Session {
                     permission_profile: thread_config.permission_profile,
                     active_permission_profile: thread_config.active_permission_profile,
                     reasoning_effort: thread_config.reasoning_effort,
-                    initial_messages,
                     rollout_path,
                 }),
             })

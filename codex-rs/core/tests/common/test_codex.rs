@@ -1,3 +1,5 @@
+use codex_protocol::protocol::TurnEnvironmentRequest;
+use codex_protocol::protocol::TurnEnvironmentRequests;
 use std::future::Future;
 use std::io::ErrorKind;
 use std::mem::swap;
@@ -127,13 +129,18 @@ impl UserInstructionsProvider for RecordingUserInstructionsProvider {
     }
 }
 
-pub fn local(cwd: AbsolutePathBuf) -> TurnEnvironmentSelection {
-    TurnEnvironmentSelection {
+/// Builds environment input without attaching any thread's capability roots.
+pub fn local_request(cwd: AbsolutePathBuf) -> TurnEnvironmentRequest {
+    TurnEnvironmentRequest {
         environment_id: codex_exec_server::LOCAL_ENVIRONMENT_ID.to_string(),
         cwd: PathUri::from_abs_path(&cwd),
         workspace_roots: vec![PathUri::from_abs_path(&cwd)],
         config: EnvironmentConfigState::FromThread,
     }
+}
+
+pub fn local(cwd: AbsolutePathBuf) -> TurnEnvironmentSelection {
+    TurnEnvironmentSelection::new(local_request(cwd))
 }
 
 /// Builds explicit environment configuration with the test thread's permissions and shell settings.
@@ -183,6 +190,11 @@ pub fn executor_path_uri(path: impl AsRef<Path>) -> Result<PathUri> {
 
 pub fn local_selections(cwd: AbsolutePathBuf) -> TurnEnvironmentSelections {
     TurnEnvironmentSelections::new(cwd.clone(), vec![local(cwd)])
+}
+
+/// Builds thread-settings input using the local test environment.
+pub fn local_requests(cwd: AbsolutePathBuf) -> TurnEnvironmentRequests {
+    TurnEnvironmentRequests::new(cwd.clone(), vec![local_request(cwd)])
 }
 
 #[derive(Debug)]
@@ -241,6 +253,16 @@ impl TestEnv {
     /// Returns the environment and target-native cwd selected by the test harness.
     pub fn selection(&self) -> &TurnEnvironmentSelection {
         &self.selection
+    }
+
+    /// Requests the fixture's environment without copying a thread's root choices.
+    pub fn request(&self) -> TurnEnvironmentRequest {
+        TurnEnvironmentRequest {
+            environment_id: self.selection.environment_id.clone(),
+            cwd: self.selection.cwd.clone(),
+            workspace_roots: self.selection.workspace_roots.clone(),
+            config: self.selection.config.clone(),
+        }
     }
 
     fn local_cwd_temp_dir(&self) -> Option<Arc<TempDir>> {
@@ -889,7 +911,7 @@ impl TestCodexBuilder {
                 .await?
             }
             (None, None) => {
-                let environments = if test_env.selection().cwd.infer_path_convention()
+                let environment_requests = if test_env.selection().cwd.infer_path_convention()
                     == Some(PathConvention::Windows)
                     && PathUri::from_abs_path(&config.cwd) != test_env.selection().cwd
                 {
@@ -897,15 +919,15 @@ impl TestCodexBuilder {
                     let mut selection = test_env.selection().clone();
                     selection.cwd = cwd.clone();
                     selection.workspace_roots = vec![cwd];
-                    test_env.selection = selection.clone();
-                    Some(vec![selection])
+                    test_env.selection = selection;
+                    Some(vec![test_env.request()])
                 } else {
                     None
                 };
                 Box::pin(thread_manager.start_thread(StartThreadOptions {
                     history_mode: self.history_mode,
                     client_mcp_extensions: client_mcp_extensions(),
-                    environments,
+                    environments: environment_requests,
                     ..StartThreadOptions::new(config.clone())
                 }))
                 .await?
@@ -1022,6 +1044,22 @@ pub struct TestCodex {
 }
 
 impl TestCodex {
+    /// Starts another test thread with the fixture's current environments and configuration.
+    /// Keeping request construction here lets ordinary tests ignore runtime selection fields.
+    pub async fn start_thread_options(&self) -> StartThreadOptions {
+        StartThreadOptions {
+            environments: Some(
+                self.codex
+                    .environment_selections()
+                    .await
+                    .into_iter()
+                    .map(TurnEnvironmentSelection::into_request)
+                    .collect(),
+            ),
+            ..StartThreadOptions::new(self.config.clone())
+        }
+    }
+
     pub fn cwd_path(&self) -> &Path {
         self.cwd.path()
     }
@@ -1195,7 +1233,8 @@ impl TestCodex {
                     text_elements: Vec::new(),
                 }])
                 .with_thread_settings(ThreadSettingsOverrides {
-                    environments: turn_environment_selections,
+                    environments: turn_environment_selections
+                        .map(TurnEnvironmentSelections::into_requests),
                     approval_policy: Some(approval_policy),
                     sandbox_policy: Some(sandbox_policy),
                     permission_profile,

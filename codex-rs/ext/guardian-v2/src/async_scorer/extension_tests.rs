@@ -380,7 +380,7 @@ struct RecordingMetrics(Mutex<Vec<RecordedMetric>>);
 impl RecordingMetrics {
     fn classification_samples(&self) -> Vec<RecordedMetric> {
         self.0.lock().unwrap().iter().filter(|sample| {
-            !matches!(sample, RecordedMetric::Histogram(name, _, _) if name == codex_guardian_context::SECTION_COST_METRIC || name == codex_guardian_context::REQUEST_TOKENS_METRIC)
+            !matches!(sample, RecordedMetric::Histogram(name, _, _) if name == codex_guardian_context::SECTION_COST_METRIC || name == codex_guardian_context::REQUEST_TOKENS_METRIC || name.starts_with("codex.guardian_v2.connection."))
         }).cloned().collect()
     }
 }
@@ -3355,10 +3355,11 @@ async fn assert_parent_compaction_reuse(parent_context_for_review: bool) -> Resu
 
 struct CacheMiss;
 impl codex_extension_api::SynchronousApprovalReviewer for CacheMiss {
-    fn review(
-        &self,
+    fn review<'a>(
+        &'a self,
         _reason: codex_protocol::approvals::GuardianReviewReason,
-    ) -> codex_extension_api::ExtensionFuture<'_, Option<ReviewDecision>> {
+        _async_approval: Option<codex_extension_api::ExtensionFuture<'a, ()>>,
+    ) -> codex_extension_api::ExtensionFuture<'a, Option<ReviewDecision>> {
         Box::pin(async { Some(ReviewDecision::denied("cache miss")) })
     }
 }

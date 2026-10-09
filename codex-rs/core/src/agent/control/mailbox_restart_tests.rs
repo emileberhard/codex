@@ -602,7 +602,7 @@ async fn v2_turn_submission_refuses_unresolved_mail_checkpoint(idle_only: bool) 
             .await
             .expect("retry accepted")
         {
-            crate::StartIfIdleSubmission::Started { turn_id } => turn_id,
+            crate::StartIfIdleSubmission::Started { turn_id, .. } => turn_id,
             other => panic!("retry was refused: {other:?}"),
         }
     } else {
@@ -612,7 +612,7 @@ async fn v2_turn_submission_refuses_unresolved_mail_checkpoint(idle_only: bool) 
             .await
             .expect("retry accepted")
         {
-            codex_protocol::turn_input::TurnInputSubmission::Started { turn_id } => turn_id,
+            codex_protocol::turn_input::TurnInputSubmission::Started { turn_id, .. } => turn_id,
             other => panic!("retry was refused: {other:?}"),
         }
     };

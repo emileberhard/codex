@@ -108,6 +108,8 @@ mod provisioning_protocol;
 #[cfg(target_os = "windows")]
 mod runtime_ownership;
 #[cfg(target_os = "windows")]
+mod service_diagnostics;
+#[cfg(target_os = "windows")]
 mod service_identity;
 #[cfg(target_os = "windows")]
 #[doc(hidden)]
@@ -133,6 +135,9 @@ pub use runtime_ownership::remove_installation;
 #[cfg(target_os = "windows")]
 #[doc(hidden)]
 pub use runtime_ownership::save_installation;
+#[cfg(target_os = "windows")]
+#[doc(hidden)]
+pub use service_diagnostics::ServiceStopReason;
 #[cfg(target_os = "windows")]
 mod resolved_permissions;
 #[cfg(target_os = "windows")]
@@ -367,6 +372,8 @@ pub use provisioning_client::refresh_registered_core_via_service;
 #[cfg(target_os = "windows")]
 pub use provisioning_client::register_desktop_installation;
 #[cfg(target_os = "windows")]
+pub use provisioning_client::start_windows_sandbox_service_for_setup;
+#[cfg(target_os = "windows")]
 pub use provisioning_protocol::FramedProvisioningMessage;
 #[cfg(target_os = "windows")]
 pub use provisioning_protocol::PROVISIONING_PROTOCOL_VERSION;
@@ -482,6 +489,8 @@ pub use unified_exec::spawn_windows_sandbox_session_for_level;
 pub use unified_exec::spawn_windows_sandbox_session_legacy;
 #[cfg(target_os = "windows")]
 pub use uninstall_windows::PreparedWindowsSandboxCleanup;
+#[cfg(target_os = "windows")]
+pub use uninstall_windows::clean_up_legacy_windows_sandbox;
 #[cfg(target_os = "windows")]
 pub use uninstall_windows::clean_up_packaged_windows_sandbox;
 #[cfg(target_os = "windows")]

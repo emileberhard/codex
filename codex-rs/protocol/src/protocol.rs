@@ -99,6 +99,10 @@ pub use crate::approvals::NetworkPolicyAmendment;
 pub use crate::approvals::NetworkPolicyRuleAction;
 pub use crate::environment::EnvironmentConfig;
 pub use crate::environment::EnvironmentConfigState;
+pub use crate::environment::TurnEnvironmentRequest;
+pub use crate::environment::TurnEnvironmentRequests;
+pub use crate::environment::TurnEnvironmentSelection;
+pub use crate::environment::TurnEnvironmentSelections;
 pub use crate::environment::has_full_access;
 pub use crate::legacy_events::HasLegacyEvent;
 pub use crate::permissions::FileSystemAccessMode;
@@ -146,34 +150,6 @@ pub fn strip_user_message_prefix(text: &str) -> &str {
     match text.find(USER_MESSAGE_BEGIN) {
         Some(idx) => text[idx + USER_MESSAGE_BEGIN.len()..].trim(),
         None => text.trim(),
-    }
-}
-
-// TODO(anp): Replace `TurnEnvironmentSelection` with `PathUri` once path URIs carry environment
-// identifiers.
-#[derive(Debug, Clone, PartialEq)]
-pub struct TurnEnvironmentSelection {
-    pub environment_id: String,
-    pub cwd: PathUri,
-    pub workspace_roots: Vec<PathUri>,
-    pub config: EnvironmentConfigState,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TurnEnvironmentSelections {
-    pub legacy_fallback_cwd: AbsolutePathBuf,
-    pub environments: Vec<TurnEnvironmentSelection>,
-}
-
-impl TurnEnvironmentSelections {
-    pub fn new(
-        legacy_fallback_cwd: AbsolutePathBuf,
-        environments: Vec<TurnEnvironmentSelection>,
-    ) -> Self {
-        Self {
-            legacy_fallback_cwd,
-            environments,
-        }
     }
 }
 
@@ -490,7 +466,7 @@ pub struct TurnSettingsUpdate {
     /// Replaces the selection for subsequent steps, without changing future turns.
     /// Environments may inherit the running turn's defaults or provide their own configuration,
     /// which can be pending. An already-selected environment with its own cannot switch back.
-    pub environments: Option<Vec<TurnEnvironmentSelection>>,
+    pub environments: Option<Vec<TurnEnvironmentRequest>>,
     pub model: Option<String>,
     /// `None` preserves the selection; `Some(None)` clears it.
     pub effort: Option<Option<ReasoningEffortConfig>>,
@@ -517,10 +493,10 @@ pub enum TurnSettingsUpdateOutcome {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ThreadSettingsOverrides {
     /// Updated fallback `cwd` and environments supplied together as a complete pair.
-    pub environments: Option<TurnEnvironmentSelections>,
+    pub environments: Option<TurnEnvironmentRequests>,
 
     /// Updated top-level runtime workspace roots for default environments.
-    /// Explicit environment selections own their roots separately.
+    /// Explicit environment requests own their workspace roots separately.
     pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
 
     /// Updated profile-defined workspace roots for status summaries and
@@ -2152,6 +2128,9 @@ pub struct MisalignmentErrorDetails {
     /// Model-visible instruction to submit if the user elects to continue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steer: Option<MisalignmentSteer>,
+    /// Opaque server-issued block target, echoed verbatim only on explicit continuation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_target: Option<String>,
 }
 
 impl fmt::Debug for MisalignmentErrorDetails {
@@ -2164,6 +2143,7 @@ impl fmt::Debug for MisalignmentErrorDetails {
                 &self.detailed_explanation.is_some(),
             )
             .field("has_steer", &self.steer.is_some())
+            .field("has_review_target", &self.review_target.is_some())
             .finish()
     }
 }
@@ -2263,6 +2243,10 @@ pub struct ContextCompactedEvent;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TurnCompleteEvent {
+    /// Resolved causal root for this turn; absent on older or synthetic events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub root_turn_id: Option<String>,
     pub turn_id: String,
     pub last_agent_message: Option<String>,
     /// Terminal error details when the turn completed unsuccessfully.
@@ -2289,6 +2273,11 @@ pub struct TurnCompleteEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TurnStartedEvent {
+    /// Provenance of a regular turn, persisted before startup work can be suspended.
+    /// Absent on older records and non-regular tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub turn_attribution: Option<crate::turn_input::TurnAttribution>,
     pub turn_id: String,
     /// ID of the originating turn in the root thread; equals `turn_id` for root turns.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3433,8 +3422,7 @@ pub struct TurnContextNetworkItem {
 pub struct TurnContextItem {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
-    /// Root turn that owns this subagent turn's attribution.
-    /// Only set for subagent turns; persisted so resume keeps the scope frozen at turn start.
+    /// Root turn that owns this turn's attribution, retained across recovery.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root_turn_id: Option<String>,
     /// Plugin selection captured for this turn. Absent in older histories.
@@ -3757,10 +3745,6 @@ pub struct ExecCommandEndEvent {
     #[ts(optional)]
     pub interaction_input: Option<String>,
 
-    /// Captured stdout
-    pub stdout: String,
-    /// Captured stderr
-    pub stderr: String,
     /// Captured aggregated output
     #[serde(default)]
     pub aggregated_output: String,
@@ -3769,8 +3753,6 @@ pub struct ExecCommandEndEvent {
     /// The duration of the command execution.
     #[ts(type = "string")]
     pub duration: Duration,
-    /// Formatted output from the command, as seen by the model.
-    pub formatted_output: String,
     /// Completion status for this command execution.
     pub status: ExecCommandStatus,
 }
@@ -4139,11 +4121,6 @@ pub struct SessionConfiguredEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffortConfig>,
 
-    /// Optional initial messages (as events) for resumed sessions.
-    /// When present, UIs can use these to seed the history.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub initial_messages: Option<Vec<EventMsg>>,
-
     /// Runtime proxy bind addresses, when the managed proxy was started for this session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -4185,7 +4162,6 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: Option<ActivePermissionProfile>,
             cwd: AbsolutePathBuf,
             reasoning_effort: Option<ReasoningEffortConfig>,
-            initial_messages: Option<Vec<EventMsg>>,
             network_proxy: Option<SessionNetworkProxyRuntime>,
             rollout_path: Option<PathBuf>,
         }
@@ -4218,7 +4194,6 @@ impl<'de> Deserialize<'de> for SessionConfiguredEvent {
             active_permission_profile: wire.active_permission_profile,
             cwd: wire.cwd,
             reasoning_effort: wire.reasoning_effort,
-            initial_messages: wire.initial_messages,
             network_proxy: wire.network_proxy,
             rollout_path: wire.rollout_path,
         })
@@ -4387,6 +4362,10 @@ pub struct Chunk {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TurnAbortedEvent {
+    /// Resolved causal root for this turn; absent on older or synthetic events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub root_turn_id: Option<String>,
     pub turn_id: Option<String>,
     pub reason: TurnAbortReason,
     /// Optional error describing why the turn was interrupted.
@@ -5737,12 +5716,9 @@ mod tests {
                 source: ExecCommandSource::Agent,
                 interaction_input: None,
                 status: CommandExecutionStatus::InProgress,
-                stdout: None,
-                stderr: None,
                 aggregated_output: None,
                 exit_code: None,
                 duration: None,
-                formatted_output: None,
             }),
         };
         let completed = ItemCompletedEvent {
@@ -5765,12 +5741,9 @@ mod tests {
                 source: ExecCommandSource::Agent,
                 interaction_input: None,
                 status: CommandExecutionStatus::Completed,
-                stdout: Some("done\n".into()),
-                stderr: Some(String::new()),
                 aggregated_output: Some("done\n".into()),
                 exit_code: Some(0),
                 duration: Some(Duration::from_millis(5)),
-                formatted_output: Some("done\n".into()),
             }),
         };
 
@@ -6020,6 +5993,7 @@ mod tests {
             misalignment: Some(MisalignmentErrorDetails {
                 error_type: Some("unauthorized_data_transfer".to_string()),
                 detailed_explanation: Some("Sensitive customer explanation".to_string()),
+                review_target: Some("sensitive-review-target".to_string()),
                 steer: Some(MisalignmentSteer {
                     message: "Sensitive customer steering".to_string(),
                 }),
@@ -6041,6 +6015,7 @@ mod tests {
         let debug = format!("{event:?}");
         assert!(!debug.contains("Sensitive customer explanation"));
         assert!(!debug.contains("Sensitive customer steering"));
+        assert!(!debug.contains("sensitive-review-target"));
     }
 
     #[test]
@@ -6271,9 +6246,12 @@ mod tests {
 
         match event {
             EventMsg::TurnAborted(TurnAbortedEvent {
-                turn_id, reason, ..
+                turn_id,
+                root_turn_id,
+                reason,
+                ..
             }) => {
-                assert_eq!(turn_id, None);
+                assert_eq!((turn_id, root_turn_id), (None, None));
                 assert_eq!(reason, TurnAbortReason::Interrupted);
             }
             _ => panic!("expected turn_aborted event"),
@@ -6430,7 +6408,6 @@ mod tests {
                 active_permission_profile: None,
                 cwd: test_path_buf("/home/user/project").abs(),
                 reasoning_effort: Some(ReasoningEffortConfig::default()),
-                initial_messages: None,
                 network_proxy: None,
                 rollout_path: Some(rollout_file.path().to_path_buf()),
             }),

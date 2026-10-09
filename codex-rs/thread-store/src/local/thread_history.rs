@@ -326,6 +326,7 @@ async fn apply_change_set(
 INSERT INTO thread_turns (
     thread_id,
     turn_id,
+    root_turn_id,
     rollout_ordinal,
     rollout_byte_offset,
     rollout_end_ordinal,
@@ -336,8 +337,9 @@ INSERT INTO thread_turns (
     completed_at,
     duration_ms,
     updated_at_ordinal
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(thread_id, turn_id) DO UPDATE SET
+    root_turn_id = COALESCE(thread_turns.root_turn_id, excluded.root_turn_id),
     rollout_end_ordinal = excluded.rollout_end_ordinal,
     rollout_end_byte_offset = excluded.rollout_end_byte_offset,
     status = excluded.status,
@@ -358,6 +360,7 @@ OR (
         )
         .bind(thread_id)
         .bind(turn_id.as_str())
+        .bind(turn.root_turn_id)
         .bind(rollout_ordinal)
         .bind(rollout_byte_offset)
         .bind(terminal_ordinal)
@@ -502,7 +505,7 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
         .map_err(thread_history_error)?;
 
         sqlx::query(
-            "INSERT OR IGNORE INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, completed_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, started_at_ms, completed_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(thread_id)
         .bind(item.turn_id.as_str())
@@ -510,6 +513,8 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
         .bind(rollout_ordinal)
         .bind(item_json.as_str())
         .bind(item.is_complete)
+        .bind(item.started_at_ms)
+        .bind(item.completed_at_ms)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;
@@ -562,7 +567,7 @@ WHERE thread_id = ?
                 .map_err(thread_history_error)?;
             }
             ThreadItem::AgentMessage {
-                phase: Some(MessagePhase::Commentary) | None,
+                phase: Some(MessagePhase::Commentary | MessagePhase::PartialAnswer) | None,
                 ..
             }
             | ThreadItem::HookPrompt { .. }

@@ -845,6 +845,8 @@ impl ThreadStore for LocalThreadStore {
 mod tests {
     #[path = "acquisition_tests.rs"]
     mod acquisition_tests;
+    #[path = "delegated_preview_tests.rs"]
+    mod delegated_preview_tests;
     use std::sync::Arc;
 
     use codex_protocol::ThreadId;
@@ -1194,6 +1196,7 @@ mod tests {
         live_thread
             .append_items(&[RolloutItem::EventMsg(EventMsg::TurnStarted(
                 TurnStartedEvent {
+                    turn_attribution: None,
                     turn_id: "turn-1".to_string(),
                     root_turn_id: None,
                     trace_id: None,
@@ -1240,6 +1243,7 @@ mod tests {
                     },
                 )),
                 RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                    root_turn_id: None,
                     turn_id: "turn-1".to_string(),
                     started_at: None,
                     last_agent_message: None,

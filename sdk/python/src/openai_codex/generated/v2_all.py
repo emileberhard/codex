@@ -465,22 +465,6 @@ class BrowserUseOriginPolicyConfig(BaseModel):
     uploads: AllowDenyRequirement | None = None
 
 
-class BrowserUseRequirements(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    allow_global_persistent_approval: Annotated[
-        bool | None, Field(alias="allowGlobalPersistentApproval")
-    ] = None
-    allow_history_access: Annotated[bool | None, Field(alias="allowHistoryAccess")] = None
-    allow_webmcp: Annotated[bool | None, Field(alias="allowWebmcp")] = None
-    default_origin_policy: Annotated[
-        BrowserUseOriginPolicy | None, Field(alias="defaultOriginPolicy")
-    ] = None
-    disable_auto_review: Annotated[bool | None, Field(alias="disableAutoReview")] = None
-    origins: dict[str, Any] | None = None
-
-
 class ByteRange(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -1300,6 +1284,16 @@ class EnvironmentConnectionNotification(BaseModel):
     )
     environment_id: Annotated[str, Field(alias="environmentId")]
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class EnvironmentSkillsParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    required: Annotated[
+        list[str] | None,
+        Field(description="Exact catalog names that must be available from this environment."),
+    ] = None
 
 
 class ExperimentalFeatureEnablementSetParams(BaseModel):
@@ -2756,6 +2750,7 @@ class MergeStrategy(Enum):
 
 class MessagePhase(Enum):
     commentary = "commentary"
+    partial_answer = "partial_answer"
     final_answer = "final_answer"
 
 
@@ -2817,7 +2812,6 @@ class ModelProviderCapabilitiesReadResponse(BaseModel):
         populate_by_name=True,
     )
     image_generation: Annotated[bool, Field(alias="imageGeneration")]
-    namespace_tools: Annotated[bool, Field(alias="namespaceTools")]
     web_search: Annotated[bool, Field(alias="webSearch")]
 
 
@@ -3863,6 +3857,14 @@ class RemoteControlStatusChangedNotification(BaseModel):
     status: RemoteControlConnectionStatus
 
 
+class RequestHeader(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    name: str
+    value: str
+
+
 class RequestId(RootModel[str | int]):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3932,6 +3934,16 @@ class ResourceTemplate(BaseModel):
     name: str
     title: str | None = None
     uri_template: Annotated[str, Field(alias="uriTemplate")]
+
+
+class AdditionalToolsResponseItem(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: str | None = None
+    role: str
+    tools: list
+    type: Annotated[Literal["additional_tools"], Field(title="AdditionalToolsResponseItemType")]
 
 
 class AgentMessageResponseItem(BaseModel):
@@ -6960,6 +6972,30 @@ class BrowserUseConfig(BaseModel):
     origins: dict[str, Any] | None = None
 
 
+class BrowserUseExtensionRequirements(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    request_headers: Annotated[list[RequestHeader] | None, Field(alias="requestHeaders")] = None
+
+
+class BrowserUseRequirements(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    allow_global_persistent_approval: Annotated[
+        bool | None, Field(alias="allowGlobalPersistentApproval")
+    ] = None
+    allow_history_access: Annotated[bool | None, Field(alias="allowHistoryAccess")] = None
+    allow_webmcp: Annotated[bool | None, Field(alias="allowWebmcp")] = None
+    default_origin_policy: Annotated[
+        BrowserUseOriginPolicy | None, Field(alias="defaultOriginPolicy")
+    ] = None
+    disable_auto_review: Annotated[bool | None, Field(alias="disableAutoReview")] = None
+    extension: BrowserUseExtensionRequirements | None = None
+    origins: dict[str, Any] | None = None
+
+
 class CancelLoginAccountResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8845,6 +8881,13 @@ class MisalignmentErrorDetails(BaseModel):
         Field(
             alias="errorType",
             description="Open-ended classification; clients must accept categories added by Responses.",
+        ),
+    ] = None
+    review_target: Annotated[
+        str | None,
+        Field(
+            alias="reviewTarget",
+            description="Opaque server-issued block target. Presence alone does not enable target-based continuation.",
         ),
     ] = None
     steer: Annotated[
@@ -11292,7 +11335,8 @@ class CustomToolCallOutputResponseItem(BaseModel):
 
 class ResponseItem(
     RootModel[
-        MessageResponseItem
+        AdditionalToolsResponseItem
+        | MessageResponseItem
         | AgentMessageResponseItem
         | ReasoningResponseItem
         | LocalShellCallResponseItem
@@ -11315,7 +11359,8 @@ class ResponseItem(
         populate_by_name=True,
     )
     root: (
-        MessageResponseItem
+        AdditionalToolsResponseItem
+        | MessageResponseItem
         | AgentMessageResponseItem
         | ReasoningResponseItem
         | LocalShellCallResponseItem
@@ -11781,6 +11826,13 @@ class Turn(BaseModel):
             description="Describes how much of `items` has been loaded for this turn.",
         ),
     ] = "full"
+    root_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="rootTurnId",
+            description="ID of the first turn in the chain of work that led to this turn. Pass this as `rootTurnId` when starting work on behalf of this turn. May be null in older history or a `review/start` response.",
+        ),
+    ] = None
     started_at: Annotated[
         int | None,
         Field(alias="startedAt", description="Unix timestamp (in seconds) when the turn started."),
@@ -11947,6 +11999,13 @@ class ConfigRequirementsReadResponse(BaseModel):
         ConfigRequirements | None,
         Field(
             description="Null if no requirements are configured (e.g. no requirements.toml/MDM entries)."
+        ),
+    ] = None
+    supports_independent_speed_modes: Annotated[
+        bool | None,
+        Field(
+            alias="supportsIndependentSpeedModes",
+            description="Whether Fast and Ultra Fast requirements are enforced independently. Older servers omit this field and use Fast mode as a shared speed gate.",
         ),
     ] = None
 
@@ -12715,10 +12774,24 @@ class TurnStartParams(BaseModel):
             description="Optional JSON Schema used to constrain the final assistant message for this turn.",
         ),
     ] = None
+    parent_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="parentTurnId",
+            description="ID of the turn that caused this new turn to start.\n\nSet this when starting work on behalf of another turn, such as delegated work in a different thread. Leave unset for work started directly by the user. Ignored when this request adds input to an active turn.",
+        ),
+    ] = None
     personality: Annotated[
         Personality | None,
         Field(
             description="@deprecated `friendly` and `pragmatic` no longer select a style. Changing this does not rewrite the thread's existing instructions."
+        ),
+    ] = None
+    root_turn_id: Annotated[
+        str | None,
+        Field(
+            alias="rootTurnId",
+            description="ID of the first turn in the chain of work that led to this new turn.\n\nWhen setting `parentTurnId`, set this to the parent turn's `rootTurnId` when known. This keeps descendant work attributed to the original turn. If omitted, the new turn becomes its own root. Ignored when this request adds input to an active turn.",
         ),
     ] = None
     sandbox_policy: Annotated[
