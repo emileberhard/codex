@@ -287,6 +287,15 @@ impl LiveThread {
         self.apply_pending_metadata_update(update, context).await
     }
 
+    pub async fn checkpoint_agent_mail(
+        &self,
+        mail: Vec<codex_protocol::protocol::InterAgentCommunication>,
+    ) -> ThreadStoreResult<()> {
+        self.thread_store
+            .checkpoint_live_agent_mail(self.thread_id, mail)
+            .await
+    }
+
     pub async fn flush(&self) -> ThreadStoreResult<()> {
         self.thread_store.flush_thread(self.thread_id).await?;
         self.flush_pending_metadata_update_for_existing_history()

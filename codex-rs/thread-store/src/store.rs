@@ -161,6 +161,36 @@ pub trait ThreadStore: Any + Send + Sync {
     /// replay history and before updating any implementation-owned projections.
     fn append_items(&self, params: AppendThreadItemsParams) -> ThreadStoreFuture<'_, ()>;
 
+    /// Checkpoints typed, non-triggering agent inputs without loading their recipient.
+    /// The existing canonical rollout is the receipt: success requires durable ordered appends,
+    /// exclusive writer ownership, and release of that writer before returning. Replay consumes
+    /// these native inputs into model context; callers must not also requeue them after success.
+    fn checkpoint_unloaded_agent_mail(
+        &self,
+        _thread_id: ThreadId,
+        _mail: Vec<codex_protocol::protocol::InterAgentCommunication>,
+    ) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "checkpoint_unloaded_agent_mail",
+            })
+        })
+    }
+
+    /// Durably consumes idle agent mail using its live canonical writer. Implementations must
+    /// make retries with the same native message IDs idempotent, including after partial I/O.
+    fn checkpoint_live_agent_mail(
+        &self,
+        _thread_id: ThreadId,
+        _mail: Vec<codex_protocol::protocol::InterAgentCommunication>,
+    ) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "checkpoint_live_agent_mail",
+            })
+        })
+    }
+
     /// Records metadata derived from rollout items.
     /// Unlike [`Self::update_thread_metadata`], this allows the write to be deferred.
     ///

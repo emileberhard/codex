@@ -2,6 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use codex_protocol::ThreadId;
+use codex_protocol::models::ResponseItem;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_protocol::protocol::ThreadMemoryMode;
 use codex_rollout::RolloutConfig;
@@ -150,6 +152,154 @@ pub(super) async fn append_items(
         RolloutWriteOp::AppendItems(params.items),
     )
     .await
+}
+
+pub(super) async fn checkpoint_unloaded_agent_mail(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    mail: Vec<InterAgentCommunication>,
+) -> ThreadStoreResult<()> {
+    if mail.iter().any(|communication| communication.trigger_turn) {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: "unloaded agent checkpoints require queue-only mail".into(),
+        });
+    }
+    let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
+    store.ensure_live_recorder_absent(thread_id).await?;
+    let writer_lock = store.acquire_writer_lock(thread_id)?;
+    let resolved = super::thread_rollout_resolver::resolve_current(store, thread_id)
+        .await?
+        .ok_or(ThreadStoreError::ThreadNotFound { thread_id })?;
+    let context =
+        super::model_context::load_from_rollout_path(store, thread_id, &resolved.path).await?;
+    let Some(RolloutItem::SessionMeta(header)) = context.items.first() else {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: format!("thread {thread_id} has no canonical session header"),
+        });
+    };
+    if header.meta.id != thread_id {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: format!("thread {thread_id} has a mismatched canonical session header"),
+        });
+    }
+    // Resume does not rewrite the header. This uses the recipient's persisted environment,
+    // without creating a session, turn, user input, or metadata update from the sender.
+    let config = RolloutConfig {
+        codex_home: store.config.codex_home.clone(),
+        sqlite: store.config.sqlite.clone(),
+        cwd: header.meta.cwd.clone(),
+        model_provider_id: header.meta.model_provider.clone().ok_or_else(|| {
+            ThreadStoreError::InvalidRequest {
+                message: format!("thread {thread_id} has no persisted model provider"),
+            }
+        })?,
+        generate_memories: header.meta.memory_mode.as_deref() != Some("disabled"),
+    };
+    let history_mode = header.meta.history_mode;
+    let rollout_id = super::thread_rollout_resolver::rollout_id_from_path_or_legacy_thread_id(
+        &resolved.path,
+        thread_id,
+        history_mode,
+    )?;
+    let recorder = RolloutRecorder::new_with_writer_lock(
+        &config,
+        RolloutRecorderParams::resume(resolved.path.clone()),
+        writer_lock,
+    )
+    .await
+    .map_err(thread_store_io_error)?;
+    let written = checkpoint_mail_to_recorder(store, thread_id, &recorder, mail).await;
+    // Shutdown is awaited even on failure: the background writer, rather than the caller,
+    // owns the cross-process lock until its queued commands finish.
+    let closed = recorder.shutdown().await.map_err(thread_store_io_error);
+    written?;
+    closed?;
+    if history_mode == ThreadHistoryMode::Paginated
+        && let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
+            store,
+            rollout_id,
+            &resolved.path,
+        )
+        .await
+    {
+        warn!("failed to project durable unloaded agent mail for {thread_id}: {err}");
+    }
+    Ok(())
+}
+
+pub(super) async fn checkpoint_live_agent_mail(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    mail: Vec<InterAgentCommunication>,
+) -> ThreadStoreResult<()> {
+    let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
+    let (recorder, _, _) = live_writer_parts(store, thread_id).await?;
+    checkpoint_mail_to_recorder(store, thread_id, &recorder, mail).await
+}
+
+async fn checkpoint_mail_to_recorder(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    recorder: &RolloutRecorder,
+    mail: Vec<InterAgentCommunication>,
+) -> ThreadStoreResult<()> {
+    if mail
+        .iter()
+        .any(|communication| communication.trigger_turn || communication.id.is_none())
+    {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: "agent checkpoints require identified queue-only mail".into(),
+        });
+    }
+    // Finish a previous partial batch before reading its receipt. Retrying must neither
+    // append buffered inputs again nor acknowledge an unresolved writer failure.
+    recorder.flush().await.map_err(thread_store_io_error)?;
+    let context =
+        super::model_context::load_from_rollout_path(store, thread_id, recorder.rollout_path())
+            .await?;
+    let mut received = std::collections::HashMap::new();
+    let mut consumed = std::collections::HashSet::new();
+    for item in context.items.iter() {
+        match item {
+            RolloutItem::InterAgentCommunication(communication) => {
+                if let Some(id) = &communication.id {
+                    received.insert(id.clone(), communication.clone());
+                }
+            }
+            RolloutItem::ResponseItem(envelope) => {
+                if let ResponseItem::AgentMessage { id: Some(id), .. } = &envelope.item {
+                    consumed.insert(id.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut items = Vec::new();
+    for communication in mail {
+        let id = communication
+            .id
+            .clone()
+            .ok_or_else(|| ThreadStoreError::InvalidRequest {
+                message: "agent checkpoint has no message identity".into(),
+            })?;
+        if let Some(previous) = received.get(&id) {
+            if previous != &communication {
+                return Err(ThreadStoreError::InvalidRequest {
+                    message: format!("agent message identity {id} already has different content"),
+                });
+            }
+        } else if consumed.contains(&id) {
+            // An older model-visible record cannot prove the complete native envelope.
+            // Never acknowledge a new payload under an already consumed identity.
+            return Err(ThreadStoreError::InvalidRequest {
+                message: format!("agent message identity {id} has already been consumed"),
+            });
+        } else {
+            received.insert(id, communication.clone());
+            items.push(RolloutItem::InterAgentCommunication(communication));
+        }
+    }
+    durable_write(recorder, RolloutWriteOp::AppendItems(items)).await
 }
 
 pub(super) async fn persist_thread(

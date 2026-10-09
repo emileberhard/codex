@@ -542,6 +542,26 @@ impl ThreadStore for LocalThreadStore {
         Box::pin(async move { live_writer::append_items(self, params).await })
     }
 
+    fn checkpoint_unloaded_agent_mail(
+        &self,
+        thread_id: ThreadId,
+        mail: Vec<codex_protocol::protocol::InterAgentCommunication>,
+    ) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(
+            async move { live_writer::checkpoint_unloaded_agent_mail(self, thread_id, mail).await },
+        )
+    }
+
+    fn checkpoint_live_agent_mail(
+        &self,
+        thread_id: ThreadId,
+        mail: Vec<codex_protocol::protocol::InterAgentCommunication>,
+    ) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(
+            async move { live_writer::checkpoint_live_agent_mail(self, thread_id, mail).await },
+        )
+    }
+
     fn persist_thread(
         &self,
         thread_id: ThreadId,
