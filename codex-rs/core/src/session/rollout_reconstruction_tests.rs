@@ -325,6 +325,48 @@ async fn record_initial_history_reconstructs_typed_inter_agent_message() {
 }
 
 #[tokio::test]
+async fn record_initial_history_consumes_checkpointed_native_mail_once() {
+    let (session, _) = make_session_and_context().await;
+    let mut checkpointed = InterAgentCommunication::new(
+        AgentPath::root(),
+        AgentPath::root().join("worker").expect("path"),
+        Vec::new(),
+        "received native input".into(),
+        false,
+    );
+    checkpointed.id = Some(codex_protocol::ResponseItemId::with_suffix(
+        "amsg",
+        "checkpointed",
+    ));
+    let mut distinct = checkpointed.clone();
+    distinct.id = Some(codex_protocol::ResponseItemId::with_suffix(
+        "amsg", "distinct",
+    ));
+    session
+        .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            history_revision: None,
+            conversation_id: ThreadId::default(),
+            history: Arc::new(vec![
+                RolloutItem::InterAgentCommunication(checkpointed.clone()),
+                // The live owner consumed the same identified input after a failed checkpoint.
+                RolloutItem::ResponseItem(ResponseItemEnvelope::new(
+                    checkpointed.to_model_input_item(),
+                )),
+                RolloutItem::InterAgentCommunication(distinct.clone()),
+            ]),
+            rollout_path: Some(PathBuf::from("/tmp/native-mail-replay.jsonl")),
+        }))
+        .await;
+    assert_eq!(
+        raw_history_items(&session.state.lock().await.clone_history()),
+        vec![
+            checkpointed.to_model_input_item(),
+            distinct.to_model_input_item()
+        ]
+    );
+}
+
+#[tokio::test]
 async fn record_initial_history_ignores_security_risk_scores() {
     let (session, _turn_context) = make_session_and_context().await;
     let user_item = user_message("visible user input");

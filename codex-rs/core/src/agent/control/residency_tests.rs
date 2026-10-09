@@ -79,6 +79,8 @@ async fn residency_slot_reservation_unloads_oldest_idle_v2_agent() {
 
     assert!(manager.get_thread(root.thread_id).await.is_ok());
     assert!(manager.get_thread(second.thread_id).await.is_ok());
+    drop(membership);
+    stop_residency_fixture(&manager).await;
 }
 
 #[tokio::test]
@@ -159,6 +161,15 @@ async fn interrupted_v2_agent_is_lost_after_residency_eviction() {
         },
         Ok(_) => panic!("expected evicted thread to be missing"),
     }
+    drop(membership);
+    stop_residency_fixture(&manager).await;
+}
+
+async fn stop_residency_fixture(manager: &ThreadManager) {
+    let stopped = manager
+        .shutdown_all_threads_bounded(tokio::time::Duration::from_secs(5))
+        .await;
+    assert!(stopped.submit_failed.is_empty() && stopped.timed_out.is_empty());
 }
 
 async fn spawn_v2_subagent(
