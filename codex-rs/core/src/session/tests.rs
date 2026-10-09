@@ -6314,6 +6314,18 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
             .await;
         assert_eq!(rolled_back.turn_attribution, None);
     }
+    if let Some(destination) = std::env::var_os("CODEX_COMPACTION_ATTRIBUTION_FIXTURE") {
+        let fixture = serde_json::json!({
+            "threadId": session.thread_id(),
+            "rollout": tokio::fs::read_to_string(&rollout_path).await.unwrap(),
+            "expectedResumeMetadata": expected,
+            "expectedTurnContext": saved_turn_context,
+            "origin": "actual native Session::replace_compacted_history writer; synthetic turn provenance supplied by existing native lifecycle test",
+        });
+        tokio::fs::write(destination, serde_json::to_vec_pretty(&fixture).unwrap())
+            .await
+            .unwrap();
+    }
 }
 
 #[tokio::test]
@@ -11696,7 +11708,7 @@ enum TerminalEventKind {
     TurnAborted,
 }
 
-async fn attach_in_memory_thread_store(
+pub(super) async fn attach_in_memory_thread_store(
     session: &mut Session,
 ) -> Arc<codex_thread_store::InMemoryThreadStore> {
     let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());

@@ -32,3 +32,10 @@ BEGIN
         first_user_item_id = excluded.first_user_item_id,
         final_agent_item_id = excluded.final_agent_item_id;
 END;
+
+DELETE FROM thread_item_versions;
+DELETE FROM thread_turn_versions;
+DELETE FROM thread_items;
+DELETE FROM thread_realtime_items;
+DELETE FROM thread_turns;
+DELETE FROM thread_history_projection_state;

@@ -933,6 +933,7 @@ impl ModelClient {
         responses_metadata: &CodexResponsesMetadata,
         include_internal: bool,
     ) -> Result<ResponsesApiRequest> {
+        BaseInstructionsFragment::validate_size(&prompt.base_instructions.text)?;
         let mut input = prompt.get_formatted_input_for_request(model_info);
         if !self.reasoning_effort_override_enabled(model_info) {
             // Unsupported models and disabled overrides must also accept saved history.
@@ -2218,6 +2219,7 @@ impl ModelClientSession {
         service_tier: Option<String>,
         responses_metadata: &CodexResponsesMetadata,
     ) -> Result<()> {
+        BaseInstructionsFragment::validate_size(&prompt.base_instructions.text)?;
         if !self.client.responses_websocket_enabled() {
             return Ok(());
         }
@@ -2280,6 +2282,7 @@ impl ModelClientSession {
         responses_metadata: &CodexResponsesMetadata,
         inference_trace: &InferenceTraceContext,
     ) -> Result<ResponseStream> {
+        BaseInstructionsFragment::validate_size(&prompt.base_instructions.text)?;
         let wire_api = self.client.state.provider.info().wire_api;
         match wire_api {
             WireApi::Responses => {

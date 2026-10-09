@@ -1,5 +1,10 @@
 load("//:defs.bzl", "codex_rust_crate")
 
+exports_files(
+    ["thread_history_migrations/1000002_thread_observation_versions.sql"],
+    visibility = ["//codex-rs/thread-store:__pkg__"],
+)
+
 codex_rust_crate(
     name = "state",
     compile_data = glob([

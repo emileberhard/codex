@@ -25,11 +25,7 @@ async fn observation_keeps_lineage_and_lifecycle_before_enrichment() {
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
-            items: vec![
-                turn_started("turn-1"),
-                completed(/*started_at_ms*/ None),
-                turn_completed("turn-1"),
-            ],
+            items: vec![turn_started("turn-1"), completed(/*started_at_ms*/ None)],
         })
         .await
         .unwrap();
@@ -201,4 +197,235 @@ async fn observation_keeps_lineage_and_lifecycle_before_enrichment() {
         fs::write(destination, serde_json::to_vec_pretty(&fixture).unwrap()).unwrap();
     }
     store.shutdown_thread(thread_id).await.unwrap();
+}
+
+#[tokio::test]
+async fn observation_retains_known_lifecycle_after_unknown_completion() {
+    assert_effective_item_version(LifecycleUpdate::UnknownCompletion).await;
+}
+
+#[tokio::test]
+async fn observation_retains_completed_item_after_late_incomplete() {
+    assert_effective_item_version(LifecycleUpdate::LateIncomplete).await;
+}
+
+enum LifecycleUpdate {
+    UnknownCompletion,
+    LateIncomplete,
+}
+
+async fn assert_effective_item_version(update: LifecycleUpdate) {
+    let home = TempDir::new().unwrap();
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .unwrap();
+    let completed = |started_at_ms, completed_at_ms| {
+        RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+            thread_id,
+            turn_id: "turn-lifecycle".into(),
+            item: agent_message("known-lifecycle", MessagePhase::FinalAnswer),
+            started_at_ms,
+            completed_at_ms,
+        }))
+    };
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![
+                turn_started_with_root("turn-lifecycle", "root-lifecycle"),
+                completed(Some(1000), 2000),
+            ],
+        })
+        .await
+        .unwrap();
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![match update {
+                LifecycleUpdate::UnknownCompletion => completed(/*started_at_ms*/ None, 3000),
+                LifecycleUpdate::LateIncomplete => {
+                    let mut item = agent_message("known-lifecycle", MessagePhase::FinalAnswer);
+                    if let TurnItem::AgentMessage(message) = &mut item {
+                        message.content = vec![AgentMessageContent::Text {
+                            text: "late incomplete payload".into(),
+                        }];
+                    }
+                    RolloutItem::EventMsg(EventMsg::ItemStarted(
+                        codex_protocol::protocol::ItemStartedEvent {
+                            thread_id,
+                            turn_id: "turn-lifecycle".into(),
+                            item,
+                            started_at_ms: 1500,
+                        },
+                    ))
+                }
+            }],
+        })
+        .await
+        .unwrap();
+    let checkpoint = store.observation_cursors(thread_id).await.unwrap();
+    let items = crate::ListItemsParams {
+        thread_id,
+        include_archived: false,
+        item_id: None,
+        page_size: 10,
+        sort_direction: SortDirection::Desc,
+        turn_id: None,
+        after_updated_at_ordinal: None,
+        position: None,
+        sort_key: crate::ItemSortKey::CreatedAtOrdinal,
+    };
+    let live = store.list_items(items.clone()).await.unwrap();
+    assert_eq!(live.items.len(), 1);
+    assert_eq!(live.items[0].started_at_ms, Some(1000));
+    assert_eq!(live.items[0].completed_at_ms, Some(2000));
+    let frozen_items = crate::ListItemsParams {
+        position: checkpoint.items.map(crate::ListItemsPosition::Cursor),
+        ..items
+    };
+    for rebuild in [false, true] {
+        if rebuild {
+            super::super::super::thread_history::delete_thread(&store, thread_id)
+                .await
+                .unwrap();
+        }
+        let frozen = store.list_items(frozen_items.clone()).await.unwrap();
+        assert_eq!(frozen.items.len(), 1);
+        assert_eq!(frozen.items[0].started_at_ms, live.items[0].started_at_ms);
+        assert_eq!(
+            frozen.items[0].completed_at_ms,
+            live.items[0].completed_at_ms
+        );
+        assert_eq!(frozen.items[0].item_json, live.items[0].item_json);
+        assert_eq!(frozen.items[0].is_complete, live.items[0].is_complete);
+    }
+    store.shutdown_thread(thread_id).await.unwrap();
+}
+
+#[tokio::test]
+async fn observation_migrates_e520_lifecycle_versions_from_canonical_history() {
+    let home = TempDir::new().unwrap();
+    let store = projection_store(home.path()).await;
+    let thread_id = ThreadId::default();
+    create_paginated_thread(&store, thread_id).await;
+    seed_paginated_thread_metadata(&store, thread_id).await;
+    store
+        .persist_thread(thread_id, PersistContext::Standard)
+        .await
+        .unwrap();
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![
+                turn_started("turn-migration"),
+                RolloutItem::EventMsg(EventMsg::ItemStarted(
+                    codex_protocol::protocol::ItemStartedEvent {
+                        thread_id,
+                        turn_id: "turn-migration".into(),
+                        item: agent_message("known-source-start", MessagePhase::Commentary),
+                        started_at_ms: 1000,
+                    },
+                )),
+                RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                    thread_id,
+                    turn_id: "turn-migration".into(),
+                    item: agent_message("unknown-source-start", MessagePhase::FinalAnswer),
+                    started_at_ms: None,
+                    completed_at_ms: 2000,
+                })),
+            ],
+        })
+        .await
+        .unwrap();
+    let checkpoint = store.observation_cursors(thread_id).await.unwrap();
+    let items = crate::ListItemsParams {
+        thread_id,
+        include_archived: false,
+        item_id: None,
+        page_size: 10,
+        sort_direction: SortDirection::Desc,
+        turn_id: None,
+        after_updated_at_ordinal: None,
+        position: checkpoint.items.map(crate::ListItemsPosition::Cursor),
+        sort_key: crate::ItemSortKey::CreatedAtOrdinal,
+    };
+    let before = store.list_items(items.clone()).await.unwrap();
+    assert_eq!(before.items.len(), 2);
+    assert_eq!(
+        before
+            .items
+            .iter()
+            .find(|item| item.item_id == "known-source-start")
+            .unwrap()
+            .started_at_ms,
+        Some(1000)
+    );
+    assert_eq!(
+        before
+            .items
+            .iter()
+            .find(|item| item.item_id == "unknown-source-start")
+            .unwrap()
+            .started_at_ms,
+        None
+    );
+    store
+        .append_items(AppendThreadItemsParams {
+            thread_id,
+            items: vec![
+                RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                    thread_id,
+                    turn_id: "turn-migration".into(),
+                    item: agent_message("known-source-start", MessagePhase::FinalAnswer),
+                    started_at_ms: None,
+                    completed_at_ms: 3000,
+                })),
+                RolloutItem::EventMsg(EventMsg::ItemCompleted(ItemCompletedEvent {
+                    thread_id,
+                    turn_id: "turn-migration".into(),
+                    item: agent_message("unknown-source-start", MessagePhase::FinalAnswer),
+                    started_at_ms: Some(1500),
+                    completed_at_ms: 3000,
+                })),
+                turn_completed("turn-migration"),
+            ],
+        })
+        .await
+        .unwrap();
+    let rollout = store.live_rollout_path(thread_id).await.unwrap();
+    let canonical = fs::read(&rollout).unwrap();
+    store.shutdown_thread(thread_id).await.unwrap();
+    drop(store);
+    let pool = codex_state::open_thread_history_db(&codex_state::SqliteConfig::new_for_testing(
+        home.path().abs(),
+    ))
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        "DROP TRIGGER thread_observation_turn_insert; DROP TRIGGER thread_observation_turn_update;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let old = include_str!(
+        "../../../state/thread_history_migrations/1000002_thread_observation_versions.sql"
+    );
+    sqlx::raw_sql(&old[old.find("CREATE TRIGGER").unwrap()..])
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql("ALTER TABLE thread_item_versions DROP COLUMN started_at_ms; ALTER TABLE thread_turn_versions DROP COLUMN root_turn_id; ALTER TABLE thread_turns DROP COLUMN root_turn_id; DELETE FROM _sqlx_migrations WHERE version IN (8, 1000004);").execute(&pool).await.unwrap();
+    pool.close().await;
+    let migrated = projection_store(home.path()).await;
+    let after = migrated.list_items(items).await.unwrap();
+    assert_eq!(
+        serde_json::to_value(after).unwrap(),
+        serde_json::to_value(before).unwrap()
+    );
+    assert_eq!(fs::read(rollout).unwrap(), canonical);
 }

@@ -505,16 +505,12 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
         .map_err(thread_history_error)?;
 
         sqlx::query(
-            "INSERT OR IGNORE INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, started_at_ms, completed_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, started_at_ms, completed_at_ms) SELECT thread_id, turn_id, item_id, updated_at_ordinal, item_json, is_complete, started_at_ms, completed_at_ms FROM thread_items WHERE thread_id = ? AND turn_id = ? AND item_id = ? AND updated_at_ordinal = ?",
         )
         .bind(thread_id)
         .bind(item.turn_id.as_str())
         .bind(item_id.as_str())
         .bind(rollout_ordinal)
-        .bind(item_json.as_str())
-        .bind(item.is_complete)
-        .bind(item.started_at_ms)
-        .bind(item.completed_at_ms)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;

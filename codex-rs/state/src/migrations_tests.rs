@@ -32,6 +32,24 @@ fn migrator_through(version: i64) -> Migrator {
     }
 }
 
+fn thread_history_migrator_through(version: i64) -> Migrator {
+    Migrator {
+        migrations: Cow::Owned(
+            THREAD_HISTORY_MIGRATOR
+                .migrations
+                .iter()
+                .filter(|migration| migration.version <= version)
+                .cloned()
+                .collect(),
+        ),
+        ignore_missing: true,
+        locking: THREAD_HISTORY_MIGRATOR.locking,
+        table_name: THREAD_HISTORY_MIGRATOR.table_name.clone(),
+        create_schemas: THREAD_HISTORY_MIGRATOR.create_schemas.clone(),
+        no_tx: THREAD_HISTORY_MIGRATOR.no_tx,
+    }
+}
+
 #[tokio::test]
 async fn guardian_metadata_cleanup_preserves_custom_names_and_titles() {
     let sqlite_home = crate::runtime::test_support::unique_temp_dir();
@@ -552,7 +570,7 @@ INSERT INTO thread_items (thread_id, turn_id, item_id, rollout_ordinal, created_
     .execute(&pool)
     .await
     .expect("pre-migration items should be inserted");
-    THREAD_HISTORY_MIGRATOR
+    thread_history_migrator_through(4)
         .run(&pool)
         .await
         .expect("update-ordinal migration should apply");
@@ -574,6 +592,25 @@ INSERT INTO thread_items (thread_id, turn_id, item_id, rollout_ordinal, created_
     .await
     .expect("old-writer items should load");
     assert_eq!(ordinals, vec![(11, 11), (12, 12), (13, 0), (14, 0)]);
+    THREAD_HISTORY_MIGRATOR.run(&pool).await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM thread_items")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
+    sqlx::query("INSERT INTO thread_items (thread_id, turn_id, item_id, rollout_ordinal, created_at_ms, item_type, item_json) VALUES ('thread-1', 'turn-1', 'current-old-writer', 15, 1500, 'userMessage', '{}')")
+        .execute(&pool).await.unwrap();
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT rollout_ordinal, updated_at_ordinal FROM thread_items"
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap(),
+        vec![(15, 0)]
+    );
 
     pool.close().await;
 }
@@ -623,7 +660,7 @@ async fn realtime_items_preserve_older_thread_history_writers() {
         .await
         .expect("insert an existing projection checkpoint");
 
-    THREAD_HISTORY_MIGRATOR
+    thread_history_migrator_through(5)
         .run(&pool)
         .await
         .expect("realtime item migration should apply");
@@ -1065,7 +1102,10 @@ async fn observation_turn_versions_preserve_backfill_and_older_writers() {
         .execute(&pool)
         .await
         .unwrap();
-    THREAD_HISTORY_MIGRATOR.run(&pool).await.unwrap();
+    thread_history_migrator_through(1000002)
+        .run(&pool)
+        .await
+        .unwrap();
     // The actual runtime migrator permits rollback onto this newer schema.
     older.run(&pool).await.unwrap();
     sqlx::query(

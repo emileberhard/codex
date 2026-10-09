@@ -329,6 +329,7 @@ async fn schedule_startup_prewarm_inner(
         return Ok(client_session);
     }
     let base_instructions = session.get_prompt_base_instructions().await.text;
+    crate::context::BaseInstructionsFragment::validate_size(&base_instructions)?;
     let startup_turn_context = session
         .new_startup_prewarm_turn_with_sub_id(INITIAL_SUBMIT_ID.to_owned())
         .await;

@@ -2,5 +2,6 @@ load("//:defs.bzl", "codex_rust_crate")
 
 codex_rust_crate(
     name = "thread-store",
+    compile_data = ["//codex-rs/state:thread_history_migrations/1000002_thread_observation_versions.sql"],
     crate_name = "codex_thread_store",
 )

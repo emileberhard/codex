@@ -194,10 +194,10 @@ async fn assert_legacy_database_repairs(latest_version: i64) {
     let item = sqlx::query_as::<_, (Option<i64>, Option<i64>, i64)>(
         "SELECT started_at_ms, completed_at_ms, is_complete FROM thread_items WHERE item_id = 'item'",
     )
-    .fetch_one(&pool)
+    .fetch_optional(&pool)
     .await
-    .expect("legacy item should remain readable");
-    assert_eq!(item, (None, Some(250), 1));
+    .expect("derived legacy item invalidation should be readable");
+    assert_eq!(item, None);
     pool.close().await;
 
     let reopened = sqlite
