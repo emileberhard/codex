@@ -686,6 +686,10 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .expect("existing projection checkpoint survives migration");
     assert_eq!(checkpoint, (42, 3));
 
+    thread_history_migrator_through(/*version*/ 8)
+        .run(&pool)
+        .await
+        .expect("root turn migration should apply before older writers resume");
     let older_pool = sqlite
         .open_thread_history_db(&older_migrator, /*telemetry_override*/ None)
         .await
