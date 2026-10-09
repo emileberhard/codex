@@ -241,10 +241,9 @@ impl InputQueue {
     pub(crate) async fn drain_mailbox(&self) -> Vec<PendingMailboxCommunication> {
         let mut pending = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut pending);
-        self.mailbox_restart_admission
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
+        if self.has_unresolved_mail_checkpoint() {
+            return Vec::new();
+        }
         pending.drain(..).collect()
     }
 

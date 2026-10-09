@@ -556,11 +556,6 @@ impl ContextManager {
         if !is_api_message(item, metadata) {
             return None;
         }
-        if matches!(item, ResponseItem::AgentMessage { id: Some(_), .. })
-            && self.raw_items().any(|previous| previous == item)
-        {
-            return None;
-        }
         let mut processed = ResponseItemEnvelope {
             item: item.clone(),
             metadata: metadata.cloned(),

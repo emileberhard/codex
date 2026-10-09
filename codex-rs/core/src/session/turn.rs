@@ -428,6 +428,7 @@ pub(crate) async fn run_turn(
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
         let pending_input = if can_drain_pending_input {
+            sess.reconcile_mailbox_before_consumption().await?;
             sess.input_queue
                 .get_pending_input(&sess.active_turn)
                 .await

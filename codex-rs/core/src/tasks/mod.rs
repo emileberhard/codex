@@ -312,6 +312,11 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
+        if let Err(err) = self.reconcile_mailbox_before_consumption().await {
+            self.send_event(&turn_context, EventMsg::Error(err.to_error_event(None)))
+                .await;
+            return;
+        }
         let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
         let turn_state = {
             let mut active = self.active_turn.lock().await;
@@ -474,6 +479,30 @@ impl Session {
             .refresh_after_auth_change(self.get_config().await.http_client_factory())
             .await;
         // A completion-triggered wakeup can be interrupted while discovery waits.
+        if self
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .is_none_or(|turn| !Arc::ptr_eq(&turn.turn_state, &turn_state))
+        {
+            return;
+        }
+        if let Err(err) = self.reconcile_mailbox_before_consumption().await {
+            self.send_event_raw_without_materializing_rollout(codex_protocol::protocol::Event {
+                id: sub_id,
+                msg: EventMsg::Error(err.to_error_event(None)),
+            })
+            .await;
+            let mut active = self.active_turn.lock().await;
+            if active
+                .as_ref()
+                .is_some_and(|turn| Arc::ptr_eq(&turn.turn_state, &turn_state))
+            {
+                active.take();
+            }
+            return;
+        }
         if self
             .active_turn
             .lock()

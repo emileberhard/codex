@@ -13429,3 +13429,6 @@ async fn rejected_mcp_refresh_then_corrected_user_config_blocks_ordinary_replace
         "rejection must not permit same-name ordinary-auth replacement in this session"
     );
 }
+
+#[path = "mailbox_checkpoint_tests.rs"]
+mod mailbox_checkpoint_tests;
