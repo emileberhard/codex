@@ -1,25 +1,12 @@
 use super::ContextualUserFragment;
-use codex_protocol::error::CodexErr;
-use codex_protocol::error::Result;
 use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ResponseItem;
-use codex_utils_output_truncation::approx_token_count;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BaseInstructionsFragment(pub(crate) String);
 
 impl BaseInstructionsFragment {
     pub(crate) const KIND: &str = "model.base_instructions";
-
-    pub(crate) fn validate_size(text: &str) -> Result<()> {
-        let estimated_tokens = approx_token_count(text);
-        if estimated_tokens > 10_000 {
-            return Err(CodexErr::InvalidRequest(format!(
-                "Base instructions contain {estimated_tokens} estimated tokens; the limit is 10000. Shorten the configured or saved base instructions before retrying."
-            )));
-        }
-        Ok(())
-    }
 
     pub(crate) fn matches_item(item: &ResponseItem) -> bool {
         let ResponseItem::Message {

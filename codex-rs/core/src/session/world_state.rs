@@ -3,7 +3,6 @@ use std::sync::Arc;
 use super::session::Session;
 use super::step_context::StepContext;
 use crate::connectors;
-use crate::context::BaseInstructionsFragment;
 use crate::context::TokenBudgetContext;
 use crate::context::world_state::AgentsMdState;
 use crate::context::world_state::AppsInstructionsState;
@@ -72,7 +71,6 @@ impl Session {
             model_instructions
         };
         let base_instructions = self.get_prompt_base_instructions().await.text;
-        BaseInstructionsFragment::validate_size(&base_instructions)?;
         let previous_model = {
             let state = self.state.lock().await;
             state

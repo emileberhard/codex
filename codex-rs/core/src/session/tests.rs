@@ -11708,7 +11708,7 @@ enum TerminalEventKind {
     TurnAborted,
 }
 
-pub(super) async fn attach_in_memory_thread_store(
+async fn attach_in_memory_thread_store(
     session: &mut Session,
 ) -> Arc<codex_thread_store::InMemoryThreadStore> {
     let store = Arc::new(codex_thread_store::InMemoryThreadStore::default());
