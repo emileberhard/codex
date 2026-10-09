@@ -402,10 +402,19 @@ impl CodexThread {
         } else {
             None
         };
+        let residency_guard = if op.requires_new_work_admission() {
+            Some(Arc::clone(&self.residency_gate).read_owned().await)
+        } else {
+            None
+        };
         self.io
             .submit_with_trace(
-                op, trace, /*parent_turn_id*/ None, /*root_turn_id*/ None, admission,
-                /*residency_guard*/ None,
+                op,
+                trace,
+                /*parent_turn_id*/ None,
+                /*root_turn_id*/ None,
+                admission,
+                residency_guard,
             )
             .await
     }
@@ -623,6 +632,7 @@ impl CodexThread {
             .services
             .local_agent_runtime
             .acquire_new_work_admission()?;
+        let residency_guard = Arc::clone(&self.residency_gate).read_owned().await;
         if !matches!(mode, TurnInputMode::Steer { .. }) {
             self.ensure_execution_capacity_for_turn_start(
                 self.session.services.agent_control.as_ref(),
@@ -630,7 +640,7 @@ impl CodexThread {
             .await?;
         }
         self.io
-            .submit_turn_input(request, mode, Some(_admission))
+            .submit_turn_input(request, mode, Some(_admission), Some(residency_guard))
             .await
     }
 

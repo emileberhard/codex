@@ -176,7 +176,8 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
         .expect("earlier session usage should be recorded");
     session
         .spawn_task(Arc::clone(&turn_context), Vec::new(), PendingTask)
-        .await;
+        .await
+        .expect("task starts");
     let mut expected_usage = Vec::new();
     if matches!(
         scenario,

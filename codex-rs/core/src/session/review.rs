@@ -168,8 +168,14 @@ pub(super) async fn spawn_review_thread(
     // TODO(ccunningham): Review turns currently rely on `spawn_task` for TurnComplete but do not
     // emit a parent TurnStarted. Consider giving review a full parent turn lifecycle
     // (TurnStarted + TurnComplete) for consistency with other standalone tasks.
-    sess.spawn_task(Arc::clone(&tc), input, ReviewTask::new())
-        .await;
+    if let Err(err) = sess
+        .spawn_task(Arc::clone(&tc), input, ReviewTask::new())
+        .await
+    {
+        sess.send_event(&tc, EventMsg::Error(err.to_error_event(None)))
+            .await;
+        return;
+    }
 
     // Announce entering review mode so UIs can switch modes.
     let item = TurnItem::EnteredReviewMode(EnteredReviewModeItem {

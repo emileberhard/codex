@@ -107,7 +107,7 @@ pub(super) async fn suspend_turn_and_shutdown(
         }
     }
     session.reconcile_mailbox_before_consumption().await?;
-    let pending_input = session.input_queue.take_restart_input(&turn).await;
+    let pending_input = session.input_queue.take_restart_input(&turn).await?;
     run_hooks_and_record_inputs(
         session,
         &task.turn_context,

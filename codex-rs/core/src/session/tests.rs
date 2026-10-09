@@ -637,7 +637,8 @@ async fn regular_turn_emits_turn_started_with_trace_id_without_waiting_for_start
         Vec::new(),
         crate::tasks::RegularTask::new(),
     )
-    .await;
+    .await
+    .expect("task starts");
 
     let first = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
         .await
@@ -793,7 +794,8 @@ async fn interrupting_regular_turn_waiting_on_startup_prewarm_emits_turn_aborted
         Vec::new(),
         crate::tasks::RegularTask::new(),
     )
-    .await;
+    .await
+    .expect("task starts");
 
     let first = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv())
         .await
@@ -3719,7 +3721,8 @@ async fn turn_start_lifecycle_exposes_turn_metadata_and_token_baseline() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 
     let actual = records
@@ -8335,7 +8338,8 @@ async fn new_task_does_not_change_an_already_running_tasks_environments() {
                 finish: Arc::clone(&finish),
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let candidate = session
         .new_turn_with_default_settings("candidate".into(), Default::default())
@@ -8609,7 +8613,8 @@ async fn spawn_task_turn_span_inherits_dispatch_trace_context() {
                 captured_trace: Arc::clone(&captured_trace),
             },
         )
-        .await;
+        .await
+        .expect("task starts");
     }
     .instrument(dispatch_span)
     .await;
@@ -8903,7 +8908,8 @@ async fn submission_loop_channel_close_aborts_active_turn_before_thread_stop_lif
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let (tx_sub, rx_sub) = async_channel::bounded(1);
     drop(tx_sub);
@@ -9642,7 +9648,8 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
     };
     session
         .spawn_task(Arc::clone(&old_turn), Vec::new(), task)
-        .await;
+        .await
+        .expect("task starts");
 
     session.mark_mcp_runtime_dirty();
     session.refresh_mcp_if_dirty().await;
@@ -9768,7 +9775,8 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
         .expect("next turn should start with the same reviewer");
     session
         .spawn_task(Arc::clone(&next_turn), Vec::new(), task)
-        .await;
+        .await
+        .expect("task starts");
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
         session
@@ -9806,7 +9814,10 @@ async fn mcp_elicitation_reviewer_uses_active_reviewer_and_latest_runtime_policy
     let restricted_turn = session
         .new_turn_with_default_settings("owner-restricted".to_string(), Default::default())
         .await;
-    session.spawn_task(restricted_turn, Vec::new(), task).await;
+    session
+        .spawn_task(restricted_turn, Vec::new(), task)
+        .await
+        .expect("task starts");
     session.refresh_mcp_if_dirty().await;
     assert_eq!(
         session
@@ -10210,7 +10221,8 @@ async fn spawn_task_does_not_update_previous_turn_settings_for_non_run_turn_task
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
     assert_eq!(sess.previous_turn_settings().await, None);
@@ -11822,7 +11834,8 @@ async fn finished_turn_retains_last_known_step_context(terminal: TerminalEventKi
                 finish: Arc::clone(&finish),
             },
         )
-        .await;
+        .await
+        .expect("task starts");
     let expected = session
         .capture_step_context(turn, &CancellationToken::new())
         .await
@@ -11903,7 +11916,8 @@ async fn remote_compaction_v2_retains_only_the_selected_step(first_attempt: Firs
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
     let primary_turn = Arc::new(
         turn.with_model("gpt-5.4".to_string(), &session.services.models_manager)
             .await,
@@ -12035,7 +12049,8 @@ async fn interrupting_compaction_fallback_retains_last_known_step_context() {
         .await;
     session
         .spawn_task(turn, Vec::new(), crate::tasks::RegularTask::new())
-        .await;
+        .await
+        .expect("task starts");
     let state = {
         let active = session.active_turn.lock().await;
         Arc::clone(&active.as_ref().expect("active turn").turn_state)
@@ -12109,7 +12124,8 @@ async fn extension_interrupt_emits_thread_idle() {
 
     Arc::new(session)
         .spawn_task(Arc::new(turn_context), Vec::new(), ExtensionInterruptedTask)
-        .await;
+        .await
+        .expect("task starts");
 
     timeout(StdDuration::from_secs(5), idle_rx.recv())
         .await
@@ -12136,7 +12152,8 @@ async fn extension_interrupt_survives_the_calling_runtime() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     let session_for_review = Arc::clone(&sess);
     let review_thread = std::thread::spawn(move || {
@@ -12194,7 +12211,8 @@ async fn turn_complete_flushes_terminal_event_after_delivery() {
         client_id: None,
     }];
     sess.spawn_task(Arc::clone(&tc), input, CompletingTask)
-        .await;
+        .await
+        .expect("task starts");
 
     let event = recv_terminal_event(&rx, TerminalEventKind::TurnComplete).await;
     assert!(matches!(event.msg, EventMsg::TurnComplete(_)));
@@ -12229,7 +12247,8 @@ async fn turn_aborted_flushes_terminal_event_after_delivery() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     let abort_task = tokio::spawn({
         let sess = Arc::clone(&sess);
@@ -12272,7 +12291,8 @@ async fn abort_regular_task_emits_marker_before_turn_aborted() {
             listen_to_cancellation_token: false,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 
@@ -12314,7 +12334,8 @@ async fn abort_gracefully_emits_marker_before_turn_aborted() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 
@@ -12391,7 +12412,8 @@ async fn task_finish_emits_turn_item_lifecycle_for_leftover_pending_user_input()
             listen_to_cancellation_token: false,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     while rx.try_recv().is_ok() {}
 
@@ -12553,7 +12575,8 @@ async fn task_finish_emits_thread_idle_lifecycle_after_active_turn_clears() {
     let session = Arc::new(session);
     session
         .spawn_task(Arc::new(turn_context), Vec::new(), CompletingTask)
-        .await;
+        .await
+        .expect("task starts");
 
     timeout(StdDuration::from_secs(2), idle_rx.recv())
         .await
@@ -12670,7 +12693,8 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12687,6 +12711,7 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
         sess.input_queue
             .get_pending_input(&sess.active_turn)
             .await
+            .expect("mailbox input remains available")
             .0,
         Vec::new()
     );
@@ -12694,7 +12719,12 @@ async fn queue_only_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
     sess.abort_all_tasks(TurnAbortReason::Replaced).await;
 
     assert_eq!(
-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
+        (sess
+            .input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .expect("mailbox input remains available"))
+        .0,
         vec![TurnInput::InterAgentCommunication(communication)],
     );
 }
@@ -12710,7 +12740,8 @@ async fn trigger_turn_mailbox_mail_waits_for_next_turn_after_answer_boundary() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12788,12 +12819,18 @@ async fn active_turn_keeps_first_root_when_mail_coalesces(inherited_root: Option
                     listen_to_cancellation_token: true,
                 },
             )
-            .await;
+            .await
+            .expect("task starts");
         }
     }
 
     assert_eq!(
-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
+        (sess
+            .input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .expect("mailbox input remains available"))
+        .0,
         vec![
             TurnInput::InterAgentCommunication(first),
             TurnInput::InterAgentCommunication(second),
@@ -12826,7 +12863,8 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12846,7 +12884,12 @@ async fn steered_input_reopens_mailbox_delivery_for_current_turn() {
     assert!(matches!(submission, TurnInputSubmission::Steered { .. }));
 
     assert_eq!(
-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
+        (sess
+            .input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .expect("mailbox input remains available"))
+        .0,
         vec![
             TurnInput::UserInput {
                 metadata: crate::session::UserInputMetadata {
@@ -12882,7 +12925,8 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12906,7 +12950,12 @@ async fn stale_defer_mailbox_delivery_does_not_override_steered_input() {
         .await;
 
     assert_eq!(
-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
+        (sess
+            .input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .expect("mailbox input remains available"))
+        .0,
         vec![
             TurnInput::UserInput {
                 metadata: crate::session::UserInputMetadata {
@@ -12942,7 +12991,8 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
             listen_to_cancellation_token: true,
         },
     )
-    .await;
+    .await
+    .expect("task starts");
 
     sess.input_queue
         .defer_mailbox_delivery_to_next_turn(&sess.active_turn, &tc.sub_id)
@@ -12975,7 +13025,12 @@ async fn tool_calls_reopen_mailbox_delivery_for_current_turn() {
     assert!(output.needs_follow_up);
     assert!(output.tool_future.is_some());
     assert_eq!(
-        (sess.input_queue.get_pending_input(&sess.active_turn).await).0,
+        (sess
+            .input_queue
+            .get_pending_input(&sess.active_turn)
+            .await
+            .expect("mailbox input remains available"))
+        .0,
         vec![TurnInput::InterAgentCommunication(communication)],
     );
 }
@@ -12992,7 +13047,8 @@ async fn abort_review_task_emits_exited_then_aborted_and_records_history() {
         client_id: None,
     }];
     sess.spawn_task(Arc::clone(&tc), input, ReviewTask::new())
-        .await;
+        .await
+        .expect("task starts");
 
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
 

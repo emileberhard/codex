@@ -238,17 +238,23 @@ impl InputQueue {
             .any(|mail| mail.communication.trigger_turn)
     }
 
-    pub(crate) async fn drain_mailbox(&self) -> Vec<PendingMailboxCommunication> {
+    pub(crate) async fn drain_mailbox(
+        &self,
+    ) -> codex_protocol::error::Result<Vec<PendingMailboxCommunication>> {
         let mut pending = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut pending);
         if self.has_unresolved_mail_checkpoint() {
-            return Vec::new();
+            return Err(codex_protocol::error::CodexErr::InvalidRequest(
+                "agent mailbox checkpoint is unresolved; input was not consumed".into(),
+            ));
         }
-        pending.drain(..).collect()
+        Ok(pending.drain(..).collect())
     }
 
-    pub(crate) async fn drain_mailbox_input_items(&self) -> (Vec<TurnInput>, TurnStartOptions) {
-        let pending_mails = self.drain_mailbox().await;
+    pub(crate) async fn drain_mailbox_input_items(
+        &self,
+    ) -> codex_protocol::error::Result<(Vec<TurnInput>, TurnStartOptions)> {
+        let pending_mails = self.drain_mailbox().await?;
         // A later follow-up supersedes the earlier choice, including an omitted choice.
         let mut start_options = pending_mails
             .iter()
@@ -278,7 +284,7 @@ impl InputQueue {
             .into_iter()
             .map(|mail| TurnInput::InterAgentCommunication(mail.communication))
             .collect();
-        (items, start_options)
+        Ok((items, start_options))
     }
 
     pub(crate) async fn turn_state_for_sub_id(
@@ -407,34 +413,19 @@ impl InputQueue {
     pub(crate) async fn get_pending_input(
         &self,
         active_turn: &Mutex<Option<ActiveTurn>>,
-    ) -> (Vec<TurnInput>, TurnStartOptions) {
-        let (pending_input, accepts_mailbox_delivery) = {
-            let mut active = active_turn.lock().await;
-            match active.as_mut() {
-                Some(active_turn) => {
-                    let mut turn_state = active_turn.turn_state.lock().await;
-                    let accepts_mailbox_delivery =
-                        turn_state.accepts_mailbox_delivery_for_current_turn();
-                    let pending_input = if accepts_mailbox_delivery {
-                        turn_state.pending_input.items.split_off(0)
-                    } else {
-                        Vec::new()
-                    };
-                    (pending_input, accepts_mailbox_delivery)
-                }
-                None => (Vec::new(), true),
+    ) -> codex_protocol::error::Result<(Vec<TurnInput>, TurnStartOptions)> {
+        let mut active = active_turn.lock().await;
+        if let Some(active_turn) = active.as_mut() {
+            let mut turn_state = active_turn.turn_state.lock().await;
+            if !turn_state.accepts_mailbox_delivery_for_current_turn() {
+                return Ok((Vec::new(), TurnStartOptions::default()));
             }
-        };
-        if !accepts_mailbox_delivery {
-            return (pending_input, TurnStartOptions::default());
-        }
-        let (mailbox_items, start_options) = self.drain_mailbox_input_items().await;
-        if pending_input.is_empty() {
-            (mailbox_items, start_options)
-        } else {
-            let mut pending_input = pending_input;
+            let (mailbox_items, start_options) = self.drain_mailbox_input_items().await?;
+            let mut pending_input = turn_state.pending_input.items.split_off(0);
             pending_input.extend(mailbox_items);
-            (pending_input, start_options)
+            Ok((pending_input, start_options))
+        } else {
+            self.drain_mailbox_input_items().await
         }
     }
 
@@ -466,7 +457,11 @@ impl InputQueue {
     }
 
     /// Drain input that must be written to history before restart handoff.
-    pub(crate) async fn take_restart_input(&self, active_turn: &ActiveTurn) -> Vec<TurnInput> {
+    pub(crate) async fn take_restart_input(
+        &self,
+        active_turn: &ActiveTurn,
+    ) -> codex_protocol::error::Result<Vec<TurnInput>> {
+        let mailbox_input = self.drain_mailbox_input_items().await?.0;
         let mut input = active_turn
             .turn_state
             .lock()
@@ -474,8 +469,8 @@ impl InputQueue {
             .pending_input
             .items
             .split_off(0);
-        input.extend(self.drain_mailbox_input_items().await.0);
-        input
+        input.extend(mailbox_input);
+        Ok(input)
     }
 }
 
@@ -719,7 +714,11 @@ mod tests {
             .await;
 
         assert_eq!(
-            input_queue.drain_mailbox_input_items().await.0,
+            input_queue
+                .drain_mailbox_input_items()
+                .await
+                .expect("mailbox input remains available")
+                .0,
             vec![
                 TurnInput::InterAgentCommunication(mail_one),
                 TurnInput::InterAgentCommunication(mail_two)
@@ -764,13 +763,17 @@ mod tests {
             .await;
 
         assert_eq!(
-            input_queue.take_restart_input(&active_turn).await,
+            input_queue
+                .take_restart_input(&active_turn)
+                .await
+                .expect("restart input remains available"),
             vec![steer, TurnInput::InterAgentCommunication(mail)]
         );
         assert!(
             input_queue
                 .take_restart_input(&active_turn)
                 .await
+                .expect("restart input remains available")
                 .is_empty()
         );
     }
@@ -813,7 +816,10 @@ mod tests {
                     )
                     .await;
             }
-            let (_, start_options) = input_queue.drain_mailbox_input_items().await;
+            let (_, start_options) = input_queue
+                .drain_mailbox_input_items()
+                .await
+                .expect("mailbox input remains available");
             assert_eq!(
                 start_options.parent_turn_id.as_deref(),
                 expected_parent_turn_id
@@ -843,7 +849,10 @@ mod tests {
                     )
                     .await;
             }
-            let (_, start_options) = input_queue.drain_mailbox_input_items().await;
+            let (_, start_options) = input_queue
+                .drain_mailbox_input_items()
+                .await
+                .expect("mailbox input remains available");
             assert_eq!(start_options.cyber_access_program, latest);
         }
     }

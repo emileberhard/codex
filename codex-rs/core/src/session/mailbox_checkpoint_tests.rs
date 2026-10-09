@@ -63,8 +63,7 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
             .input_queue
             .drain_mailbox_input_items()
             .await
-            .0
-            .is_empty()
+            .is_err()
     );
     session
         .reconcile_mailbox_before_consumption()
@@ -136,7 +135,12 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
             .await
             .expect("checkpoint settles before consumption");
     }
-    let input = session.input_queue.drain_mailbox_input_items().await.0;
+    let input = session
+        .input_queue
+        .drain_mailbox_input_items()
+        .await
+        .expect("mailbox input remains available")
+        .0;
     assert_eq!(
         input,
         vec![

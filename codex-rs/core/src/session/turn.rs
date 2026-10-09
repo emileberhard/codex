@@ -431,7 +431,7 @@ pub(crate) async fn run_turn(
             sess.reconcile_mailbox_before_consumption().await?;
             sess.input_queue
                 .get_pending_input(&sess.active_turn)
-                .await
+                .await?
                 .0
         } else {
             Vec::new()

@@ -127,7 +127,8 @@ async fn steering_does_not_wait_for_realtime_history() {
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let history = session
         .realtime_history
@@ -223,7 +224,8 @@ async fn start_only_rejects_active_turn_without_injecting() {
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let input = SubmittedTurnInput::ResponseItem(user_message("synthetic idle input"));
     let submission = submit_start_only(&session, input).await;
@@ -240,6 +242,7 @@ async fn start_only_rejects_active_turn_without_injecting() {
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
+            .expect("mailbox input remains available")
             .0
     );
 
@@ -264,7 +267,8 @@ async fn recovery_rejects_active_turn_without_injecting_or_applying_settings() {
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let submission = handle_recovery(
         &session,
@@ -298,6 +302,7 @@ async fn recovery_rejects_active_turn_without_injecting_or_applying_settings() {
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
+            .expect("mailbox input remains available")
             .0,
         Vec::<TurnInput>::new()
     );
@@ -394,6 +399,7 @@ async fn start_only_rejects_current_plan_before_validating_settings() {
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
+            .expect("mailbox input remains available")
             .0
     );
 }
@@ -650,6 +656,7 @@ async fn automatic_admission_rechecks_plan_mode_without_committing_sparse_settin
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
+            .expect("mailbox input remains available")
             .0,
         Vec::<TurnInput>::new()
     );
@@ -740,6 +747,7 @@ async fn admission_revalidates_constraints_before_committing(kind: TurnStartKind
             .input_queue
             .get_pending_input(&session.active_turn)
             .await
+            .expect("mailbox input remains available")
             .0,
         Vec::<TurnInput>::new()
     );
@@ -893,7 +901,8 @@ async fn steer_only_enforces_expected_turn_id() {
                 listen_to_cancellation_token: false,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let submission = submit_steer_only(
         &session,
@@ -995,7 +1004,8 @@ async fn rejects_non_regular_turns() {
                     listen_to_cancellation_token: true,
                 },
             )
-            .await;
+            .await
+            .expect("task starts");
 
         let steer_input = vec![UserInput::Text {
             text: "steer".to_string(),
@@ -1052,7 +1062,8 @@ async fn steer_preserves_request_origin(
                 listen_to_cancellation_token: false,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
     let content = vec![UserInput::Text {
         text: "Create the worktree now.".to_owned(),
         text_elements: Vec::new(),
@@ -1074,6 +1085,7 @@ async fn steer_preserves_request_origin(
         .input_queue
         .get_pending_input(&session.active_turn)
         .await
+        .expect("mailbox input remains available")
         .0;
     assert_eq!(
         pending,

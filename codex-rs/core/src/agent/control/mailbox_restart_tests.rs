@@ -161,6 +161,7 @@ impl MailFixture {
                 .input_queue
                 .drain_mailbox()
                 .await
+                .expect("mailbox input remains available")
                 .is_empty(),
             "replayed mail must not be queued again"
         );

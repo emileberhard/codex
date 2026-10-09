@@ -1027,6 +1027,7 @@ impl SessionIo {
         request: impl Into<WithTurnExtensionData<TurnInputRequest>>,
         mode: TurnInputMode,
         new_work_admission: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        residency_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> CodexResult<TurnInputSubmission> {
         let id = new_submission_id();
         let (reply_tx, reply_rx) = oneshot::channel();
@@ -1047,7 +1048,7 @@ impl SessionIo {
             parent_turn_id: None,
             root_turn_id: None,
             new_work_admission,
-            residency_guard: None,
+            residency_guard,
         })
         .await?;
         reply_rx.await.unwrap_or(Err(CodexErr::InternalAgentDied))

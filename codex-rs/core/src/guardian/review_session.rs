@@ -900,6 +900,7 @@ impl codex_guardian_reviewer::ReviewerRuntime for GuardianReviewSession {
                 request,
                 TurnInputMode::StartIfIdle,
                 /*new_work_admission*/ None,
+                /*residency_guard*/ None,
             )
             .await?)
     }

@@ -77,8 +77,11 @@ impl Session {
     pub(crate) async fn reconcile_mailbox_before_consumption(
         self: &std::sync::Arc<Self>,
     ) -> codex_protocol::error::Result<()> {
-        if !self.input_queue.has_unresolved_mail_checkpoint() {
-            return Ok(());
+        {
+            let _pending = self.input_queue.mailbox_pending_mails.lock().await;
+            if !self.input_queue.has_unresolved_mail_checkpoint() {
+                return Ok(());
+            }
         }
         let session = std::sync::Arc::clone(self);
         tokio::spawn(async move {

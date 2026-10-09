@@ -67,7 +67,8 @@ async fn cancelled_startup_does_not_record_unselected_review_evidence() {
             }],
             crate::tasks::RegularTask::new(),
         )
-        .await;
+        .await
+        .expect("task starts");
     let started = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv())
         .await
         .unwrap()

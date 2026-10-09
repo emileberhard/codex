@@ -274,10 +274,10 @@ impl Session {
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
-    ) {
+    ) -> codex_protocol::error::Result<()> {
         self.abort_all_tasks(TurnAbortReason::Replaced).await;
         self.clear_connector_selection().await;
-        self.start_task(turn_context, input, task).await;
+        self.start_task(turn_context, input, task).await
     }
 
     #[expect(
@@ -289,7 +289,9 @@ impl Session {
         turn_context: Arc<TurnContext>,
         input: Vec<TurnInput>,
         task: T,
-    ) {
+    ) -> codex_protocol::error::Result<()> {
+        self.reconcile_mailbox_before_consumption().await?;
+        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await?;
         self.activate_plugin_selection(&turn_context).await;
         // Inherited or recovered roots are applied before task start. Otherwise this
         // task owns its turn, including background work. Later mail cannot change it.
@@ -312,12 +314,6 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
-        if let Err(err) = self.reconcile_mailbox_before_consumption().await {
-            self.send_event(&turn_context, EventMsg::Error(err.to_error_event(None)))
-                .await;
-            return;
-        }
-        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
         let turn_state = {
             let mut active = self.active_turn.lock().await;
             self.record_started_turn(&turn_context.sub_id).await;
@@ -423,6 +419,7 @@ impl Session {
             _timer: timer,
         };
         turn.task = Some(running_task);
+        Ok(())
     }
 
     /// Returns whether an extension has marked this thread as durably asleep.
@@ -513,7 +510,20 @@ impl Session {
             return;
         }
         let (input, mut start_options) =
-            self.input_queue.get_pending_input(&self.active_turn).await;
+            match self.input_queue.get_pending_input(&self.active_turn).await {
+                Ok(input) => input,
+                Err(err) => {
+                    self.send_event_raw_without_materializing_rollout(
+                        codex_protocol::protocol::Event {
+                            id: sub_id,
+                            msg: EventMsg::Error(err.to_error_event(None)),
+                        },
+                    )
+                    .await;
+                    self.clear_reserved_idle_turn(&turn_state).await;
+                    return;
+                }
+            };
         if !input.iter().any(
             |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
         ) {
@@ -559,8 +569,14 @@ impl Session {
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
             .await;
-        self.start_task(turn_context, Vec::new(), RegularTask::new())
-            .await;
+        if let Err(err) = self
+            .start_task(Arc::clone(&turn_context), Vec::new(), RegularTask::new())
+            .await
+        {
+            self.send_event(&turn_context, EventMsg::Error(err.to_error_event(None)))
+                .await;
+            self.clear_reserved_idle_turn(&turn_state).await;
+        }
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {

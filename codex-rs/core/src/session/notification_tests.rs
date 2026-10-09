@@ -15,7 +15,8 @@ async fn task_finish_preserves_notification_budget_and_queued_user_input() {
                 listen_to_cancellation_token: false,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
     let text = "notification diagnostic line\n".repeat(500);
     let notification = |text| ResponseItem::CustomToolCallOutput {
         id: None,

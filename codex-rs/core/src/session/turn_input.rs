@@ -405,6 +405,7 @@ async fn start_or_steer(
                 };
                 Some(admission)
             };
+            session.reconcile_mailbox_before_consumption().await?;
             let Some(turn_context) = settings
                 .apply_started(session, submission_id.clone(), TurnStartKind::User)
                 .await?
@@ -429,7 +430,7 @@ async fn start_or_steer(
             }
             session
                 .spawn_task(turn_context, task_input, RegularTask::new())
-                .await;
+                .await?;
             Ok(TurnInputSubmission::Started {
                 turn_id: submission_id,
             })
@@ -524,6 +525,11 @@ async fn start_if_idle(
         });
     }
 
+    if let Err(error) = session.reconcile_mailbox_before_consumption().await {
+        session.clear_reserved_idle_turn(&turn_state).await;
+        return Err(error);
+    }
+
     let settings = match PreparedTurnInputSettings::prepare(
         session,
         WithTurnExtensionData {
@@ -589,9 +595,13 @@ async fn start_if_idle(
             }
         }
     }
-    session
+    if let Err(error) = session
         .start_task(turn_context, task_input, RegularTask::new())
-        .await;
+        .await
+    {
+        session.clear_reserved_idle_turn(&turn_state).await;
+        return Err(error);
+    }
     Ok(TurnInputSubmission::Started {
         turn_id: submission_id,
     })
@@ -703,7 +713,10 @@ impl Session {
         Ok(())
     }
 
-    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
+    pub(crate) async fn clear_reserved_idle_turn(
+        &self,
+        turn_state: &Arc<tokio::sync::Mutex<TurnState>>,
+    ) {
         let mut active_turn_guard = self.active_turn.lock().await;
         if let Some(active_turn) = active_turn_guard.as_ref()
             && active_turn.task.is_none()

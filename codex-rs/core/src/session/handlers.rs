@@ -124,12 +124,17 @@ pub async fn run_user_shell_command(
     let turn_context = sess
         .new_turn_with_default_settings(sub_id, Default::default())
         .await;
-    sess.spawn_task(
-        turn_context,
-        Vec::new(),
-        UserShellCommandTask::new(command, timeout_ms),
-    )
-    .await;
+    if let Err(err) = sess
+        .spawn_task(
+            Arc::clone(&turn_context),
+            Vec::new(),
+            UserShellCommandTask::new(command, timeout_ms),
+        )
+        .await
+    {
+        sess.send_event(&turn_context, EventMsg::Error(err.to_error_event(None)))
+            .await;
+    }
 }
 
 pub async fn resolve_elicitation(
@@ -252,7 +257,13 @@ pub async fn compact(sess: &Arc<Session>, sub_id: String) {
         .new_turn_with_default_settings(sub_id, Default::default())
         .await;
 
-    sess.spawn_task(turn_context, Vec::new(), CompactTask).await;
+    if let Err(err) = sess
+        .spawn_task(Arc::clone(&turn_context), Vec::new(), CompactTask)
+        .await
+    {
+        sess.send_event(&turn_context, EventMsg::Error(err.to_error_event(None)))
+            .await;
+    }
 }
 
 pub(super) async fn persist_thread_memory_mode_update(

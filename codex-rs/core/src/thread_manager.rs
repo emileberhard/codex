@@ -1968,7 +1968,9 @@ impl ThreadManagerState {
         } else {
             None
         };
-        let residency_guard = if matches!(op, Op::InterAgentCommunication { .. }) {
+        let residency_guard = if op.requires_new_work_admission()
+            || matches!(op, Op::InterAgentCommunication { .. })
+        {
             thread
                 .session
                 .services

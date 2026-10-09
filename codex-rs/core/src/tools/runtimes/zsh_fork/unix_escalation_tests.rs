@@ -598,7 +598,8 @@ async fn execve_permission_request_hook_short_circuits_prompt() -> anyhow::Resul
     let turn_context = Arc::new(turn_context);
     session
         .spawn_task(Arc::clone(&turn_context), Vec::new(), PendingApprovalTask)
-        .await;
+        .await
+        .expect("task starts");
     let provider = CoreShellActionProvider {
         policy: std::sync::Arc::new(RwLock::new(codex_execpolicy::Policy::empty())),
         session: Arc::clone(&session),

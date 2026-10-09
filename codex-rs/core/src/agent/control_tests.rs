@@ -1036,7 +1036,8 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
                 .session
                 .input_queue
                 .drain_mailbox_input_items()
-                .await;
+                .await
+                .expect("mailbox input remains available");
             match route {
                 V2ReloadRoute::NestedParent => harness
                     .manager

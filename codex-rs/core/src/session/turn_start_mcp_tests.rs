@@ -71,7 +71,8 @@ async fn turn_start_refreshes_dirty_mcp_reuses_clean_runtime_and_cancels_discove
                 Vec::new(),
                 crate::tasks::RegularTask::new(),
             )
-            .await;
+            .await
+            .expect("task starts");
         tokio::time::timeout(
             std::time::Duration::from_secs(5),
             recorder.discovered.notified(),

@@ -114,7 +114,8 @@ async fn activate_turn_with_new_review_authority(session: &Arc<Session>) -> Arc<
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let (active_turn, _, _, _) = session
         .active_turn_context_and_strict_auto_review()
@@ -252,7 +253,8 @@ async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
     let step_context = StepContext::for_test(Arc::clone(&turn_context));
 
     let requested_permissions = RequestPermissionProfile {
@@ -725,7 +727,8 @@ async fn strict_auto_review_turn_grant_forces_guardian_for_exec_command_policy_s
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
 
     let handler = crate::tools::handlers::ExecCommandHandler::default();
     #[allow(deprecated)]
@@ -789,7 +792,8 @@ async fn network_approval_uses_published_task_authority_within_same_turn(
                 listen_to_cancellation_token: true,
             },
         )
-        .await;
+        .await
+        .expect("task starts");
     // Inject later-step authority directly while live policy changes remain gated.
     {
         let active = session.active_turn.lock().await;
