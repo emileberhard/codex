@@ -74,7 +74,6 @@ mod execution;
 mod inspection;
 mod interrupt;
 mod legacy;
-mod mailbox;
 mod residency;
 mod resume;
 mod root_handoff;
@@ -185,8 +184,8 @@ impl LocalAgentControl {
                 .await?;
             Some(admission)
         } else {
-            // This only appends to the recipient's durable input queue. It is
-            // continuation state from already-admitted work, not new ingress.
+            // Both delivery paths below hold process admission until either the loaded
+            // submission has dispatched or the unloaded input has been checkpointed.
             None
         };
         self.send_inter_agent_communication_after_capacity_check(
@@ -270,24 +269,37 @@ impl LocalAgentControl {
         &self,
         agent_id: ThreadId,
         state: &Arc<ThreadManagerState>,
-        communication: InterAgentCommunication,
+        mut communication: InterAgentCommunication,
         context: AgentCommunicationContext,
         start_options: TurnStartOptions,
     ) -> CodexResult<String> {
         let communication_for_log =
             crate::agent_communication::logging_enabled().then(|| communication.clone());
-        {
-            // Keep unloaded delivery atomic with publication of a reloaded session.
+        let unloaded = {
             let threads = state.threads.read().await;
-            if !communication.trigger_turn && !threads.contains_key(&agent_id) {
-                let _membership = self.runtime.admit_start()?;
-                self.runtime.ensure_agent_known(agent_id)?;
-                let submission_id = uuid::Uuid::now_v7().to_string();
-                self.runtime.mailboxes.enqueue(
-                    agent_id,
-                    Some(submission_id.clone()),
-                    vec![communication],
-                )?;
+            !communication.trigger_turn && !threads.contains_key(&agent_id)
+        };
+        if unloaded {
+            let admission = self.runtime.acquire_new_work_admission()?;
+            let membership = self.runtime.admit_start()?;
+            self.runtime.ensure_agent_known(agent_id)?;
+            let submission_id = uuid::Uuid::now_v7().to_string();
+            communication
+                .id
+                .get_or_insert_with(|| codex_protocol::ResponseItemId::new("amsg"));
+            let communication_for_log =
+                crate::agent_communication::logging_enabled().then(|| communication.clone());
+            // The store serializes this checkpoint with resume under recipient writer
+            // ownership. If resume already won, refuse rather than acknowledge lost mail.
+            let state = Arc::clone(state);
+            // Cancellation must not release process admission or publication exclusion
+            // while the native writer still owns an accepted checkpoint operation.
+            return tokio::spawn(async move {
+                let _admission = admission;
+                let _membership = membership;
+                state
+                    .checkpoint_unloaded_agent_mail(agent_id, vec![communication])
+                    .await?;
                 if let Some(communication) = communication_for_log {
                     crate::agent_communication::emit_agent_communication_send(
                         &submission_id,
@@ -296,8 +308,11 @@ impl LocalAgentControl {
                         agent_id,
                     );
                 }
-                return Ok(submission_id);
-            }
+                crate::agent_communication::emit_agent_communication_receive(&submission_id);
+                Ok(submission_id)
+            })
+            .await
+            .map_err(|err| CodexErr::Fatal(format!("agent mail checkpoint task failed: {err}")))?;
         }
         // Loaded recipients retain submission ordering with follow-ups and interrupts.
         let (parent_turn_id, root_turn_id) = if communication.trigger_turn {

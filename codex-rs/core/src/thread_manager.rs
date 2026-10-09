@@ -465,6 +465,29 @@ impl NewWorkAdmission {
         }
         Ok(admission)
     }
+
+    /// Residency teardown can also belong to an already-authorized restart recovery.
+    /// It creates no new thread/turn admission; those operations retain their own gate.
+    pub(crate) fn acquire_residency_checkpoint(
+        &self,
+    ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
+        if !self.is_fenced() {
+            return self.acquire();
+        }
+        let admission = self.gate.clone().try_read_owned().map_err(|_| {
+            CodexErr::InvalidRequest("restart residency checkpoint is not settled".into())
+        })?;
+        if !self.is_fenced() {
+            return Err(CodexErr::InvalidRequest(
+                "restart residency checkpoint is not settled".into(),
+            ));
+        }
+        Ok(admission)
+    }
+
+    pub(crate) fn refuse_restart_readiness(&self) {
+        self.fence_ready.store(false, Ordering::Release);
+    }
 }
 
 /// Shared, `Arc`-owned state for [`ThreadManager`]. This `Arc` is required to have a single
@@ -1916,6 +1939,21 @@ impl ThreadManagerState {
             })
     }
 
+    pub(crate) async fn checkpoint_unloaded_agent_mail(
+        &self,
+        thread_id: ThreadId,
+        mail: Vec<codex_protocol::protocol::InterAgentCommunication>,
+    ) -> CodexResult<()> {
+        self.thread_store
+            .checkpoint_unloaded_agent_mail(thread_id, mail)
+            .await
+            .map_err(|err| {
+                CodexErr::Fatal(format!(
+                    "failed to checkpoint agent mail for {thread_id}: {err}"
+                ))
+            })
+    }
+
     /// Send an operation to a thread by ID.
     pub(crate) async fn send_op(
         &self,
@@ -1925,7 +1963,9 @@ impl ThreadManagerState {
         root_turn_id: Option<String>,
     ) -> CodexResult<String> {
         let thread = self.get_thread(thread_id).await?;
-        let admission = if op.requires_new_work_admission() {
+        let admission = if op.requires_new_work_admission()
+            || matches!(op, Op::InterAgentCommunication { .. })
+        {
             Some(self.acquire_new_work_admission()?)
         } else {
             None

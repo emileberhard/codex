@@ -111,7 +111,9 @@ pub(crate) struct LocalAgentRuntime {
         Arc<OnceLock<Arc<dyn ThreadInstructionsProvider>>>,
     pub(super) registry: Arc<AgentRegistry>,
     pub(super) residency: Arc<V2Residency>,
-    pub(super) mailboxes: Arc<super::mailbox::Mailboxes>,
+    // Native cold mail is checkpointed directly into canonical replay. Keep the controller's
+    // idle subscription alive; loaded sessions own their pending input in InputQueue.
+    pub(super) mailbox_updates: Arc<tokio::sync::watch::Sender<bool>>,
     /// Shared by every session in this tree, including private delegates.
     pub(crate) shutdown: CancellationToken,
     shutdown_state: Arc<AgentTreeShutdownState>,
@@ -130,7 +132,7 @@ impl LocalAgentRuntime {
             thread_id_generator,
             registry: Arc::default(),
             residency: Arc::default(),
-            mailboxes: Arc::default(),
+            mailbox_updates: Arc::default(),
             shutdown: CancellationToken::new(),
             shutdown_state: Arc::default(),
             agent_execution_limiter: Arc::default(),
@@ -193,6 +195,16 @@ impl LocalAgentRuntime {
         self.new_work_admission.acquire()
     }
 
+    pub(crate) fn acquire_residency_checkpoint(
+        &self,
+    ) -> CodexResult<tokio::sync::OwnedRwLockReadGuard<()>> {
+        self.new_work_admission.acquire_residency_checkpoint()
+    }
+
+    pub(crate) fn refuse_restart_readiness(&self) {
+        self.new_work_admission.refuse_restart_readiness();
+    }
+
     pub(crate) fn require_settled_restart_fence(&self) -> CodexResult<()> {
         if self.new_work_admission.is_fenced() {
             return Ok(());
@@ -239,7 +251,6 @@ impl LocalAgentRuntime {
     pub(crate) fn request_shutdown(&self) -> Arc<AgentTreeShutdownState> {
         self.shutdown_state.members.close();
         self.shutdown.cancel();
-        self.mailboxes.close();
         Arc::clone(&self.shutdown_state)
     }
 

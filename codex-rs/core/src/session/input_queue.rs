@@ -19,6 +19,8 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::AbortOnDropHandle;
 
+mod mailbox_checkpoint;
+
 /// Host capture metadata belonging to one input, including steers within another turn.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserInputMetadata {
@@ -96,6 +98,9 @@ pub(crate) struct InputQueue {
     activity_tx: watch::Sender<InputQueueActivity>,
     controller: Option<(ThreadId, Arc<dyn AgentControl>, watch::Receiver<bool>)>,
     mailbox_pending_mails: Mutex<VecDeque<PendingMailboxCommunication>>,
+    /// A failed eviction checkpoint retains its process admission until the input owner
+    /// consumes or durably retries the unread mail. Restart must not advertise readiness.
+    mailbox_restart_admission: std::sync::Mutex<Option<tokio::sync::OwnedRwLockReadGuard<()>>>,
 }
 
 pub(crate) struct PendingMailboxCommunication {
@@ -111,6 +116,7 @@ impl InputQueue {
             activity_tx,
             controller: None,
             mailbox_pending_mails: Mutex::new(VecDeque::new()),
+            mailbox_restart_admission: std::sync::Mutex::new(None),
         }
     }
 
@@ -237,6 +243,10 @@ impl InputQueue {
     pub(crate) async fn drain_mailbox(&self) -> Vec<PendingMailboxCommunication> {
         let mut pending = self.mailbox_pending_mails.lock().await;
         self.read_mailbox(&mut pending);
+        self.mailbox_restart_admission
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         pending.drain(..).collect()
     }
 

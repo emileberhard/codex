@@ -178,6 +178,14 @@ impl V2Residency {
             {
                 continue;
             }
+            let Ok(admission) = candidate_thread
+                .session
+                .services
+                .local_agent_runtime
+                .acquire_residency_checkpoint()
+            else {
+                continue;
+            };
             // Once shutdown is submitted, cancellation cannot revoke it. The eviction task
             // must keep delivery excluded and capacity reserved through registry removal.
             let manager = Arc::clone(manager);
@@ -185,7 +193,25 @@ impl V2Residency {
             let teardown = membership.clone().into_teardown_guard();
             let eviction = tokio::spawn(async move {
                 let _residency_guard = residency_guard;
+                let mut admission = Some(admission);
                 candidate_thread.ensure_rollout_materialized().await;
+                if let Err(err) = candidate_thread
+                    .session
+                    .checkpoint_mailbox_for_eviction(&mut admission)
+                    .await
+                {
+                    warn!(
+                        "cannot unload v2 resident with uncheckpointed mail {candidate_thread_id}: {err}"
+                    );
+                    teardown.complete();
+                    return false;
+                }
+                // Checkpoint I/O can yield to a newly admitted turn. Its native input is
+                // now durable, but an active recipient must keep its existing residency.
+                if !is_unloadable(candidate_thread.as_ref()).await {
+                    teardown.complete();
+                    return false;
+                }
                 if let Err(err) = candidate_thread.shutdown_and_wait().await {
                     warn!(
                         "failed to shut down v2 resident thread before unloading {candidate_thread_id}: {err}"
@@ -193,23 +219,8 @@ impl V2Residency {
                     teardown.complete();
                     return false;
                 }
-                // The submission loop has stopped and the residency guard excludes senders.
-                // Preserve unread queue-only mail before dropping the session that held it.
-                let mail = candidate_thread
-                    .session
-                    .input_queue
-                    .drain_mailbox()
-                    .await
-                    .into_iter()
-                    .map(|mail| mail.communication)
-                    .collect();
-                // A concurrent tree shutdown deliberately discards its unread mail.
-                let _ = candidate_thread
-                    .session
-                    .services
-                    .local_agent_runtime
-                    .mailboxes
-                    .enqueue(candidate_thread_id, /*id*/ None, mail);
+                // Unread inputs are already canonical. Replay, rather than an additional
+                // in-memory mailbox, delivers them exactly once after lazy reload/restart.
                 let environments = candidate_thread.environment_selections().await;
                 let mut threads = manager.threads.write().await;
                 if threads

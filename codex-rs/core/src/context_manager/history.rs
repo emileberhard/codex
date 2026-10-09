@@ -556,6 +556,13 @@ impl ContextManager {
         if !is_api_message(item, metadata) {
             return None;
         }
+        // A failed idle-mail checkpoint may later be consumed by the live input owner.
+        // The native message identity survives both records; receive and replay it once.
+        if matches!(item, ResponseItem::AgentMessage { id: Some(_), .. })
+            && self.raw_items().any(|previous| previous == item)
+        {
+            return None;
+        }
         let mut processed = ResponseItemEnvelope {
             item: item.clone(),
             metadata: metadata.cloned(),

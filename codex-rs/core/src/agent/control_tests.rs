@@ -768,8 +768,6 @@ async fn send_input_submits_user_message() {
 async fn send_inter_agent_communication_without_turn_queues_message_without_triggering_turn() {
     let harness = AgentControlHarness::new().await;
     let (thread_id, thread) = harness.start_thread().await;
-    harness.manager.begin_new_work_fence();
-    assert!(harness.manager.poll_new_work_fence());
     let communication = InterAgentCommunication::new(
         AgentPath::root(),
         AgentPath::try_from("/root/worker").expect("agent path"),
@@ -1125,6 +1123,19 @@ async fn check_v2_agent_reload(route: V2ReloadRoute) {
         "hello after reload".to_string(),
         /*trigger_turn*/ false,
     );
+    if matches!(route, V2ReloadRoute::NestedParentAfterRestart) {
+        let refusal = control
+            .send_inter_agent_communication(
+                spawned_agent.thread_id,
+                communication.clone(),
+                AgentCommunicationContext::new(AgentCommunicationKind::Message, ThreadId::new()),
+                Default::default(),
+            )
+            .await
+            .expect_err("ordinary mail stays fenced during exact restart recovery");
+        assert!(refusal.to_string().contains("draining for restart"));
+        harness.manager.unfence_new_work();
+    }
     control
         .send_inter_agent_communication(
             spawned_agent.thread_id,

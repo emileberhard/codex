@@ -176,13 +176,13 @@ impl AgentControl for LocalAgentControl {
 
     fn take_mailbox(
         &self,
-        agent: ThreadId,
+        _agent: ThreadId,
     ) -> Vec<codex_protocol::protocol::InterAgentCommunication> {
-        self.runtime.mailboxes.take(agent)
+        Vec::new()
     }
 
-    fn watch_mailbox(&self, agent: ThreadId) -> tokio::sync::watch::Receiver<bool> {
-        self.runtime.mailboxes.watch(agent)
+    fn watch_mailbox(&self, _agent: ThreadId) -> tokio::sync::watch::Receiver<bool> {
+        self.runtime.mailbox_updates.subscribe()
     }
 
     fn ensure_child_loaded(&self, parent: ThreadId, child: ThreadId) -> BoxFuture<'_, Result<()>> {
