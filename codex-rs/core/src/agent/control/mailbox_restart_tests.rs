@@ -1,6 +1,9 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[path = "mailbox_fixture_export.rs"]
+mod fixture_export;
+
 struct MailFixture {
     harness: AgentControlHarness,
     root: Arc<CodexThread>,
@@ -10,11 +13,20 @@ struct MailFixture {
 
 impl MailFixture {
     async fn new() -> Self {
+        Self::with_responses_url(/*responses_url*/ None).await
+    }
+
+    async fn with_responses_url(responses_url: Option<String>) -> Self {
         let (home, mut config) = test_config().await;
         config.features.enable(Feature::MultiAgentV2).expect("V2");
         config.features.enable(Feature::Sqlite).expect("SQLite");
         config.model = Some("gpt-5.6-sol".into());
         config.multi_agent_v2.max_concurrent_threads_per_session = 2;
+        if let Some(responses_url) = responses_url {
+            config.model_provider.base_url = Some(responses_url);
+            config.model_provider.supports_websockets = false;
+            config.model_provider.request_max_retries = Some(0);
+        }
         let harness = AgentControlHarness::new_with_config(home, config).await;
         let (_, root) = harness.start_paginated_thread().await;
         persist_thread_for_tree_resume(&root, "root fixture").await;
@@ -265,8 +277,22 @@ async fn v2_mail_survives_native_restart(transferred: bool) {
         .await;
     stop(&resumed).await;
     let twice = fixture.resume().await;
-    fixture.assert_received(&twice, &[first, second]).await;
+    fixture
+        .assert_received(&twice, &[first.clone(), second.clone()])
+        .await;
     stop(&twice).await;
+    if std::env::var("RC_EXPORT_NATIVE_MAIL_FIXTURES").is_ok_and(|value| value == "1") {
+        fixture
+            .export_fixture(
+                if transferred {
+                    "unread_eviction"
+                } else {
+                    "direct_cold"
+                },
+                &[first, second],
+            )
+            .await;
+    }
 }
 
 #[tokio::test]
@@ -491,5 +517,207 @@ async fn v2_loaded_mail_refuses_after_process_fence() {
             .has_pending_mailbox_items()
             .await
     );
+    stop(&fixture.harness.manager).await;
+}
+
+#[test_case::test_case(false; "start_or_steer")]
+#[test_case::test_case(true; "start_if_idle")]
+#[tokio::test]
+async fn v2_turn_submission_refuses_unresolved_mail_checkpoint(idle_only: bool) {
+    let server = wiremock::MockServer::start().await;
+    let fixture = MailFixture::with_responses_url(Some(server.uri())).await;
+    let mail = message("submission_refusal");
+    fixture
+        .send(mail.clone())
+        .await
+        .expect("loaded mail receipt");
+    fixture.queued().await;
+    fixture
+        .child
+        .session
+        .services
+        .thread_store
+        .shutdown_thread(fixture.child_id())
+        .await
+        .expect("writer fault");
+    let mut admission = Some(
+        fixture
+            .child
+            .session
+            .services
+            .local_agent_runtime
+            .acquire_residency_checkpoint()
+            .expect("admission"),
+    );
+    fixture
+        .child
+        .session
+        .checkpoint_mailbox_for_eviction(&mut admission)
+        .await
+        .expect_err("failed native checkpoint");
+    let request = codex_protocol::turn_input::TurnInputRequest::user_input(text_input(
+        "explicit input must not disappear",
+    ));
+    let refused = if idle_only {
+        fixture
+            .child
+            .start_turn_if_idle(request)
+            .await
+            .map(|result| format!("{result:?}"))
+    } else {
+        fixture
+            .child
+            .start_or_steer_turn(request)
+            .await
+            .map(|result| format!("{result:?}"))
+    };
+    let no_reservation = fixture.child.session.active_turn.lock().await.is_none();
+    fixture
+        .child
+        .session
+        .abort_all_tasks(TurnAbortReason::Interrupted)
+        .await;
+    let writer = fixture.open_writer().await;
+    fixture
+        .child
+        .session
+        .reconcile_mailbox_before_consumption()
+        .await
+        .expect("repair pending mail");
+    let response = core_test_support::responses::mount_sse_once(
+        &server,
+        core_test_support::responses::sse(vec![
+            core_test_support::responses::ev_response_created("mail-retry"),
+            core_test_support::responses::ev_completed("mail-retry"),
+        ]),
+    )
+    .await;
+    let retry_request = codex_protocol::turn_input::TurnInputRequest::user_input(text_input(
+        "explicit input must not disappear",
+    ));
+    let turn_id = if idle_only {
+        match fixture
+            .child
+            .start_turn_if_idle(retry_request)
+            .await
+            .expect("retry accepted")
+        {
+            crate::StartIfIdleSubmission::Started { turn_id } => turn_id,
+            other => panic!("retry was refused: {other:?}"),
+        }
+    } else {
+        match fixture
+            .child
+            .start_or_steer_turn(retry_request)
+            .await
+            .expect("retry accepted")
+        {
+            codex_protocol::turn_input::TurnInputSubmission::Started { turn_id } => turn_id,
+            other => panic!("retry was refused: {other:?}"),
+        }
+    };
+    timeout(Duration::from_secs(5), async {
+        loop {
+            let event = fixture.child.next_event().await.expect("retry lifecycle");
+            if matches!(event.msg, EventMsg::TurnComplete(ref completed) if completed.turn_id == turn_id) {
+                break;
+            }
+        }
+    }).await.expect("accepted retry ends through the actual task lifecycle");
+    let inputs = response.single_request().input();
+    let native: Vec<_> = inputs
+        .iter()
+        .filter(|item| item["type"] == "agent_message")
+        .cloned()
+        .collect();
+    assert_eq!(
+        native,
+        vec![serde_json::to_value(mail.to_model_input_item()).expect("native mail")]
+    );
+    let explicit_count = inputs
+        .iter()
+        .filter(|item| item["role"] == "user")
+        .flat_map(|item| item["content"].as_array().into_iter().flatten())
+        .filter(|item| item["text"] == "explicit input must not disappear")
+        .count();
+    assert_eq!(explicit_count, 1);
+    writer.shutdown().await.expect("close repaired writer");
+    stop(&fixture.harness.manager).await;
+    assert!(
+        refused.is_err(),
+        "unresolved persistence falsely accepted explicit input: {refused:?}"
+    );
+    assert!(
+        no_reservation,
+        "refused input retained a task-less idle reservation"
+    );
+}
+
+#[tokio::test]
+async fn v2_turn_submission_retains_residency_after_waiter_cancellation() {
+    let fixture = MailFixture::new().await;
+    fixture
+        .send(message("cancelled_submission"))
+        .await
+        .expect("loaded receipt");
+    fixture.queued().await;
+    fixture
+        .child
+        .session
+        .services
+        .thread_store
+        .shutdown_thread(fixture.child_id())
+        .await
+        .expect("storage fault");
+    let mut admission = Some(
+        fixture
+            .child
+            .session
+            .services
+            .local_agent_runtime
+            .acquire_residency_checkpoint()
+            .expect("admission"),
+    );
+    fixture
+        .child
+        .session
+        .checkpoint_mailbox_for_eviction(&mut admission)
+        .await
+        .expect_err("pending checkpoint");
+    let mut submission = Box::pin(fixture.child.start_or_steer_turn(
+        codex_protocol::turn_input::TurnInputRequest::user_input(text_input("cancelled waiter")),
+    ));
+    assert!(futures::poll!(submission.as_mut()).is_pending());
+    assert!(
+        Arc::clone(&fixture.child.residency_gate)
+            .try_write_owned()
+            .is_err()
+    );
+    drop(submission);
+    assert!(
+        Arc::clone(&fixture.child.residency_gate)
+            .try_write_owned()
+            .is_err()
+    );
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(guard) = Arc::clone(&fixture.child.residency_gate).try_write_owned() {
+                drop(guard);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("queued refusal settles residency ownership");
+    assert!(fixture.child.session.active_turn.lock().await.is_none());
+    let writer = fixture.open_writer().await;
+    fixture
+        .child
+        .session
+        .reconcile_mailbox_before_consumption()
+        .await
+        .expect("repair retained mail");
+    writer.shutdown().await.expect("close writer");
     stop(&fixture.harness.manager).await;
 }

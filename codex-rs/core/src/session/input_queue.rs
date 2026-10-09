@@ -884,3 +884,7 @@ mod tests {
         assert!(input_queue.has_trigger_turn_mailbox_items().await);
     }
 }
+
+#[cfg(test)]
+#[path = "input_queue/mailbox_submission_tests.rs"]
+mod mailbox_submission_tests;
