@@ -471,6 +471,11 @@ fallback; it does not prove their exact start order.
 
 # Client-owned realtime handoffs (experimental)
 
+Realtime V3 accepts the voices returned in `thread/realtime/listVoices`'s `v3`
+catalog, including Bubbie. This backports upstream `03b761dca9b04f47e166494232d70b3fe7c6738a`
+for Pingo while the matched official ChatGPT bundle still uses Codex alpha.17.2;
+drop the backport when the approved upstream base includes that change.
+
 Pass `handoffOwner: "client"` to `thread/realtime/start` when an external
 executor owns delegated work; app-server then does not start or steer a Codex
 turn for handoffs. Omitted or `"codex"` ownership preserves Codex execution;
