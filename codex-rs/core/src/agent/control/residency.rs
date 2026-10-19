@@ -73,8 +73,6 @@ impl ThreadManagerState {
                 .checkpoint_mailbox_for_eviction(&mut admission)
                 .await
             {
-                teardown
-                    .record_shutdown_failure("checkpoint_mailbox", CodexErrKind::from(&err).into());
                 teardown.complete();
                 return Err(err);
             }

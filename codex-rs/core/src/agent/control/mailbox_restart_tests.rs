@@ -460,7 +460,17 @@ async fn v2_failed_eviction_keeps_mail_and_refuses_restart_readiness() {
     fixture.harness.manager.unfence_new_work();
     fixture.evict().await;
     assert_eq!(fixture.stored_mail().await, vec![communication.clone()]);
+    let shutdown = fixture
+        .harness
+        .manager
+        .request_agent_tree_shutdown(fixture.root.session.thread_id)
+        .await
+        .expect("root shutdown handle");
     stop(&fixture.harness.manager).await;
+    timeout(Duration::from_secs(5), shutdown.wait_detailed())
+        .await
+        .expect("bounded tree shutdown")
+        .expect("repaired eviction leaves no permanent shutdown failure");
     let resumed = fixture.resume().await;
     fixture.assert_received(&resumed, &[communication]).await;
     stop(&resumed).await;
