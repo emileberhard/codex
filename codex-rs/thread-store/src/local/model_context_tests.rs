@@ -643,6 +643,8 @@ fn turn_complete(turn_id: &str) -> RolloutItem {
 fn user_message(message: &str) -> RolloutItem {
     RolloutItem::ResponseItem(
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -683,26 +685,20 @@ fn turn_context(root: &Path, turn_id: &str) -> RolloutItem {
         root_turn_id: None,
         disabled_plugin_ids: None,
         cwd: serde_json::from_value(serde_json::json!(root)).expect("absolute cwd"),
-        workspace_roots: None,
-        current_date: None,
-        timezone: None,
         approval_policy: AskForApproval::Never,
         approvals_reviewer: None,
         sandbox_policy: SandboxPolicy::new_read_only_policy(),
         permission_profile: None,
         active_permission_profile: None,
-        network: None,
         file_system_sandbox_policy: None,
         model: "test-model".to_string(),
         comp_hash: None,
-        personality: None,
         collaboration_mode: None,
         multi_agent_version: None,
-        multi_agent_mode: None,
         realtime_active: None,
         cyber_access_program: None,
         effort: None,
-        summary: ReasoningSummary::Auto,
+        summary: Some(ReasoningSummary::Auto),
     })
 }
 

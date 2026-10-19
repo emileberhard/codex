@@ -65,6 +65,7 @@ pub(super) async fn lookup(
                 let response = app_server
                     .thread_list(ThreadListParams {
                         include_completion_times: None,
+                        excluded_thread_ids: None,
                         originators: None,
                         cursor,
                         limit: Some(100),

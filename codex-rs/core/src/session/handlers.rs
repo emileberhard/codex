@@ -27,6 +27,8 @@ use crate::tasks::CompactTask;
 use crate::tasks::UserShellCommandMode;
 use crate::tasks::UserShellCommandTask;
 use crate::tasks::execute_user_shell_command;
+use crate::thread_manager::AgentTreeShutdownFailure;
+use crate::thread_manager::thread_store_error_kind;
 use codex_protocol::error::CodexErr;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::ErrorEvent;
@@ -311,6 +313,7 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
     }
     let _ = sess.conversation.shutdown().await;
     sess.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    super::async_compaction::shutdown(sess).await;
     let shell_snapshot_prewarm = sess.state.lock().await.shell_snapshot_prewarm.take();
     if let Some(shell_snapshot_prewarm) = shell_snapshot_prewarm {
         shell_snapshot_prewarm.abort();
@@ -324,7 +327,14 @@ pub(super) async fn shutdown_session_runtime(sess: &Arc<Session>) {
         .terminate_all_processes()
         .await;
     if let Err(err) = sess.services.code_mode_service.shutdown().await {
-        sess.services.local_agent_runtime.record_shutdown_failure();
+        sess.services.local_agent_runtime.record_shutdown_failure(
+            AgentTreeShutdownFailure::operation_failed(
+                "session_shutdown",
+                "code_mode",
+                Some(sess.thread_id),
+                "code_mode_error",
+            ),
+        );
         warn!("failed to shutdown code mode session: {err}");
     }
     sess.stop_mcp_prewarm_worker().await;
@@ -370,7 +380,14 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
     if let Some(live_thread) = sess.live_thread()
         && let Err(e) = live_thread.shutdown().await
     {
-        sess.services.local_agent_runtime.record_shutdown_failure();
+        sess.services.local_agent_runtime.record_shutdown_failure(
+            AgentTreeShutdownFailure::operation_failed(
+                "session_shutdown",
+                "close_persistence",
+                Some(sess.thread_id),
+                thread_store_error_kind(&e),
+            ),
+        );
         warn!("failed to shutdown thread persistence: {e}");
         let event = Event {
             id: sub_id.clone(),
@@ -475,11 +492,15 @@ pub(super) async fn submission_loop(
                 continue;
             }
         };
-        if matches!(sub.op, Op::ResolveElicitation { .. }) {
-            debug!(submission_id = %sub.id, operation = sub.op.kind(), "Submission");
-        } else {
-            debug!(?sub, "Submission");
-        }
+        debug!(
+            thread_id = %sess.thread_id(),
+            submission_id = %sub.id,
+            operation = sub.op.kind(),
+            parent_turn_id = ?sub.parent_turn_id,
+            root_turn_id = ?sub.root_turn_id,
+            op = ?sub.op,
+            "Submission"
+        );
         let dispatch_span = submission_dispatch_span(&sub);
         let should_exit = async {
             match sub.op {
@@ -536,6 +557,25 @@ pub(super) async fn submission_loop(
                         })
                         .await;
                     }
+                    false
+                }
+                Op::RealtimeConversationAttach { params, reply } => {
+                    let result =
+                        crate::realtime_conversation::handle_attach(&sess, sub.id, params).await;
+                    let _ = reply.send(result);
+                    false
+                }
+                Op::RealtimeConversationDetach {
+                    realtime_session_id,
+                    reply,
+                } => {
+                    crate::realtime_conversation::handle_detach(
+                        &sess,
+                        Some(&realtime_session_id),
+                        &sub.id,
+                    )
+                    .await;
+                    let _ = reply.send(Ok(()));
                     false
                 }
                 Op::RealtimeConversationAudio(params) => {
@@ -757,7 +797,14 @@ pub(super) async fn submission_loop(
         if let Some(live_thread) = sess.live_thread()
             && let Err(err) = live_thread.shutdown().await
         {
-            sess.services.local_agent_runtime.record_shutdown_failure();
+            sess.services.local_agent_runtime.record_shutdown_failure(
+                AgentTreeShutdownFailure::operation_failed(
+                    "session_shutdown",
+                    "close_persistence_after_channel_closed",
+                    Some(sess.thread_id),
+                    thread_store_error_kind(&err),
+                ),
+            );
             warn!("failed to shutdown thread persistence after submission channel closed: {err}");
         }
     }

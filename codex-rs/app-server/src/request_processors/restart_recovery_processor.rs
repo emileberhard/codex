@@ -1,5 +1,6 @@
 use super::restart_recovery_settings::latest_restart_recovery_settings;
 use super::*;
+use codex_core::RestartRecoveryThread;
 use codex_protocol::mcp::ClientMcpExtensions;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::turn_input::CyberAccessProgram;
@@ -136,7 +137,7 @@ impl ThreadRequestProcessor {
             .recovered_turn_ids
             .insert(params.turn_id.clone());
         let submission = thread
-            .recover_turn_after_restart_if_idle(RecoverTurnRequest {
+            .recover_turn_if_idle(RecoverTurnRequest {
                 turn_id: params.turn_id.clone(),
                 thread_settings,
                 trace: self.request_trace_context(&request_id).await,
@@ -193,7 +194,7 @@ impl ThreadRequestProcessor {
         client_mcp_extensions: ClientMcpExtensions,
     ) -> Result<
         (
-            Arc<CodexThread>,
+            RestartRecoveryThread,
             ThreadSettingsOverrides,
             Option<CyberAccessProgram>,
         ),
@@ -202,7 +203,7 @@ impl ThreadRequestProcessor {
         let _thread_list_state_permit = self.acquire_thread_list_state_permit().await?;
         let (thread, thread_settings, cyber_access_program) = match self
             .thread_manager
-            .get_thread(thread_id)
+            .loaded_thread_for_restart_recovery(thread_id)
             .await
         {
             Ok(thread) => (thread, ThreadSettingsOverrides::default(), None),
@@ -298,7 +299,6 @@ impl ThreadRequestProcessor {
                 } else {
                     let NewThread {
                         thread_id: resumed_thread_id,
-                        thread,
                         ..
                     } = self
                         .thread_manager
@@ -318,18 +318,27 @@ impl ThreadRequestProcessor {
                             "restart recovery resumed thread {resumed_thread_id} instead of {thread_id}"
                         )));
                     }
+                    let thread = self
+                        .thread_manager
+                        .loaded_thread_for_restart_recovery(thread_id)
+                        .await
+                        .map_err(|error| {
+                            internal_error(format!(
+                                "error pinning recovered thread {thread_id}: {error}"
+                            ))
+                        })?;
                     (thread, thread_settings, cyber_access_program)
                 }
             }
         };
         Self::set_app_server_client_info(
-            thread.as_ref(),
+            thread.thread().as_ref(),
             app_server_client_name,
             app_server_client_version,
         )
         .await?;
         let thread_state = self.thread_state_manager.thread_state(thread_id).await;
-        self.ensure_listener_task_running(thread_id, Arc::clone(&thread), thread_state)
+        self.ensure_listener_task_running(thread_id, Arc::clone(thread.thread()), thread_state)
             .await?;
         self.ensure_conversation_listener(
             thread_id,

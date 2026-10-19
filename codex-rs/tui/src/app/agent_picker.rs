@@ -41,6 +41,7 @@ impl App {
                                 request_id: RequestId::String(Uuid::new_v4().to_string()),
                                 params: ThreadListParams {
                                     include_completion_times: None,
+                                    excluded_thread_ids: None,
                                     originators: None,
                                     cursor,
                                     limit: Some(AGENT_PICKER_PAGE_SIZE),

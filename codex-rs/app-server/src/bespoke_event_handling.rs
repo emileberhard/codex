@@ -500,7 +500,10 @@ pub(crate) async fn apply_bespoke_event_handling(
                     ))
                     .await;
             }
-            RealtimeEvent::SessionUpdated { .. } => {}
+            RealtimeEvent::SessionUpdated {
+                realtime_session_id,
+                ..
+            } => outgoing.track_realtime_session_updated(realtime_session_id),
             RealtimeEvent::InputAudioSpeechStarted(event) => {
                 let notification = ThreadRealtimeItemAddedNotification {
                     thread_id: conversation_id.to_string(),
@@ -3307,6 +3310,8 @@ mod tests {
                     thread_id: conversation_id,
                     turn_id: "turn-1".to_string(),
                     item: CoreTurnItem::SubAgentActivity(SubAgentActivityItem {
+                        model: None,
+                        reasoning_effort: None,
                         id: "activity-1".to_string(),
                         kind: SubAgentActivityKind::Interrupted,
                         agent_thread_id: child_thread_id,
@@ -3343,6 +3348,8 @@ mod tests {
             ItemCompletedNotification {
                 started_at_ordinal: None,
                 item: ThreadItem::SubAgentActivity {
+                    model: None,
+                    reasoning_effort: None,
                     id: "activity-1".to_string(),
                     kind: codex_app_server_protocol::SubAgentActivityKind::Interrupted,
                     agent_thread_id: child_thread_id_string,

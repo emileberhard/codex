@@ -140,7 +140,7 @@ pub fn local_request(cwd: AbsolutePathBuf) -> TurnEnvironmentRequest {
 }
 
 pub fn local(cwd: AbsolutePathBuf) -> TurnEnvironmentSelection {
-    TurnEnvironmentSelection::new(local_request(cwd))
+    TurnEnvironmentSelection::new(local_request(cwd), &[])
 }
 
 /// Builds explicit environment configuration with the test thread's permissions and shell settings.
@@ -219,6 +219,7 @@ impl TestEnv {
         let cwd = local_cwd_temp_dir.abs();
         let selection = match exec_server_url {
             Some(_) => TurnEnvironmentSelection {
+                selected_capability_roots: Default::default(),
                 environment_id: codex_exec_server::REMOTE_ENVIRONMENT_ID.to_string(),
                 cwd: PathUri::from_abs_path(&cwd),
                 workspace_roots: vec![PathUri::from_abs_path(&cwd)],
@@ -301,6 +302,7 @@ pub async fn test_env() -> Result<TestEnv> {
                 )
                 .await?;
             let selection = TurnEnvironmentSelection {
+                selected_capability_roots: Default::default(),
                 environment_id: codex_exec_server::REMOTE_ENVIRONMENT_ID.to_string(),
                 cwd: cwd_uri.clone(),
                 workspace_roots: vec![cwd_uri.clone()],
@@ -735,6 +737,30 @@ impl TestCodexBuilder {
         previous.codex.shutdown_and_wait().await?;
         self.resume(server, Arc::clone(&previous.home), rollout_path)
             .await
+    }
+
+    /// Restarts without changing the executor platform selected by the test process.
+    pub async fn restart_with_auto_env(
+        &mut self,
+        server: &MockServer,
+        previous: &TestCodex,
+    ) -> Result<TestCodex> {
+        let rollout_path = previous
+            .session_configured
+            .rollout_path
+            .clone()
+            .context("rollout path")?;
+        previous.codex.shutdown_and_wait().await?;
+        let base_url = format!("{}/v1", server.uri());
+        let test_env = test_env().await?;
+        Box::pin(self.build_with_home_and_base_url(
+            base_url,
+            Arc::clone(&previous.home),
+            Some(rollout_path),
+            test_env,
+            /*include_local_environment*/ false,
+        ))
+        .await
     }
 
     async fn build_with_home_and_base_url(

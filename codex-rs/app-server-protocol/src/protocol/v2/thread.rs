@@ -1514,6 +1514,11 @@ pub struct ThreadListParams {
     /// Optional page size; defaults to a reasonable server-side value.
     #[ts(optional = nullable)]
     pub limit: Option<u32>,
+    /// Thread IDs to exclude before applying the result limit. Up to 100
+    /// entries; invalid IDs or a larger list are rejected, never truncated.
+    /// Send the same exclusions on each page. Omitted, null, or empty means no exclusions.
+    #[ts(optional = nullable)]
+    pub excluded_thread_ids: Option<Vec<String>>,
     /// Optional sort key; defaults to created_at.
     #[ts(optional = nullable)]
     pub sort_key: Option<ThreadSortKey>,
@@ -1661,7 +1666,7 @@ pub enum SortDirection {
     Desc,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadListResponse {
@@ -1671,6 +1676,10 @@ pub struct ThreadListResponse {
     #[ts(type = "{ [threadId: string]: number | null } | null")]
     pub completion_times: Option<std::collections::BTreeMap<String, Option<i64>>>,
     pub data: Vec<Thread>,
+    /// Local receipts for eligible threads on this page, keyed by thread ID.
+    /// Null means durable read state is unavailable; an absent key means that row is ineligible.
+    #[experimental("thread/list.readStates")]
+    pub read_states: Option<HashMap<String, ThreadReadState>>,
     /// Opaque cursor to pass to the next call to continue after the last item.
     /// if None, there are no more items to return.
     pub next_cursor: Option<String>,
@@ -1815,11 +1824,14 @@ pub struct ThreadReadParams {
     pub include_turns: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ThreadReadResponse {
     pub thread: Thread,
+    /// Local receipt. Null means this thread's durable read state is unavailable.
+    #[experimental("thread/read.readState")]
+    pub read_state: Option<ThreadReadState>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
@@ -1945,6 +1957,25 @@ pub struct ThreadItemsListResponse {
     /// Opaque cursor to pass as `cursor` when reversing `sortDirection`.
     /// This is only populated when the page contains at least one item.
     pub backwards_cursor: Option<String>,
+}
+
+/// EXPERIMENTAL - retrieve a bounded set of persisted items from one turn.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadItemsReadParams {
+    pub thread_id: String,
+    pub turn_id: String,
+    /// Item IDs to retrieve. Supply 1 to 100 IDs.
+    pub item_ids: Vec<String>,
+}
+
+/// EXPERIMENTAL - persisted items returned in canonical stored order.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadItemsReadResponse {
+    pub data: Vec<ThreadItemEntry>,
 }
 
 /// EXPERIMENTAL - list ordinary and realtime thread history in rollout order.
@@ -2123,6 +2154,67 @@ pub struct ThreadStartedNotification {
 pub struct ThreadStatusChangedNotification {
     pub thread_id: String,
     pub status: ThreadStatus,
+}
+
+/// The first unread position in a durable local thread. A null position means read.
+/// The opaque revision guards edits against activity or marks the caller has not seen.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadReadState {
+    pub first_unread: Option<ThreadUnreadPosition>,
+    pub revision: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
+pub enum ThreadUnreadPosition {
+    /// Explicitly marked unread, including when the thread has no turns.
+    ThreadStart,
+    /// The earliest completed result needing attention.
+    Turn {
+        #[serde(rename = "turnId")]
+        #[ts(rename = "turnId")]
+        turn_id: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
+pub enum ThreadReadStateOperation {
+    Read,
+    Unread,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadReadStateUpdateParams {
+    pub thread_id: String,
+    pub operation: ThreadReadStateOperation,
+    /// Revision of the row or transcript actually seen. Conflicts require a fresh user action.
+    pub expected_revision: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadReadStateUpdateResponse {
+    pub read_state: ThreadReadState,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadReadStateChangedNotification {
+    pub thread_id: String,
+    pub read_state: ThreadReadState,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

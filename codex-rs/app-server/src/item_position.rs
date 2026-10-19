@@ -25,7 +25,7 @@ pub(crate) async fn attach(
         .list_items(ListItemsParams {
             thread_id,
             turn_id: Some(turn_id),
-            item_id: Some(item_id.clone()),
+            item_ids: Some(vec![item_id.clone()]),
             include_archived: true,
             position: None,
             page_size: 1,

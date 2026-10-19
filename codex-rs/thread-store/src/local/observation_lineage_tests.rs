@@ -39,9 +39,9 @@ async fn observation_keeps_lineage_and_lifecycle_before_enrichment() {
         items_view: StoredTurnItemsView::Summary,
     };
     let items = crate::ListItemsParams {
+        item_ids: None,
         thread_id,
         include_archived: false,
-        item_id: None,
         page_size: 10,
         sort_direction: SortDirection::Desc,
         turn_id: None,
@@ -270,9 +270,9 @@ async fn assert_effective_item_version(update: LifecycleUpdate) {
         .unwrap();
     let checkpoint = store.observation_cursors(thread_id).await.unwrap();
     let items = crate::ListItemsParams {
+        item_ids: None,
         thread_id,
         include_archived: false,
-        item_id: None,
         page_size: 10,
         sort_direction: SortDirection::Desc,
         turn_id: None,
@@ -344,9 +344,9 @@ async fn observation_migrates_e520_lifecycle_versions_from_canonical_history() {
         .unwrap();
     let checkpoint = store.observation_cursors(thread_id).await.unwrap();
     let items = crate::ListItemsParams {
+        item_ids: None,
         thread_id,
         include_archived: false,
-        item_id: None,
         page_size: 10,
         sort_direction: SortDirection::Desc,
         turn_id: None,

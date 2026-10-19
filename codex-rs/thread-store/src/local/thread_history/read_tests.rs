@@ -1020,7 +1020,6 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
     ] {
         let page = store
             .list_items(ListItemsParams {
-                item_id: None,
                 after_updated_at_ordinal: Some(2),
                 ..item_params(
                     thread_id,
@@ -1044,7 +1043,6 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
     assert_eq!(first_page.items, vec![item_2.clone(), item_3.clone()]);
     for params in [
         ListItemsParams {
-            item_id: None,
             position: creation_page.next_cursor.map(ListItemsPosition::Cursor),
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
         },
@@ -1065,7 +1063,6 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let second_page = store
         .list_items(ListItemsParams {
-            item_id: None,
             position: first_page.next_cursor.map(ListItemsPosition::Cursor),
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
         })
@@ -1076,7 +1073,6 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let exclusive_page = store
         .list_items(ListItemsParams {
-            item_id: None,
             turn_id: Some("turn-2".to_string()),
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 2)
         })
@@ -1086,7 +1082,6 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let descending_page = store
         .list_items(ListItemsParams {
-            item_id: None,
             sort_direction: SortDirection::Desc,
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
         })
@@ -1095,7 +1090,6 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
     assert_eq!(descending_page.items, vec![item_1, item_3]);
     let descending_next_page = store
         .list_items(ListItemsParams {
-            item_id: None,
             position: descending_page.next_cursor.map(ListItemsPosition::Cursor),
             sort_direction: SortDirection::Desc,
             ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ 0)
@@ -1106,7 +1100,6 @@ async fn list_items_filters_exclusive_update_ordinals_across_pages_and_turns() {
 
     let error = store
         .list_items(ListItemsParams {
-            item_id: None,
             sort_key: ItemSortKey::UpdatedAtOrdinal,
             ..item_params(
                 thread_id,
@@ -1128,7 +1121,6 @@ async fn list_items_rejects_update_ordinals_outside_sqlite_integer_range() {
     for sort_key in [ItemSortKey::CreatedAtOrdinal, ItemSortKey::UpdatedAtOrdinal] {
         let error = store
             .list_items(ListItemsParams {
-                item_id: None,
                 sort_key,
                 ..updated_item_params(thread_id, /*after_updated_at_ordinal*/ u64::MAX)
             })
@@ -1373,10 +1365,27 @@ async fn lineage_reads_page_across_parent_and_child_segments() {
         matches!(store.list_items(anchored).await, Err(ThreadStoreError::InvalidRequest { message }) if message == "cursor.itemId does not identify an item in the requested history scope")
     );
 
+    let inherited_lookup =
+        item_lookup_params(child_id, "root-1", &["root-agent", "root-user", "missing"]);
+    let inherited_lookup = store
+        .list_items(inherited_lookup)
+        .await
+        .expect("lookup inherited items");
+    assert_eq!(item_ids(&inherited_lookup), vec!["root-user", "root-agent"]);
+
+    let excluded_lookup = item_lookup_params(child_id, "excluded-root", &["excluded-item"]);
+    assert!(
+        store
+            .list_items(excluded_lookup)
+            .await
+            .expect("exclude source item after fork cutoff")
+            .items
+            .is_empty()
+    );
+
     for sort_key in [ItemSortKey::CreatedAtOrdinal, ItemSortKey::UpdatedAtOrdinal] {
         let error = store
             .list_items(ListItemsParams {
-                item_id: None,
                 sort_key,
                 ..updated_item_params(child_id, /*after_updated_at_ordinal*/ 0)
             })
@@ -1967,7 +1976,7 @@ fn item_params(
     sort_direction: SortDirection,
 ) -> ListItemsParams {
     ListItemsParams {
-        item_id: None,
+        item_ids: None,
         thread_id,
         turn_id: turn_id.map(str::to_owned),
         include_archived: false,
@@ -1981,7 +1990,6 @@ fn item_params(
 
 fn updated_item_params(thread_id: ThreadId, after_updated_at_ordinal: u64) -> ListItemsParams {
     ListItemsParams {
-        item_id: None,
         sort_key: ItemSortKey::UpdatedAtOrdinal,
         after_updated_at_ordinal: Some(after_updated_at_ordinal),
         ..item_params(
@@ -1989,6 +1997,19 @@ fn updated_item_params(thread_id: ThreadId, after_updated_at_ordinal: u64) -> Li
             /*turn_id*/ None,
             /*cursor*/ None,
             /*page_size*/ 2,
+            SortDirection::Asc,
+        )
+    }
+}
+
+fn item_lookup_params(thread_id: ThreadId, turn_id: &str, item_ids: &[&str]) -> ListItemsParams {
+    ListItemsParams {
+        item_ids: Some(item_ids.iter().map(ToString::to_string).collect()),
+        ..item_params(
+            thread_id,
+            Some(turn_id),
+            /*cursor*/ None,
+            item_ids.len(),
             SortDirection::Asc,
         )
     }

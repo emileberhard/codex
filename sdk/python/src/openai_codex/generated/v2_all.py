@@ -1128,6 +1128,8 @@ class OutputTextContentItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    annotations: list | None = None
+    logprobs: list | None = None
     text: str
     type: Annotated[Literal["output_text"], Field(title="OutputTextContentItemType")]
 
@@ -3993,6 +3995,7 @@ class LocalShellCallResponseItem(BaseModel):
     )
     action: LocalShellAction
     call_id: Annotated[str | None, Field(description="Set when using the Responses API.")] = None
+    encrypted_content: str | None = None
     id: Annotated[
         str | None,
         Field(description="Legacy id field retained for compatibility with older payloads."),
@@ -4008,11 +4011,13 @@ class FunctionCallResponseItem(BaseModel):
     )
     arguments: str
     call_id: str
+    encrypted_content: str | None = None
     encrypted_function_args: list[str] | None = None
     id: str | None = None
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
     name: str
     namespace: str | None = None
+    status: str | None = None
     type: Annotated[Literal["function_call"], Field(title="FunctionCallResponseItemType")]
 
 
@@ -4022,6 +4027,7 @@ class ToolSearchCallResponseItem(BaseModel):
     )
     arguments: Any
     call_id: str | None = None
+    encrypted_content: str | None = None
     execution: str
     id: str | None = None
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
@@ -4034,6 +4040,7 @@ class CustomToolCallResponseItem(BaseModel):
         populate_by_name=True,
     )
     call_id: str
+    encrypted_content: str | None = None
     id: str | None = None
     input: str
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
@@ -4060,6 +4067,7 @@ class ImageGenerationCallResponseItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    encrypted_content: str | None = None
     id: str | None = None
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
     result: str
@@ -4965,7 +4973,7 @@ class SkillSummary(BaseModel):
     enabled: bool
     interface: SkillInterface | None = None
     name: str
-    path: AbsolutePathBuf | None = None
+    path: LegacyAppPathString | None = None
     short_description: Annotated[str | None, Field(alias="shortDescription")] = None
 
 
@@ -5524,6 +5532,19 @@ class SubAgentActivityThreadItem(BaseModel):
     agent_thread_id: Annotated[str, Field(alias="agentThreadId")]
     id: str
     kind: SubAgentActivityKind
+    model: Annotated[
+        str | None,
+        Field(
+            description="Resolved model at sub-agent creation; absent from older records and other activities."
+        ),
+    ] = None
+    reasoning_effort: Annotated[
+        ReasoningEffort | None,
+        Field(
+            alias="reasoningEffort",
+            description="Resolved reasoning effort at sub-agent creation, when known.",
+        ),
+    ] = None
     type: Annotated[Literal["subAgentActivity"], Field(title="SubAgentActivityThreadItemType")]
 
 
@@ -5788,6 +5809,29 @@ class ThreadReadParams(BaseModel):
         ),
     ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ReadThreadReadStateOperation(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["read"], Field(title="ReadThreadReadStateOperationType")]
+
+
+class UnreadThreadReadStateOperation(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["unread"], Field(title="UnreadThreadReadStateOperationType")]
+
+
+class ThreadReadStateOperation(
+    RootModel[ReadThreadReadStateOperation | UnreadThreadReadStateOperation]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ReadThreadReadStateOperation | UnreadThreadReadStateOperation
 
 
 class ThreadRealtimeAudioChunk(BaseModel):
@@ -6418,6 +6462,28 @@ class ThreadUnarchivedNotification(BaseModel):
         populate_by_name=True,
     )
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadStartThreadUnreadPosition(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["threadStart"], Field(title="ThreadStartThreadUnreadPositionType")]
+
+
+class TurnThreadUnreadPosition(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    turn_id: Annotated[str, Field(alias="turnId")]
+    type: Annotated[Literal["turn"], Field(title="TurnThreadUnreadPositionType")]
+
+
+class ThreadUnreadPosition(RootModel[ThreadStartThreadUnreadPosition | TurnThreadUnreadPosition]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: ThreadStartThreadUnreadPosition | TurnThreadUnreadPosition
 
 
 class ThreadUnsubscribeParams(BaseModel):
@@ -9206,10 +9272,12 @@ class MessageResponseItem(BaseModel):
         populate_by_name=True,
     )
     content: list[ContentItem]
+    encrypted_content: str | None = None
     id: str | None = None
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
     phase: MessagePhase | None = None
     role: str
+    status: str | None = None
     type: Annotated[Literal["message"], Field(title="MessageResponseItemType")]
 
 
@@ -9218,6 +9286,7 @@ class WebSearchCallResponseItem(BaseModel):
         populate_by_name=True,
     )
     action: ResponsesApiWebSearchAction | None = None
+    encrypted_content: str | None = None
     id: str | None = None
     internal_chat_message_metadata_passthrough: InternalChatMessageMetadataPassthrough | None = None
     status: str | None = None
@@ -9943,7 +10012,7 @@ class SkillMetadata(BaseModel):
     enabled: bool
     interface: SkillInterface | None = None
     name: str
-    path: AbsolutePathBuf
+    path: LegacyAppPathString
     plugin_id: Annotated[
         str | None,
         Field(
@@ -10286,6 +10355,13 @@ class ThreadListParams(BaseModel):
             description="Optional cwd filter or filters; when set, only threads whose session cwd exactly matches one of these paths are returned."
         ),
     ] = None
+    excluded_thread_ids: Annotated[
+        list[str] | None,
+        Field(
+            alias="excludedThreadIds",
+            description="Thread IDs to exclude before applying the result limit. Up to 100 entries; invalid IDs or a larger list are rejected, never truncated. Send the same exclusions on each page. Omitted, null, or empty means no exclusions.",
+        ),
+    ] = None
     limit: Annotated[
         int | None,
         Field(description="Optional page size; defaults to a reasonable server-side value.", ge=0),
@@ -10342,6 +10418,22 @@ class ThreadListParams(BaseModel):
             description="If true, return from the state DB without scanning JSONL rollouts to repair thread metadata. Omitted or false preserves scan-and-repair behavior.",
         ),
     ] = None
+
+
+class ThreadReadState(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    first_unread: Annotated[ThreadUnreadPosition | None, Field(alias="firstUnread")] = None
+    revision: str
+
+
+class ThreadReadStateChangedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    read_state: Annotated[ThreadReadState, Field(alias="readState")]
+    thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class TranscriptSegmentThreadRealtimeItem(BaseModel):
@@ -11412,6 +11504,24 @@ class ErrorServerNotification(BaseModel):
     params: ErrorNotification
 
 
+class ThreadReadStateChangedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/readState/changed"],
+        Field(title="Thread/readState/changedNotificationMethod"),
+    ]
+    params: ThreadReadStateChangedNotification
+
+
 class ThreadGoalUpdatedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -11887,6 +11997,10 @@ class TurnToolOutput(BaseModel):
     name: str
     namespace: str | None = None
     output: FunctionCallOutputBody
+    retain: Annotated[
+        bool | None,
+        Field(description="Requests retention of this output in the thread's model history."),
+    ] = None
 
 
 class TurnsPage(BaseModel):
@@ -13278,6 +13392,7 @@ class ServerNotification(
         ErrorServerNotification
         | ThreadStartedServerNotification
         | ThreadStatusChangedServerNotification
+        | ThreadReadStateChangedServerNotification
         | ThreadArchivedServerNotification
         | ThreadDeletedServerNotification
         | ThreadUnarchivedServerNotification
@@ -13368,6 +13483,7 @@ class ServerNotification(
         ErrorServerNotification
         | ThreadStartedServerNotification
         | ThreadStatusChangedServerNotification
+        | ThreadReadStateChangedServerNotification
         | ThreadArchivedServerNotification
         | ThreadDeletedServerNotification
         | ThreadUnarchivedServerNotification

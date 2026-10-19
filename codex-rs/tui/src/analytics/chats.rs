@@ -145,6 +145,7 @@ pub(super) async fn roots(
 pub(super) fn list_params() -> ThreadListParams {
     ThreadListParams {
         include_completion_times: None,
+        excluded_thread_ids: None,
         limit: Some(100),
         sort_key: Some(ThreadSortKey::UpdatedAt),
         sort_direction: Some(SortDirection::Desc),

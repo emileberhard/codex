@@ -406,6 +406,7 @@ async fn remote_session_commands_with_workload_identity_use_server_auth() -> Res
                     request_id: RequestId::Integer(4),
                     params: ThreadListParams {
                         include_completion_times: None,
+                        excluded_thread_ids: None,
                         cursor: None,
                         limit: None,
                         sort_key: None,

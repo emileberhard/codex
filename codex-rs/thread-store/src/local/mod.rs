@@ -1109,26 +1109,20 @@ mod tests {
                 root_turn_id: None,
                 disabled_plugin_ids: None,
                 cwd: serde_json::from_value(serde_json::json!(cwd)).expect("absolute cwd"),
-                workspace_roots: None,
-                current_date: None,
-                timezone: None,
                 approval_policy,
                 approvals_reviewer: None,
                 sandbox_policy: SandboxPolicy::DangerFullAccess,
                 permission_profile: None,
                 active_permission_profile: None,
-                network: None,
                 file_system_sandbox_policy: None,
                 model: model.to_string(),
                 comp_hash: None,
-                personality: None,
                 collaboration_mode: None,
                 multi_agent_version: None,
-                multi_agent_mode: None,
                 realtime_active: None,
                 cyber_access_program: None,
                 effort: None,
-                summary: ReasoningSummary::Auto,
+                summary: Some(ReasoningSummary::Auto),
             })
         };
 
@@ -1738,6 +1732,8 @@ mod tests {
 
             let late_edit = RolloutItem::ResponseItem(
                 ResponseItem::Message {
+                    status: None,
+                    encrypted_content: None,
                     id: None,
                     role: "user".to_string(),
                     content: vec![ContentItem::InputText {

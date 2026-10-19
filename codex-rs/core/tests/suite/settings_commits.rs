@@ -8,6 +8,7 @@ use codex_extension_api::ExtensionData;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_history::RolloutItem;
 use codex_history::RolloutLine;
+use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::ThreadHistoryMode;
@@ -62,7 +63,7 @@ fn assert_checkpoints(test: &TestCodex, expected: &[ThreadSettingsSnapshot]) -> 
 #[test_case(ThreadHistoryMode::Legacy; "legacy")]
 #[test_case(ThreadHistoryMode::Paginated; "paginated")]
 #[tokio::test]
-async fn initial_plugin_ids_are_checkpointed_once_on_materialization(
+async fn initial_settings_include_plugin_ids_without_duplicate_checkpoints(
     history_mode: ThreadHistoryMode,
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
@@ -205,6 +206,7 @@ async fn settings_notifications_keep_their_commit_across_postcommit_work(
     initial.disabled_plugin_ids = None;
     let thread_settings = ThreadSettingsOverrides {
         model: Some(COMMITTED_MODEL.to_string()),
+        approval_policy: Some(AskForApproval::Never),
         disabled_plugin_ids: Some(vec!["slack@openai".to_string()]),
         ..Default::default()
     };
@@ -291,6 +293,25 @@ async fn settings_notifications_keep_their_commit_across_postcommit_work(
         expected_request_model
     );
     assert_eq!(test.codex.thread_settings_snapshot().await, restored);
+    test.codex.flush_rollout().await?;
+    let rollout_path = test.codex.rollout_path().expect("rollout path");
+    let (items, _, parse_errors) =
+        codex_rollout::RolloutRecorder::load_rollout_items(&rollout_path).await?;
+    assert_eq!(parse_errors, 0);
+    let latest_settings = items.iter().rev().find_map(|item| match item {
+        RolloutItem::TurnContext(context) => {
+            Some((context.model.as_str(), context.approval_policy))
+        }
+        RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(applied)) => Some((
+            applied.thread_settings.model.as_str(),
+            applied.thread_settings.approval_policy,
+        )),
+        _ => None,
+    });
+    assert_eq!(
+        latest_settings,
+        Some((restored.model.as_str(), restored.approval_policy))
+    );
     Ok(())
 }
 

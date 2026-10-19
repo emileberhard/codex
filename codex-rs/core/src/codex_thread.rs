@@ -219,6 +219,42 @@ pub struct CodexThread {
     _diagnostics_guard: GaugeGuard,
 }
 
+#[must_use = "dropping releases the residency pin before recovery is submitted"]
+pub struct RestartRecoveryThread {
+    thread: Arc<CodexThread>,
+    residency_pin: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+}
+
+impl RestartRecoveryThread {
+    pub(crate) fn new(
+        thread: Arc<CodexThread>,
+        residency_pin: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+    ) -> Self {
+        Self {
+            thread,
+            residency_pin,
+        }
+    }
+
+    pub fn thread(&self) -> &Arc<CodexThread> {
+        &self.thread
+    }
+
+    pub async fn recover_turn_if_idle(
+        self,
+        request: RecoverTurnRequest,
+    ) -> CodexResult<StartIfIdleSubmission> {
+        self.thread
+            .session
+            .services
+            .local_agent_runtime
+            .require_settled_restart_fence()?;
+        self.thread
+            .recover_turn(request, None, self.residency_pin)
+            .await
+    }
+}
+
 #[derive(Default)]
 struct OutOfBandElicitations {
     count: i64,
@@ -388,6 +424,14 @@ impl CodexThread {
         self.session.flush_rollout().await
     }
 
+    /// Test barrier: waits for background compaction without consuming its published result.
+    /// Call after the request starts, with foreground work gated to prevent new launches.
+    #[doc(hidden)]
+    pub async fn wait_for_background_compaction_for_test(&self) {
+        crate::session::async_compaction::wait_for_background_compaction_for_test(&self.session)
+            .await;
+    }
+
     pub async fn submit_with_trace(
         &self,
         op: Op,
@@ -491,26 +535,14 @@ impl CodexThread {
             .services
             .local_agent_runtime
             .acquire_new_work_admission()?;
-        self.recover_turn(request, Some(admission)).await
-    }
-
-    /// Resumes one suspended turn while ordinary work remains fenced in a replacement process.
-    pub async fn recover_turn_after_restart_if_idle(
-        &self,
-        request: RecoverTurnRequest,
-    ) -> CodexResult<StartIfIdleSubmission> {
-        self.session
-            .services
-            .local_agent_runtime
-            .require_settled_restart_fence()?;
-        self.recover_turn(request, /*new_work_admission*/ None)
-            .await
+        self.recover_turn(request, Some(admission), None).await
     }
 
     async fn recover_turn(
         &self,
         request: impl Into<WithTurnExtensionData<RecoverTurnRequest>>,
         new_work_admission: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
+        residency_guard: Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> CodexResult<StartIfIdleSubmission> {
         self.ensure_execution_capacity_for_turn_start(self.session.services.agent_control.as_ref())
             .await?;
@@ -536,6 +568,7 @@ impl CodexThread {
                 trace,
                 turn_id,
                 new_work_admission,
+                residency_guard,
                 turn_extension_init,
             )
             .await?
@@ -812,7 +845,8 @@ impl CodexThread {
                 approval_policy,
                 approvals_reviewer,
             },
-            environments: environment_requests.map(TurnEnvironmentRequests::select),
+            environments: environment_requests
+                .map(|requests| requests.select(&self.session.services.selected_capability_roots)),
             runtime_workspace_roots,
             profile_workspace_roots,
             sandbox_policy,

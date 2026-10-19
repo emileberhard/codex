@@ -38,7 +38,9 @@ fn settings_item(
                 permission_profile: PermissionProfile::read_only(),
                 active_permission_profile,
                 cwd: cwd(),
-                runtime_workspace_roots: None,
+                runtime_workspace_roots: Some(vec![
+                    cwd().join("recovery-root").expect("workspace root"),
+                ]),
                 reasoning_effort: None,
                 reasoning_summary: None,
                 personality: None,
@@ -67,9 +69,6 @@ fn turn_context_item(
         root_turn_id: None,
         disabled_plugin_ids: None,
         cwd: cwd(),
-        workspace_roots: Some(vec![cwd()]),
-        current_date: None,
-        timezone: None,
         approval_policy,
         approvals_reviewer,
         sandbox_policy: permission_profile
@@ -77,18 +76,15 @@ fn turn_context_item(
             .expect("legacy sandbox policy"),
         permission_profile: Some(permission_profile),
         active_permission_profile,
-        network: None,
         file_system_sandbox_policy: None,
         model: "gpt-5".to_string(),
         comp_hash: None,
-        personality: None,
         collaboration_mode: None,
         multi_agent_version: None,
-        multi_agent_mode: None,
         realtime_active: None,
         cyber_access_program: None,
         effort: None,
-        summary: codex_protocol::config_types::ReasoningSummary::Auto,
+        summary: Some(codex_protocol::config_types::ReasoningSummary::Auto),
     })
 }
 
@@ -139,7 +135,10 @@ fn latest_settings_snapshot_wins() {
     );
     let persisted = latest_restart_recovery_settings(&history).expect("persisted settings");
     assert_eq!(persisted.model_provider.as_deref(), Some("openai"));
-    assert_eq!(persisted.workspace_roots, None);
+    assert_eq!(
+        persisted.workspace_roots,
+        Some(vec![cwd().join("recovery-root").expect("workspace root")])
+    );
     assert_eq!(persisted.cyber_access_program, None);
     assert_eq!(persisted.thread_settings.service_tier, Some(None));
     assert_eq!(
@@ -178,7 +177,10 @@ fn latest_turn_context_wins_over_earlier_settings_update() {
     );
     let persisted = latest_restart_recovery_settings(&history).expect("persisted settings");
     assert_eq!(persisted.model_provider.as_deref(), Some("openai"));
-    assert_eq!(persisted.workspace_roots, Some(vec![cwd()]));
+    assert_eq!(
+        persisted.workspace_roots,
+        Some(vec![cwd().join("recovery-root").expect("workspace root")])
+    );
     assert_eq!(persisted.cyber_access_program, None);
     assert_eq!(persisted.thread_settings.service_tier, Some(None));
     assert_eq!(

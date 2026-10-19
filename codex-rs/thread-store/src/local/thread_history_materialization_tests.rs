@@ -3528,6 +3528,8 @@ fn turn_completed(turn_id: &str) -> RolloutItem {
 fn user_message(message: &str) -> RolloutItem {
     RolloutItem::ResponseItem(
         ResponseItem::Message {
+            status: None,
+            encrypted_content: None,
             id: None,
             role: "user".to_string(),
             content: vec![ContentItem::InputText {
@@ -3735,7 +3737,7 @@ async fn legacy_projection_sqlite_checkpoint_reopens_and_preserves_frozen_source
     };
     let before = store.list_turns(params.clone()).await.unwrap();
     let item_params = crate::ListItemsParams {
-        item_id: None,
+        item_ids: None,
         thread_id,
         turn_id: None,
         include_archived: false,

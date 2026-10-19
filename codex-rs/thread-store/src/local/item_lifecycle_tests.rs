@@ -39,9 +39,9 @@ async fn incomplete_item_is_pageable_and_completion_never_moves_it_behind_a_curs
         .expect("persist");
     store.flush_thread(thread_id).await.expect("flush");
     let params = ListItemsParams {
+        item_ids: None,
         thread_id,
         turn_id: Some("turn-1".to_string()),
-        item_id: None,
         include_archived: true,
         position: None,
         page_size: 1,
@@ -106,7 +106,7 @@ async fn incomplete_item_is_pageable_and_completion_never_moves_it_behind_a_curs
     );
     let exact = store
         .list_items(ListItemsParams {
-            item_id: Some("first".to_string()),
+            item_ids: Some(vec!["first".to_string()]),
             ..params
         })
         .await
@@ -199,9 +199,9 @@ async fn fork_prefix_preserves_the_item_snapshot_before_later_completion_and_upd
         seed_paginated_thread_metadata(&store, child).await;
         let page = store
             .list_items(ListItemsParams {
+                item_ids: None,
                 thread_id: child,
                 turn_id: Some("turn".to_string()),
-                item_id: None,
                 include_archived: true,
                 position: None,
                 page_size: 10,

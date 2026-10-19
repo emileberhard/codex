@@ -74,7 +74,7 @@ fn settings_from_snapshot(snapshot: &ThreadSettingsSnapshot) -> RestartRecoveryS
         },
         cwd: snapshot.cwd.clone(),
         model_provider: Some(snapshot.model_provider_id.clone()),
-        workspace_roots: None,
+        workspace_roots: snapshot.runtime_workspace_roots.clone(),
         cyber_access_program: None,
     }
 }
@@ -102,14 +102,13 @@ fn settings_from_turn_context(
                 .collaboration_mode
                 .clone()
                 .or_else(|| previous_snapshot.map(|snapshot| snapshot.collaboration_mode.clone())),
-            personality: turn_context
-                .personality
-                .or_else(|| previous_snapshot.and_then(|snapshot| snapshot.personality)),
+            personality: previous_snapshot.and_then(|snapshot| snapshot.personality),
             ..Default::default()
         },
         cwd: turn_context.cwd.clone(),
         model_provider: previous_snapshot.map(|snapshot| snapshot.model_provider_id.clone()),
-        workspace_roots: turn_context.workspace_roots.clone(),
+        workspace_roots: previous_snapshot
+            .and_then(|snapshot| snapshot.runtime_workspace_roots.clone()),
         cyber_access_program: turn_context.cyber_access_program,
     }
 }

@@ -132,6 +132,8 @@ mod image_url;
 pub mod in_process;
 mod item_position;
 mod log_write_warning;
+#[cfg(unix)]
+mod managed_daemon;
 mod mcp_refresh;
 mod message_processor;
 mod model_catalog;
@@ -791,6 +793,10 @@ pub async fn run_main_with_transport_options(
     ensure_nofile_floor()?;
     #[cfg(target_os = "windows")]
     let _registered_core = codex_windows_sandbox::registered_core_requested();
+    let managed_daemon = matches!(&transport, AppServerTransport::UnixSocket { .. })
+        && runtime_options.managed_daemon;
+    #[cfg(unix)]
+    let nofile_limit_result = managed_daemon.then(managed_daemon::raise_nofile_limit);
     let loader_overrides = loader_overrides_with_test_user_config_file(
         loader_overrides,
         test_user_config_file_from_env(),
@@ -810,6 +816,7 @@ pub async fn run_main_with_transport_options(
         )
     })?;
     let codex_home = find_codex_home()?;
+    let startup_cwd = std::env::current_dir().ok();
     let local_runtime_paths = ExecServerRuntimeOptions::from_optional_paths(
         arg0_paths.codex_self_exe.clone(),
         arg0_paths.codex_linux_sandbox_exe.clone(),
@@ -825,7 +832,7 @@ pub async fn run_main_with_transport_options(
         Arc::new(NoopThreadConfigLoader),
     );
     let bootstrap_config = config_manager
-        .load_startup_config(/*fallback_cwd*/ None)
+        .load_startup_config(startup_cwd.clone())
         .await?;
     let bootstrap_auth =
         AuthManager::shared_from_config(&bootstrap_config, /*enable_codex_api_key_env*/ false)
@@ -838,10 +845,7 @@ pub async fn run_main_with_transport_options(
     );
     let mut config_warnings = Vec::new();
     let mut plugin_startup_config = PluginStartupConfig::Current;
-    let config = match config_manager
-        .load_latest_config(/*fallback_cwd*/ None)
-        .await
-    {
+    let config = match config_manager.load_latest_config(startup_cwd).await {
         Ok(config) => config,
         Err(err) if is_unsupported_untrusted_approval_policy_error(&err) => {
             return Err(err);
@@ -862,6 +866,7 @@ pub async fn run_main_with_transport_options(
             })?
         }
     };
+    config.validate_windows_mxc_requirement()?;
     config.auth_config().validate()?;
     let auth_manager =
         AuthManager::shared_from_config(&config, /*enable_codex_api_key_env*/ false)
@@ -1034,6 +1039,10 @@ pub async fn run_main_with_transport_options(
         .with(log_db_layer)
         .with(otel_layers)
         .try_init();
+    #[cfg(unix)]
+    if let Some(Err(err)) = nofile_limit_result {
+        warn!(%err, "failed to raise managed app-server file descriptor limit");
+    }
     for warning in &config_warnings {
         match &warning.details {
             Some(details) => error!("{} {}", warning.summary, details),
@@ -1072,8 +1081,6 @@ pub async fn run_main_with_transport_options(
     let graceful_signal_restart_enabled =
         runtime_options.install_shutdown_signal_handler && !single_client_mode;
     let start_fenced = runtime_options.start_fenced;
-    let managed_daemon = matches!(&transport, AppServerTransport::UnixSocket { .. })
-        && runtime_options.managed_daemon;
     let mut app_server_client_name_rx = None;
 
     match &transport {
@@ -1254,11 +1261,17 @@ pub async fn run_main_with_transport_options(
     });
 
     let recovery_file = daemon_recovery_file_path(&config.codex_home);
+    let daemon_settings_file = managed_daemon.then(|| {
+        config
+            .codex_home
+            .as_path()
+            .join("app-server-daemon/settings.json")
+    });
     let processor_handle = tokio::spawn({
         let auth_manager = Arc::clone(&auth_manager);
         let initialize_notification_sender = outgoing_message_sender.clone();
         let outbound_control_tx = outbound_control_tx;
-        let processor = Arc::new(MessageProcessor::new(MessageProcessorArgs {
+        let mut processor = MessageProcessor::new(MessageProcessorArgs {
             outgoing: outgoing_message_sender,
             analytics_events_client,
             arg0_paths,
@@ -1284,7 +1297,9 @@ pub async fn run_main_with_transport_options(
             )
             .then_some(plugin_startup_config),
             restart_recovery_grant: runtime_options.restart_recovery_grant.clone(),
-        }));
+        });
+        processor.remote_control_processor.daemon_settings_file = daemon_settings_file;
+        let processor = Arc::new(processor);
         let mut thread_created_rx = processor.thread_created_receiver();
         let mut running_turn_count_rx = processor.subscribe_running_assistant_turn_count();
         let mut active_admissions_rx = processor.turn_admission.subscribe_active();

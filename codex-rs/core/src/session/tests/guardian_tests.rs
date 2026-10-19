@@ -1117,7 +1117,7 @@ async fn compaction_initial_context_preserves_separate_guardian_developer_messag
     let step_context = StepContext::for_test(Arc::clone(&turn_context));
     let world_state = Arc::new(
         session
-            .build_world_state_for_step(&step_context)
+            .build_world_state_for_step(&step_context, /*new_window*/ true)
             .await
             .expect("world state should build"),
     );
@@ -1307,6 +1307,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         code_mode_session_provider: Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
         extensions: codex_extension_api::empty_extension_registry(),
         conversation_history: InitialHistory::New,
+        history_initialization: HistoryInitialization::New,
         disabled_plugin_ids: None,
         requested_history_mode: None,
         fork_persistence: ForkPersistence::Copied,

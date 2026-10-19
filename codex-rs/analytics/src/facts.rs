@@ -33,6 +33,7 @@ use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsage;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
+use codex_utils_path_uri::PathUri;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -387,7 +388,7 @@ pub struct SkillInvocation {
 #[derive(Clone, Debug)]
 pub enum SkillInvocationLocation {
     Host {
-        path: PathBuf,
+        path: PathUri,
         scope: SkillScope,
     },
     Resource {
@@ -591,6 +592,19 @@ pub(crate) enum AnalyticsFact {
     },
     RealtimeHandoffRequested {
         thread_id: String,
+    },
+    RealtimeSessionStarted {
+        thread_id: String,
+        realtime_session_id: Option<String>,
+        started_at: u64,
+    },
+    RealtimeSessionUpdated {
+        thread_id: String,
+        realtime_session_id: String,
+    },
+    RealtimeSessionClosed {
+        thread_id: String,
+        closed_at: u64,
     },
     Notification(Box<ServerNotification>),
     // Facts that do not naturally exist on the app-server protocol surface, or

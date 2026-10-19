@@ -504,9 +504,8 @@ pub enum ListItemsPosition {
 /// Parameters for listing persisted items within a thread.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListItemsParams {
-    /// Optional exact item identity, used to attach persisted positions to live notifications.
-    #[serde(default)]
-    pub item_id: Option<String>,
+    /// Exact item lookup scoped to `turn_id`; incompatible with cursors and update replay.
+    pub item_ids: Option<Vec<String>>,
     /// Thread id to read.
     pub thread_id: ThreadId,
     /// Optional turn id to filter by. When omitted, returns items across the thread.

@@ -345,11 +345,16 @@ pub(super) async fn page_item_rows(
                 .push(" AND updated_at_ordinal > ")
                 .push_bind(sqlite_integer(after_updated_at_ordinal)?);
         }
-        if let Some(item_id) = params.item_id.as_deref() {
-            query.push(" AND item_id = ").push_bind(item_id);
-        }
         if let Some(turn_id) = params.turn_id.as_deref() {
             query.push(" AND turn_id = ").push_bind(turn_id);
+        }
+        if let Some(item_ids) = params.item_ids.as_deref() {
+            query.push(" AND item_id IN (");
+            let mut ids = query.separated(", ");
+            for item_id in item_ids {
+                ids.push_bind(item_id);
+            }
+            ids.push_unseparated(")");
         }
         push_cursor_clause(&mut query, params.sort_direction, segment_cursor)?;
         push_order_and_limit(&mut query, params.sort_direction, remaining);
@@ -396,9 +401,6 @@ WHERE thread_id =
         .push_bind(rollout_id.to_string())
         .push(" AND updated_at_ordinal > ")
         .push_bind(sqlite_integer(after_updated_at_ordinal)?);
-    if let Some(item_id) = params.item_id.as_deref() {
-        query.push(" AND item_id = ").push_bind(item_id);
-    }
     if let Some(turn_id) = params.turn_id.as_deref() {
         query.push(" AND turn_id = ").push_bind(turn_id);
     }
