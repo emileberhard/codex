@@ -73,7 +73,7 @@ pub(super) async fn notify(
     match db.thread_read_states(&[id]).await {
         Ok(mut states) => {
             if let Some(state) = states.remove(&id) {
-                let subscribers = manager.subscribed_connection_ids(id).await;
+                let subscribers = manager.recipients(id).await;
                 ThreadScopedOutgoingMessageSender::new(Arc::clone(outgoing), subscribers, id)
                     .send_server_notification(ServerNotification::ThreadReadStateChanged(
                         ThreadReadStateChangedNotification {

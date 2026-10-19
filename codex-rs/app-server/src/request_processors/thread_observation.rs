@@ -1,3 +1,4 @@
+use super::PendingThreadUnloads;
 use super::thread_processor::ThreadRequestProcessor;
 use super::thread_processor::thread_read_view_error;
 use crate::error_code::internal_error;
@@ -20,7 +21,6 @@ use codex_core::CodexThread;
 use codex_protocol::ThreadId;
 use codex_thread_store::ThreadObservationCursors;
 use codex_thread_store::ThreadStore;
-use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -101,7 +101,7 @@ pub(super) async fn send_subscribe_response(
     manager: &ThreadStateManager,
     state: &Arc<Mutex<ThreadState>>,
     outgoing: &Arc<OutgoingMessageSender>,
-    pending_unloads: &Arc<Mutex<HashSet<ThreadId>>>,
+    pending_unloads: &PendingThreadUnloads,
     request_id: ConnectionRequestId,
     mut thread: Thread,
     store: &dyn ThreadStore,
@@ -179,7 +179,7 @@ pub(super) async fn send_subscribe_response(
             });
         }
         let fence = pending_unloads.lock().await;
-        if fence.contains(&thread_id) {
+        if fence.contains_key(&thread_id) {
             return Err(closing_error());
         }
         let current = state.lock().await;

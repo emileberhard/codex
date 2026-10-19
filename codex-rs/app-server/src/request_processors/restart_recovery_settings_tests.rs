@@ -38,9 +38,7 @@ fn settings_item(
                 permission_profile: PermissionProfile::read_only(),
                 active_permission_profile,
                 cwd: cwd(),
-                runtime_workspace_roots: Some(vec![
-                    cwd().join("recovery-root").expect("workspace root"),
-                ]),
+                runtime_workspace_roots: Some(vec![cwd().join("recovery-root")]),
                 reasoning_effort: None,
                 reasoning_summary: None,
                 personality: None,
@@ -137,7 +135,7 @@ fn latest_settings_snapshot_wins() {
     assert_eq!(persisted.model_provider.as_deref(), Some("openai"));
     assert_eq!(
         persisted.workspace_roots,
-        Some(vec![cwd().join("recovery-root").expect("workspace root")])
+        Some(vec![cwd().join("recovery-root")])
     );
     assert_eq!(persisted.cyber_access_program, None);
     assert_eq!(persisted.thread_settings.service_tier, Some(None));
@@ -179,7 +177,7 @@ fn latest_turn_context_wins_over_earlier_settings_update() {
     assert_eq!(persisted.model_provider.as_deref(), Some("openai"));
     assert_eq!(
         persisted.workspace_roots,
-        Some(vec![cwd().join("recovery-root").expect("workspace root")])
+        Some(vec![cwd().join("recovery-root")])
     );
     assert_eq!(persisted.cyber_access_program, None);
     assert_eq!(persisted.thread_settings.service_tier, Some(None));

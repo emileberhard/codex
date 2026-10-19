@@ -256,9 +256,14 @@ impl ThreadRequestProcessor {
                     /*developer_instructions*/ None,
                     thread_settings.personality,
                 );
+                let persisted_resume_settings =
+                    super::persisted_resume_settings::latest_persisted_resume_settings(
+                        thread_history.get_rollout_items(),
+                    );
                 let persisted_metadata = self
                     .load_and_apply_persisted_resume_metadata(
                         &thread_history,
+                        persisted_resume_settings.as_ref(),
                         &mut request_overrides,
                         &mut typesafe_overrides,
                     )
