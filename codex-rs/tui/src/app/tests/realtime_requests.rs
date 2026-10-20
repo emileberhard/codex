@@ -660,6 +660,7 @@ async fn replay_reconciles_only_matching_voice_captions_one_for_one() {
         role: role.to_string(),
         text: text.to_string(),
         complete: true,
+        interrupted_final_pending: false,
         before_turn_id: None,
     })
     .collect();
@@ -735,6 +736,7 @@ async fn retained_caption_consumes_only_one_matching_answer_fallback_on_reattach
             role: "assistant".into(),
             text: "Same   answer".into(),
             complete: true,
+            interrupted_final_pending: false,
             before_turn_id: None,
         }]
         .into(),
@@ -834,6 +836,7 @@ async fn buffered_voice_items_reconcile_captions_after_thread_switch() {
             role: role.to_string(),
             text: text.to_string(),
             complete: true,
+            interrupted_final_pending: false,
             before_turn_id: None,
         })
         .collect(),
@@ -915,6 +918,7 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
             role: role.to_string(),
             text: text.to_string(),
             complete: true,
+            interrupted_final_pending: false,
             before_turn_id: None,
         })
         .collect(),
@@ -2296,4 +2300,57 @@ async fn microphone_discovery_ignores_another_threads_completion() -> Result<()>
     server.shutdown().await?;
     proxy.await??;
     Ok(())
+}
+
+#[tokio::test]
+async fn provider_error_inactive_replay_absorbs_late_final_and_keeps_new_identical_output() {
+    let (mut app, _events, _ops) = make_test_app_with_channels().await;
+    let thread_id = ThreadId::new();
+    for notification in [
+        ServerNotification::ThreadRealtimeTranscriptDelta(
+            codex_app_server_protocol::ThreadRealtimeTranscriptDeltaNotification {
+                thread_id: thread_id.to_string(),
+                role: "assistant".into(),
+                delta: "Hello".into(),
+            },
+        ),
+        ServerNotification::ThreadRealtimeError(
+            codex_app_server_protocol::ThreadRealtimeErrorNotification {
+                thread_id: thread_id.to_string(),
+                message: "invalid request".into(),
+                terminal: Some(false),
+                provider_error: None,
+            },
+        ),
+        ServerNotification::ThreadRealtimeTranscriptDone(
+            codex_app_server_protocol::ThreadRealtimeTranscriptDoneNotification {
+                thread_id: thread_id.to_string(),
+                role: "assistant".into(),
+                text: "a different final".into(),
+            },
+        ),
+        ServerNotification::ThreadRealtimeTranscriptDelta(
+            codex_app_server_protocol::ThreadRealtimeTranscriptDeltaNotification {
+                thread_id: thread_id.to_string(),
+                role: "assistant".into(),
+                delta: "Hello".into(),
+            },
+        ),
+        ServerNotification::ThreadRealtimeTranscriptDone(
+            codex_app_server_protocol::ThreadRealtimeTranscriptDoneNotification {
+                thread_id: thread_id.to_string(),
+                role: "assistant".into(),
+                text: "Hello".into(),
+            },
+        ),
+    ] {
+        app.retain_inactive_realtime_transcript(thread_id, &notification);
+    }
+    let records = &app.pending_realtime_transcript_replay[&thread_id];
+    assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .iter()
+            .all(|record| record.text == "Hello" && record.complete)
+    );
 }

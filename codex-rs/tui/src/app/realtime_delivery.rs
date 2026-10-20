@@ -155,6 +155,24 @@ impl App {
                 }
             }
         }
+        if matches!(notification, ServerNotification::ThreadRealtimeStarted(_))
+            && let Some(records) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
+        {
+            for record in records {
+                record.interrupted_final_pending = false;
+            }
+        }
+        if let ServerNotification::ThreadRealtimeError(error) = notification
+            && error.terminal == Some(false)
+            && let Some(records) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
+            && let Some(partial) = records
+                .iter_mut()
+                .rev()
+                .find(|record| record.role == "assistant" && !record.complete)
+        {
+            partial.complete = true;
+            partial.interrupted_final_pending = true;
+        }
         let (role, text, complete) = match notification {
             ServerNotification::ThreadRealtimeTranscriptDelta(n) => {
                 (n.role.as_str(), n.delta.as_str(), false)
@@ -172,6 +190,20 @@ impl App {
             .pending_realtime_transcript_replay
             .entry(thread_id)
             .or_default();
+        if role == "assistant"
+            && let Some(record) = records
+                .iter_mut()
+                .rev()
+                .find(|record| record.interrupted_final_pending)
+        {
+            if complete {
+                record.interrupted_final_pending = false;
+                return;
+            }
+            if !text.is_empty() {
+                record.interrupted_final_pending = false;
+            }
+        }
         if complete {
             if text.trim().is_empty() {
                 if let Some(index) = records
@@ -206,6 +238,7 @@ impl App {
                 role: role.to_string(),
                 text: bounded,
                 complete: true,
+                interrupted_final_pending: false,
                 before_turn_id: None,
             });
         } else {
@@ -241,6 +274,7 @@ impl App {
                     role: role.to_string(),
                     text: bounded,
                     complete: false,
+                    interrupted_final_pending: false,
                     before_turn_id: None,
                 });
             }

@@ -222,7 +222,7 @@ impl RealtimeHistoryState {
                     if let Some(segment) =
                         self.active_segments.take(RealtimeTranscriptRole::Assistant)
                     {
-                        self.seal_active_segment(&mut items, segment, Continuation::Finish);
+                        self.seal_active_segment(&mut items, segment, Continuation::Continue);
                     }
                 }
                 RealtimeEvent::Error(_) => self.failed = true,
@@ -354,6 +354,9 @@ impl RealtimeHistoryState {
         role: RealtimeTranscriptRole,
         delta: &RealtimeTranscriptDelta,
     ) -> Option<RealtimeTranscriptStream> {
+        if delta.delta.is_empty() {
+            return None;
+        }
         let session_id = self.active_session_id.clone()?;
         self.active_segments.first_active_role.get_or_insert(role);
         let segment = self

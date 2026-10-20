@@ -799,3 +799,145 @@ fn provider_errors_isolate_assistant_text_and_leave_the_caller_open(
             .is_empty()
     );
 }
+
+#[test]
+fn provider_error_absorbs_late_assistant_finals_without_deduplicating_new_output() {
+    for late_text in [Some("Hello"), Some("a different final"), Some(""), None] {
+        let mut state = started_state();
+        let caller = observe_realtime(
+            &mut state,
+            RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "caller ".into(),
+            }),
+        )
+        .transcript_stream
+        .unwrap();
+        let first = observe_realtime(
+            &mut state,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "Hello".into(),
+            }),
+        )
+        .transcript_stream
+        .unwrap();
+        let mut completed = Vec::new();
+        for _ in 0..2 {
+            completed.extend(
+                observe_realtime(
+                    &mut state,
+                    RealtimeEvent::ProviderError(codex_protocol::protocol::RealtimeProviderError {
+                        message: "invalid request".into(),
+                        code: None,
+                        r#type: None,
+                        param: None,
+                        event_id: None,
+                        client_event_id: None,
+                    }),
+                )
+                .items,
+            );
+        }
+        if let Some(text) = late_text {
+            let final_effects = observe_realtime(
+                &mut state,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone { text: text.into() }),
+            );
+            assert!(final_effects.items.is_empty());
+            assert!(final_effects.transcript_stream.is_none());
+        }
+        let caller_tail = observe_realtime(
+            &mut state,
+            RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "continues".into(),
+            }),
+        )
+        .transcript_stream
+        .unwrap();
+        assert_eq!(caller_tail.item_id, caller.item_id);
+        let next = observe_realtime(
+            &mut state,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "Hello".into(),
+            }),
+        )
+        .transcript_stream
+        .unwrap();
+        assert_ne!(next.item_id, first.item_id);
+        completed.extend(
+            observe_realtime(
+                &mut state,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                    text: "Hello".into(),
+                }),
+            )
+            .items,
+        );
+        assert_eq!(
+            completed
+                .iter()
+                .map(|item| (&item.id, &item.content))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    &first.item_id,
+                    &RealtimeItemContent::TranscriptSegment {
+                        role: RealtimeTranscriptRole::Assistant,
+                        text: "Hello".into()
+                    }
+                ),
+                (
+                    &next.item_id,
+                    &RealtimeItemContent::TranscriptSegment {
+                        role: RealtimeTranscriptRole::Assistant,
+                        text: "Hello".into()
+                    }
+                ),
+            ]
+        );
+    }
+}
+
+#[test]
+fn provider_error_without_open_assistant_partial_preserves_final_only_output() {
+    let mut state = started_state();
+    let mut completed = Vec::new();
+    for _ in 0..2 {
+        assert!(
+            observe_realtime(
+                &mut state,
+                RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                    delta: String::new()
+                })
+            )
+            .transcript_stream
+            .is_none()
+        );
+        observe_realtime(
+            &mut state,
+            RealtimeEvent::ProviderError(codex_protocol::protocol::RealtimeProviderError {
+                message: "invalid request".into(),
+                code: None,
+                r#type: None,
+                param: None,
+                event_id: None,
+                client_event_id: None,
+            }),
+        );
+        completed.extend(
+            observe_realtime(
+                &mut state,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                    text: "Hello".into(),
+                }),
+            )
+            .items,
+        );
+    }
+    assert_eq!(completed.len(), 2);
+    assert_ne!(completed[0].id, completed[1].id);
+    assert!(completed.iter().all(|item| item.content
+        == RealtimeItemContent::TranscriptSegment {
+            role: RealtimeTranscriptRole::Assistant,
+            text: "Hello".into()
+        }));
+}

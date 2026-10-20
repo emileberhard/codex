@@ -129,3 +129,104 @@ async fn completed_utterances_keep_repeated_speech_and_final_only_turns_distinct
         );
     }
 }
+
+#[tokio::test]
+async fn provider_error_absorbs_late_finals_across_tail_drains_without_deduplicating_new_output() {
+    for drain_before_error in [None, Some(false), Some(true)] {
+        for late_text in [Some("Hello"), Some("a different final"), Some(""), None] {
+            let first = events(RealtimeTranscriptState::default());
+            observe(
+                &first,
+                RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                    delta: "Hello".into(),
+                }),
+            )
+            .await;
+            let mut retained = if drain_before_error == Some(true) {
+                first.take_transcript_tail().await
+            } else {
+                Vec::new()
+            };
+            for _ in 0..2 {
+                observe(
+                    &first,
+                    RealtimeEvent::ProviderError(codex_protocol::protocol::RealtimeProviderError {
+                        message: "invalid request".into(),
+                        code: None,
+                        r#type: None,
+                        param: None,
+                        event_id: None,
+                        client_event_id: None,
+                    }),
+                )
+                .await;
+            }
+            if drain_before_error == Some(false) {
+                retained.extend(first.take_transcript_tail().await);
+            }
+            let reconnected = events(first.transcript_state());
+            if let Some(text) = late_text {
+                observe(
+                    &reconnected,
+                    RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                        delta: String::new(),
+                    }),
+                )
+                .await;
+                observe(
+                    &reconnected,
+                    RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                        text: text.into(),
+                    }),
+                )
+                .await;
+            }
+            observe(
+                &reconnected,
+                RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                    delta: "Hello".into(),
+                }),
+            )
+            .await;
+            observe(
+                &reconnected,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                    text: "Hello".into(),
+                }),
+            )
+            .await;
+            retained.extend(reconnected.take_transcript_tail().await);
+            assert_eq!(retained, vec![entry("assistant", "Hello"); 2]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn provider_error_without_open_assistant_output_preserves_final_only_output() {
+    let events = events(RealtimeTranscriptState::default());
+    for _ in 0..2 {
+        observe(
+            &events,
+            RealtimeEvent::ProviderError(codex_protocol::protocol::RealtimeProviderError {
+                message: "invalid request".into(),
+                code: None,
+                r#type: None,
+                param: None,
+                event_id: None,
+                client_event_id: None,
+            }),
+        )
+        .await;
+        observe(
+            &events,
+            RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                text: "Hello".into(),
+            }),
+        )
+        .await;
+    }
+    assert_eq!(
+        events.take_transcript_tail().await,
+        vec![entry("assistant", "Hello"); 2]
+    );
+}

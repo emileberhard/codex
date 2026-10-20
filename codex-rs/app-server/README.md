@@ -589,7 +589,10 @@ such as `requested`, `transport_closed`, or `error` still denotes a provider clo
 unchanged. Provider errors alone do not fail canonical session history;
 `content`, `connection_lost`, unknown and missing provider close reasons do.
 Interrupted assistant transcript text is retained as a separate segment without
-completing an open caller segment or recording playback delivery. Explicit
+completing an open caller segment or recording playback delivery. Its open
+transcript boundary absorbs a late final without duplicating retained text; a
+new nonempty assistant delta starts a separate segment, even with identical text.
+The API transcript tail and TUI replay retain that boundary too. Explicit
 provider closure suppresses synthetic transcript-tail handoffs, including when
 `flushTranscriptTailOnSessionEnd` is enabled; ordinary local stop keeps its tail
 flush behavior.

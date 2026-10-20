@@ -637,12 +637,20 @@ async fn provider_error_keeps_voice_active_and_does_not_finish_the_caller() {
         assert_eq!(chat.realtime_conversation.pending_speech.len(), 1);
         assert!(!chat.realtime_conversation.pending_speech[0].captioned);
         assert!(ops.try_recv().is_err());
+        chat.on_realtime_transcript_done("assistant".into(), "a different final".into());
+        assert_eq!(chat.realtime_conversation.accepted_transcripts.len(), 1);
+        assert_eq!(chat.realtime_conversation.transcript, "caller continues");
+        assert_eq!(chat.realtime_conversation.pending_speech.len(), 1);
+        assert!(!chat.realtime_conversation.pending_speech[0].captioned);
         chat.on_realtime_transcript_delta("assistant".into(), "independent answer".into());
         assert_eq!(chat.realtime_conversation.transcript, "independent answer");
         assert_eq!(
             chat.realtime_conversation.interleaved_transcript,
             Some(("user".into(), "caller continues".into()))
         );
+        chat.on_realtime_transcript_done("assistant".into(), "independent answer".into());
+        assert_eq!(chat.realtime_conversation.accepted_transcripts.len(), 2);
+        assert!(!chat.realtime_conversation.pending_speech[0].captioned);
         chat.reset_realtime_conversation();
     }
 }
@@ -686,5 +694,39 @@ async fn provider_close_during_startup_cleanup_cancels_retry() {
             );
             assert!(ops.try_recv().is_err());
         }
+    }
+}
+
+#[tokio::test]
+async fn provider_error_late_final_is_absorbed_after_reset_and_widget_replay() {
+    for replay_widget in [false, true] {
+        let (mut chat, _sender, _events, mut ops) = make_chatwidget_manual_with_sender().await;
+        activate_voice(&mut chat);
+        chat.on_realtime_transcript_delta("assistant".into(), "Hello".into());
+        chat.on_realtime_provider_error("invalid request".into());
+        chat.reset_realtime_conversation();
+        let records = chat.take_realtime_transcript_cells_for_replay();
+        if replay_widget {
+            let (replacement, _, _, _) = make_chatwidget_manual_with_sender().await;
+            chat = replacement;
+        }
+        chat.restore_realtime_transcript_cells(records);
+        chat.on_realtime_transcript_delta("assistant".into(), String::new());
+        chat.on_realtime_transcript_done("assistant".into(), "a different final".into());
+        assert_eq!(chat.realtime_conversation.accepted_transcripts.len(), 1);
+        assert_eq!(
+            chat.realtime_conversation.accepted_transcripts[0].text,
+            "Hello"
+        );
+        chat.on_realtime_transcript_delta("assistant".into(), "Hello".into());
+        chat.on_realtime_transcript_done("assistant".into(), "Hello".into());
+        assert_eq!(chat.realtime_conversation.accepted_transcripts.len(), 2);
+        assert!(
+            chat.realtime_conversation
+                .accepted_transcripts
+                .iter()
+                .all(|record| record.text == "Hello")
+        );
+        assert!(ops.try_recv().is_err());
     }
 }
