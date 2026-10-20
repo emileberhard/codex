@@ -770,6 +770,17 @@ async fn provider_error_delta_only_policy_preserves_deltas_for_both_final_orderi
             Some("user")
         );
         assert_eq!(chat.realtime_conversation.transcript, "caller continues");
+        chat.on_realtime_transcript_delta("assistant".into(), "pending at local stop".into());
+        chat.finish_realtime_partial_transcripts();
+        assert_eq!(
+            chat.realtime_conversation
+                .accepted_transcripts
+                .iter()
+                .filter(|record| record.role == "assistant")
+                .map(|record| record.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old", "new", "new", "pending at local stop"]
+        );
         chat.reset_realtime_conversation();
     }
 }
@@ -779,6 +790,7 @@ async fn provider_error_policy_survives_committed_output_replay_and_caption_evic
     let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
     activate_voice(&mut chat);
     chat.on_realtime_transcript_delta("assistant".into(), "old".into());
+    chat.finish_realtime_partial_transcripts();
     chat.reset_realtime_conversation();
     let mut replay = chat.take_realtime_transcript_cells_for_replay();
     replay.records.clear();
