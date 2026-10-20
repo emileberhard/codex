@@ -5765,6 +5765,12 @@
     "ThreadRealtimeClosedNotification": {
       "description": "EXPERIMENTAL - emitted when thread realtime transport closes.",
       "properties": {
+        "providerClosed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "reason": {
           "type": [
             "string",
@@ -5785,6 +5791,22 @@
       "properties": {
         "message": {
           "type": "string"
+        },
+        "providerError": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadRealtimeProviderError"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "terminal": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "threadId": {
           "type": "string"
@@ -5982,6 +6004,41 @@
         "audio",
         "threadId"
       ],
+      "type": "object"
+    },
+    "ThreadRealtimeProviderError": {
+      "properties": {
+        "clientEventId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eventId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "param": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ThreadRealtimeSdpNotification": {

@@ -1,9 +1,62 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "ThreadRealtimeProviderError": {
+      "properties": {
+        "clientEventId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "eventId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "param": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
   "description": "EXPERIMENTAL - emitted when thread realtime encounters an error.",
   "properties": {
     "message": {
       "type": "string"
+    },
+    "providerError": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadRealtimeProviderError"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "terminal": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "threadId": {
       "type": "string"

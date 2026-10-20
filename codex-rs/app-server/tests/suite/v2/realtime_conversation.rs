@@ -44,6 +44,7 @@ use codex_app_server_protocol::ThreadRealtimeListVoicesParams;
 use codex_app_server_protocol::ThreadRealtimeListVoicesResponse;
 use codex_app_server_protocol::ThreadRealtimeOutputAudioDeltaNotification;
 use codex_app_server_protocol::ThreadRealtimeSdpNotification;
+use codex_app_server_protocol::ThreadRealtimeSessionOutcome;
 use codex_app_server_protocol::ThreadRealtimeStartParams;
 use codex_app_server_protocol::ThreadRealtimeStartResponse;
 use codex_app_server_protocol::ThreadRealtimeStartTransport;
@@ -52,6 +53,7 @@ use codex_app_server_protocol::ThreadRealtimeStopParams;
 use codex_app_server_protocol::ThreadRealtimeStopResponse;
 use codex_app_server_protocol::ThreadRealtimeTranscriptDeltaNotification;
 use codex_app_server_protocol::ThreadRealtimeTranscriptDoneNotification;
+use codex_app_server_protocol::ThreadRealtimeTranscriptRole;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
@@ -1089,12 +1091,15 @@ async fn realtime_conversation_streams_v2_notifications() -> Result<()> {
             .await?;
     assert_eq!(realtime_error.thread_id, output_audio.thread_id);
     assert_eq!(realtime_error.message, "upstream boom");
+    assert_eq!(realtime_error.terminal, None);
+    assert_eq!(realtime_error.provider_error, None);
 
     let closed =
         read_notification::<ThreadRealtimeClosedNotification>(&mut mcp, "thread/realtime/closed")
             .await?;
     assert_eq!(closed.thread_id, output_audio.thread_id);
     assert_eq!(closed.reason.as_deref(), Some("error"));
+    assert_eq!(closed.provider_closed, None);
 
     let history_request = mcp
         .send_thread_timeline_list_request(ThreadTimelineListParams {
@@ -4690,4 +4695,195 @@ fn assert_invalid_request(error: JSONRPCError, message: String) {
     assert_eq!(error.error.code, -32600);
     assert_eq!(error.error.message, message);
     assert_eq!(error.error.data, None);
+}
+
+#[test_case(Some("close_requested"), ThreadRealtimeSessionOutcome::Ended)]
+#[test_case(Some("content"), ThreadRealtimeSessionOutcome::Failed)]
+#[test_case(Some("future_reason"), ThreadRealtimeSessionOutcome::Failed)]
+#[test_case(Some("requested"), ThreadRealtimeSessionOutcome::Failed)]
+#[test_case(Some("transport_closed"), ThreadRealtimeSessionOutcome::Failed)]
+#[test_case(Some("error"), ThreadRealtimeSessionOutcome::Failed)]
+#[test_case(None, ThreadRealtimeSessionOutcome::Failed)]
+#[tokio::test]
+async fn realtime_provider_error_allows_independent_input_and_provider_close_is_terminal(
+    reason: Option<&str>,
+    outcome: ThreadRealtimeSessionOutcome,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let mut harness = RealtimeE2eHarness::new(
+        RealtimeTestVersion::V1,
+        no_main_loop_responses(),
+        realtime_sideband(vec![
+            open_realtime_sideband_connection(vec![
+                vec![
+                    json!({"type": "input_transcript.added", "item": {"text": "caller "}}),
+                    json!({"type": "output_transcript.added", "item": {"text": "interrupted"}}),
+                    json!({"type": "error", "event_id": "provider-1", "error": {"message": "original provider message", "type": "fixture_type", "code": "fixture_code", "param": "input", "client_event_id": "client-1"}}),
+                    json!({"type": "error", "message": "no provider details"}),
+                ],
+                vec![
+                    json!({"type": "input_transcript.added", "item": {"text": "continues"}}),
+                    json!({"type": "output_transcript.added", "item": {"text": "independent output"}}),
+                    json!({"type": "session.closed", "reason": reason}),
+                ],
+            ]),
+            open_realtime_sideband_connection(vec![vec![]]),
+        ]),
+    ).await?;
+    let request = harness
+        .mcp
+        .send_thread_start_request_with_auto_env(ThreadStartParams {
+            history_mode: Some(ThreadHistoryMode::Paginated),
+            ..Default::default()
+        })
+        .await?;
+    let thread: ThreadStartResponse =
+        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(request)).await??;
+    harness.thread_id = thread.thread.id;
+    let request = harness
+        .mcp
+        .send_thread_realtime_start_request(ThreadRealtimeStartParams {
+            thread_id: harness.thread_id.clone(),
+            handoff_owner: Some(ThreadRealtimeHandoffOwner::Client),
+            client_managed_handoffs: None,
+            delegation_ack_filler: None,
+            flush_transcript_tail_on_session_end: Some(true),
+            codex_responses_as_items: None,
+            codex_response_item_prefix: None,
+            codex_response_handoff_mode: None,
+            backend_reasoning_status: false,
+            codex_response_handoff_channel_prefixes: None,
+            model: None,
+            output_modality: RealtimeOutputModality::Audio,
+            include_startup_context: Some(false),
+            initial_items: None,
+            realtime_start_instructions: None,
+            realtime_end_instructions: None,
+            prompt: Some(Some("fixture".to_string())),
+            realtime_session_id: None,
+            transport: Some(ThreadRealtimeStartTransport::Webrtc {
+                sdp: "v=offer\r\n".to_string(),
+            }),
+            version: Some(RealtimeConversationVersion::V3),
+            voice: None,
+        })
+        .await?;
+    let _: ThreadRealtimeStartResponse =
+        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(request)).await??;
+    harness
+        .read_notification::<ThreadRealtimeStartedNotification>("thread/realtime/started")
+        .await?;
+    harness
+        .read_notification::<ThreadRealtimeSdpNotification>("thread/realtime/sdp")
+        .await?;
+    harness
+        .append_text(harness.thread_id.clone(), "first input")
+        .await?;
+    let error = harness
+        .read_notification::<ThreadRealtimeErrorNotification>("thread/realtime/error")
+        .await?;
+    assert_eq!(
+        serde_json::to_value(error)?,
+        json!({
+            "threadId": harness.thread_id, "message": "original provider message", "terminal": false,
+            "providerError": {"type": "fixture_type", "code": "fixture_code", "param": "input", "eventId": "provider-1", "clientEventId": "client-1"},
+        })
+    );
+    let error = harness
+        .read_notification::<ThreadRealtimeErrorNotification>("thread/realtime/error")
+        .await?;
+    assert_eq!(
+        serde_json::to_value(error)?,
+        json!({"threadId": harness.thread_id, "message": "no provider details", "terminal": false})
+    );
+    harness
+        .append_text(harness.thread_id.clone(), "independent input")
+        .await?;
+    let notification = timeout(
+        DEFAULT_TIMEOUT,
+        harness.mcp.read_stream_until_matching_notification(
+            "provider closure without a synthetic handoff",
+            |notification| {
+                matches!(
+                    notification.method.as_str(),
+                    "thread/realtime/itemAdded" | "thread/realtime/closed"
+                )
+            },
+        ),
+    )
+    .await??;
+    assert_eq!(notification.method, "thread/realtime/closed");
+    let closed: ThreadRealtimeClosedNotification =
+        serde_json::from_value(notification.params.context("closed params")?)?;
+    assert_eq!(closed.reason.as_deref(), reason);
+    assert_eq!(closed.provider_closed, Some(true));
+    let request = harness
+        .mcp
+        .send_thread_realtime_stop_request(ThreadRealtimeStopParams {
+            thread_id: harness.thread_id.clone(),
+        })
+        .await?;
+    let _: ThreadRealtimeStopResponse =
+        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(request)).await??;
+    assert!(
+        read_notification_with_timeout::<ThreadRealtimeClosedNotification>(
+            &mut harness.mcp,
+            "thread/realtime/closed",
+            Duration::from_millis(250)
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        !harness
+            .realtime_server
+            .wait_for_handshakes(2, Duration::from_millis(250))
+            .await
+    );
+    let writes = harness.realtime_server.single_connection();
+    assert_eq!(writes.len(), 2);
+    assert_eq!(
+        writes[1].body_json()["content"][0]["text"],
+        "independent input"
+    );
+    let request = harness
+        .mcp
+        .send_thread_timeline_list_request(ThreadTimelineListParams {
+            thread_id: harness.thread_id.clone(),
+            cursor: None,
+            limit: Some(100),
+        })
+        .await?;
+    let timeline: ThreadTimelineListResponse =
+        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(request)).await??;
+    let contents = timeline
+        .data
+        .into_iter()
+        .filter_map(|entry| match entry {
+            ThreadTimelineEntry::Realtime { item, .. } => Some(item.content),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        contents,
+        vec![
+            ThreadRealtimeItemContent::RealtimeSessionStarted,
+            ThreadRealtimeItemContent::TranscriptSegment {
+                role: ThreadRealtimeTranscriptRole::Assistant,
+                text: "interrupted".to_string()
+            },
+            ThreadRealtimeItemContent::TranscriptSegment {
+                role: ThreadRealtimeTranscriptRole::User,
+                text: "caller continues".to_string()
+            },
+            ThreadRealtimeItemContent::TranscriptSegment {
+                role: ThreadRealtimeTranscriptRole::Assistant,
+                text: "independent output".to_string()
+            },
+            ThreadRealtimeItemContent::RealtimeSessionClosed { outcome },
+        ]
+    );
+    assert!(harness.main_loop_responses_requests().await?.is_empty());
+    harness.shutdown().await;
+    Ok(())
 }

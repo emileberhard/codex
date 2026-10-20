@@ -218,6 +218,13 @@ impl RealtimeHistoryState {
                         self.pending_handoffs.push_back(session_id.clone());
                     }
                 }
+                RealtimeEvent::ProviderError(_) => {
+                    if let Some(segment) =
+                        self.active_segments.take(RealtimeTranscriptRole::Assistant)
+                    {
+                        self.seal_active_segment(&mut items, segment, Continuation::Finish);
+                    }
+                }
                 RealtimeEvent::Error(_) => self.failed = true,
                 _ => {}
             },
@@ -278,7 +285,12 @@ impl RealtimeHistoryState {
                 let text = message.text.clone();
                 self.observe_assistant_message(&mut items, &event.turn_id, &event.item_id, &text);
             }
-            EventMsg::RealtimeConversationClosed(_) => {
+            EventMsg::RealtimeConversationClosed(event) => {
+                self.failed |= event.provider_closed == Some(true)
+                    && !matches!(
+                        event.reason.as_deref(),
+                        Some("close_requested" | "expired" | "remote_hangup")
+                    );
                 if let Some(session_id) = self.active_session_id.take() {
                     self.seal_segments(&mut items, Continuation::Finish);
                     items.push(RealtimeItem {

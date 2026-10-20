@@ -517,6 +517,33 @@ pub struct ThreadRealtimeSdpNotification {
 pub struct ThreadRealtimeErrorNotification {
     pub thread_id: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub terminal: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub provider_error: Option<ThreadRealtimeProviderError>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadRealtimeProviderError {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub r#type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub param: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub event_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub client_event_id: Option<String>,
 }
 
 /// EXPERIMENTAL - emitted when thread realtime transport closes.
@@ -526,4 +553,57 @@ pub struct ThreadRealtimeErrorNotification {
 pub struct ThreadRealtimeClosedNotification {
     pub thread_id: String,
     pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub provider_closed: Option<bool>,
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn realtime_close_provenance_is_additive_and_optional() {
+        for reason in [
+            Some("requested"),
+            Some("transport_closed"),
+            Some("error"),
+            Some("future_reason"),
+            None,
+        ] {
+            let legacy = json!({"threadId": "thread", "reason": reason});
+            let decoded: ThreadRealtimeClosedNotification =
+                serde_json::from_value(legacy.clone()).unwrap();
+            assert_eq!(decoded.provider_closed, None);
+            assert_eq!(serde_json::to_value(decoded).unwrap(), legacy);
+            let provider = json!({"threadId": "thread", "reason": reason, "providerClosed": true});
+            let decoded: ThreadRealtimeClosedNotification =
+                serde_json::from_value(provider.clone()).unwrap();
+            assert_eq!(decoded.provider_closed, Some(true));
+            assert_eq!(decoded.reason.as_deref(), reason);
+            assert_eq!(serde_json::to_value(decoded).unwrap(), provider);
+        }
+    }
+
+    #[test]
+    fn realtime_error_metadata_is_additive_and_optional() {
+        let legacy = json!({"threadId": "thread", "message": "failure"});
+        let decoded: ThreadRealtimeErrorNotification =
+            serde_json::from_value(legacy.clone()).unwrap();
+        assert_ne!(decoded.terminal, Some(false));
+        assert_eq!(decoded.provider_error, None);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), legacy);
+        let minimal_provider =
+            json!({"threadId": "thread", "message": "original message", "terminal": false});
+        let decoded: ThreadRealtimeErrorNotification =
+            serde_json::from_value(minimal_provider.clone()).unwrap();
+        assert_eq!(decoded.provider_error, None);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), minimal_provider);
+        let provider = json!({"threadId": "thread", "message": "original message", "terminal": false, "providerError": {"type": "invalid_request_error", "code": "future_code", "param": "input", "eventId": "provider-1", "clientEventId": "client-1"}});
+        let decoded: ThreadRealtimeErrorNotification =
+            serde_json::from_value(provider.clone()).unwrap();
+        assert_eq!(decoded.terminal, Some(false));
+        assert_eq!(serde_json::to_value(decoded).unwrap(), provider);
+    }
 }

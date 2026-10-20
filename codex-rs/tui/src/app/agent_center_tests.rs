@@ -796,6 +796,7 @@ async fn overview_clears_voice_badge_after_async_close() -> Result<()> {
             codex_app_server_protocol::ThreadRealtimeClosedNotification {
                 thread_id: owner.to_string(),
                 reason: Some("requested".into()),
+                provider_closed: None,
             },
         ),
     );

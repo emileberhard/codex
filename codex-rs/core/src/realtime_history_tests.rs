@@ -276,7 +276,10 @@ fn promotes_backing_agent_artifacts_once_without_a_client_request() {
         );
     }
     state.observe(&EventMsg::RealtimeConversationClosed(
-        RealtimeConversationClosedEvent { reason: None },
+        RealtimeConversationClosedEvent {
+            reason: None,
+            provider_closed: None,
+        },
     ));
     let late = state.observe(&assistant_delta(
         "late-artifact",
@@ -406,7 +409,10 @@ fn preserves_first_transcript_activity_order_when_both_speakers_are_active() {
         }
         let items = state
             .observe(&EventMsg::RealtimeConversationClosed(
-                RealtimeConversationClosedEvent { reason: None },
+                RealtimeConversationClosedEvent {
+                    reason: None,
+                    provider_closed: None,
+                },
             ))
             .items;
         let observed_roles = items
@@ -457,7 +463,10 @@ fn generates_distinct_boundary_ids_for_reused_realtime_sessions() {
             },
         ));
         let closed = state.observe(&EventMsg::RealtimeConversationClosed(
-            RealtimeConversationClosedEvent { reason: None },
+            RealtimeConversationClosedEvent {
+                reason: None,
+                provider_closed: None,
+            },
         ));
         for item in started.items.into_iter().chain(closed.items) {
             assert_eq!(item.realtime_session_id, "reused-session");
@@ -592,7 +601,10 @@ fn promotes_successful_dynamic_tools_and_splits_active_transcripts() {
     assert!(state.observe(&completed).items.is_empty());
 
     let closed = state.observe(&EventMsg::RealtimeConversationClosed(
-        RealtimeConversationClosedEvent { reason: None },
+        RealtimeConversationClosedEvent {
+            reason: None,
+            provider_closed: None,
+        },
     ));
     assert_eq!(closed.items[0].id, second.item_id);
     let late = completed_item(dynamic_tool_call(
@@ -674,4 +686,116 @@ fn typed_input_seals_both_roles_but_realtime_delegation_does_not(
     ] {
         assert!(observe_realtime(&mut state, event).items.is_empty());
     }
+}
+
+#[test_case(Some("close_requested"), RealtimeSessionOutcome::Ended)]
+#[test_case(Some("expired"), RealtimeSessionOutcome::Ended)]
+#[test_case(Some("remote_hangup"), RealtimeSessionOutcome::Ended)]
+#[test_case(Some("content"), RealtimeSessionOutcome::Failed)]
+#[test_case(Some("connection_lost"), RealtimeSessionOutcome::Failed)]
+#[test_case(Some("future_reason"), RealtimeSessionOutcome::Failed)]
+#[test_case(Some("requested"), RealtimeSessionOutcome::Failed)]
+#[test_case(Some("transport_closed"), RealtimeSessionOutcome::Failed)]
+#[test_case(Some("error"), RealtimeSessionOutcome::Failed)]
+#[test_case(None, RealtimeSessionOutcome::Failed)]
+fn provider_errors_isolate_assistant_text_and_leave_the_caller_open(
+    reason: Option<&str>,
+    outcome: RealtimeSessionOutcome,
+) {
+    let mut state = started_state();
+    let caller = observe_realtime(
+        &mut state,
+        RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
+            delta: "caller ".to_string(),
+        }),
+    )
+    .transcript_stream
+    .unwrap();
+    let interrupted = observe_realtime(
+        &mut state,
+        RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+            delta: "interrupted".to_string(),
+        }),
+    )
+    .transcript_stream
+    .unwrap();
+    let error = observe_realtime(
+        &mut state,
+        RealtimeEvent::ProviderError(codex_protocol::protocol::RealtimeProviderError {
+            message: "provider declined output".to_string(),
+            code: None,
+            r#type: None,
+            param: None,
+            event_id: None,
+            client_event_id: None,
+        }),
+    );
+    assert_eq!(error.items.len(), 1);
+    assert_eq!(error.items[0].id, interrupted.item_id);
+    assert_eq!(
+        error.items[0].content,
+        RealtimeItemContent::TranscriptSegment {
+            role: RealtimeTranscriptRole::Assistant,
+            text: "interrupted".to_string()
+        }
+    );
+    let caller_tail = observe_realtime(
+        &mut state,
+        RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
+            delta: "continues".to_string(),
+        }),
+    )
+    .transcript_stream
+    .unwrap();
+    assert_eq!(caller_tail.item_id, caller.item_id);
+    let next = observe_realtime(
+        &mut state,
+        RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+            delta: "independent answer".to_string(),
+        }),
+    )
+    .transcript_stream
+    .unwrap();
+    assert_ne!(next.item_id, interrupted.item_id);
+    observe_realtime(
+        &mut state,
+        RealtimeEvent::SessionClosed {
+            reason: reason.map(str::to_owned),
+        },
+    );
+    let closed = state.observe(&EventMsg::RealtimeConversationClosed(
+        RealtimeConversationClosedEvent {
+            reason: reason.map(str::to_owned),
+            provider_closed: Some(true),
+        },
+    ));
+    assert_eq!(
+        closed
+            .items
+            .iter()
+            .map(|item| item.content.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            RealtimeItemContent::TranscriptSegment {
+                role: RealtimeTranscriptRole::User,
+                text: "caller continues".to_string()
+            },
+            RealtimeItemContent::TranscriptSegment {
+                role: RealtimeTranscriptRole::Assistant,
+                text: "independent answer".to_string()
+            },
+            RealtimeItemContent::RealtimeSessionClosed { outcome },
+        ]
+    );
+    assert!(
+        state
+            .observe(&EventMsg::RealtimeConversationClosed(
+                RealtimeConversationClosedEvent {
+                    reason: Some("requested".to_string()),
+                    provider_closed: None,
+                }
+            ))
+            .items
+            .is_empty()
+    );
 }

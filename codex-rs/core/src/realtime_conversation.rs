@@ -124,11 +124,12 @@ const REALTIME_ACTIVE_RESPONSE_ERROR_PREFIX: &str =
     "Conversation already has an active response in progress:";
 const REALTIME_SESSION_ENDED_HANDOFF_INSTRUCTION: &str = "The user just ended their realtime session. Here is the remaining handoff/transcript tail. You probably do not have to do anything; acknowledge the handoff unless the transcript itself asks for something.";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum RealtimeConversationEnd {
     Requested,
     TransportClosed,
     Error,
+    ProviderClosed { reason: Option<String> },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,6 +181,7 @@ pub(crate) struct RealtimeConversationManager {
 
 struct RealtimeConversationManagerState {
     conversation: Option<ConversationState>,
+    last_close: Option<RealtimeConversationEnd>,
     mode_instructions: Option<RealtimeModeInstructions>,
     // Keep context active until the terminal transcript is recorded.
     context_active: bool,
@@ -529,7 +531,7 @@ struct ConversationState {
     session_kind: RealtimeSessionKind,
     handoff: RealtimeHandoffState,
     input_task: JoinHandle<()>,
-    fanout_task: Option<JoinHandle<()>>,
+    fanout_task: Option<JoinHandle<RealtimeConversationEnd>>,
     realtime_active: Arc<AtomicBool>,
     // A misalignment failure retires only this session's queued handoffs.
     route_handoffs: Arc<RealtimeHandoffAdmission>,
@@ -570,6 +572,7 @@ impl RealtimeConversationManager {
         Self {
             state: Mutex::new(RealtimeConversationManagerState {
                 conversation: None,
+                last_close: None,
                 mode_instructions: None,
                 context_active: false,
             }),
@@ -631,17 +634,13 @@ impl RealtimeConversationManager {
     ) -> CodexResult<RealtimeStartOutput> {
         let previous_state = {
             let mut guard = self.state.lock().await;
+            guard.last_close = None;
             guard.conversation.take()
         };
         if let Some(state) = previous_state {
             let previous_sub_id = state.sub_id.clone();
-            stop_conversation_state(state, RealtimeFanoutTaskStop::Await).await;
-            send_realtime_conversation_closed(
-                sess,
-                previous_sub_id,
-                RealtimeConversationEnd::Requested,
-            )
-            .await;
+            let end = stop_conversation_state(state, RealtimeFanoutTaskStop::Await).await;
+            send_realtime_conversation_closed(sess, previous_sub_id, end).await;
         }
 
         self.start_inner(start, mode_instructions, sub_id).await
@@ -818,10 +817,10 @@ impl RealtimeConversationManager {
         })
     }
 
-    pub(crate) async fn register_fanout_task(
+    async fn register_fanout_task(
         &self,
         realtime_active: &Arc<AtomicBool>,
-        fanout_task: JoinHandle<()>,
+        fanout_task: JoinHandle<RealtimeConversationEnd>,
     ) {
         let mut fanout_task = Some(fanout_task);
         {
@@ -864,6 +863,7 @@ impl RealtimeConversationManager {
             return;
         };
         stop_conversation_state(state, RealtimeFanoutTaskStop::Detach).await;
+        guard.last_close = Some(end.clone());
         send_realtime_conversation_closed(sess, sub_id, end).await;
     }
 
@@ -1375,7 +1375,7 @@ async fn clear_active_handoff_if_matches(handoff: &RealtimeHandoffState, handoff
 async fn stop_conversation_state(
     mut state: ConversationState,
     fanout_task_stop: RealtimeFanoutTaskStop,
-) {
+) -> RealtimeConversationEnd {
     state.realtime_active.store(false, Ordering::Relaxed);
     state.stop_token.cancel();
     let _ = state.input_task.await;
@@ -1383,11 +1383,15 @@ async fn stop_conversation_state(
     if let Some(fanout_task) = state.fanout_task.take() {
         match fanout_task_stop {
             RealtimeFanoutTaskStop::Await => {
-                let _ = fanout_task.await;
+                if let Ok(end @ RealtimeConversationEnd::ProviderClosed { .. }) = fanout_task.await
+                {
+                    return end;
+                }
             }
             RealtimeFanoutTaskStop::Detach => {}
         }
     }
+    RealtimeConversationEnd::Requested
 }
 
 pub(crate) async fn handle_start(
@@ -1457,6 +1461,7 @@ async fn prepare_realtime_start(
     sess: &Arc<Session>,
     params: ConversationStartParams,
 ) -> CodexResult<PreparedRealtimeConversationStart> {
+    sess.conversation.state.lock().await.last_close = None;
     let provider = sess.provider().await;
     let auth_manager = sess
         .services
@@ -1906,8 +1911,18 @@ async fn handle_start_inner(
                     info!("received realtime conversation event");
                 }
             }
-            if let RealtimeEvent::Error(_) = &event {
-                end = RealtimeConversationEnd::Error;
+            match &event {
+                RealtimeEvent::SessionClosed { reason } => {
+                    end = RealtimeConversationEnd::ProviderClosed {
+                        reason: reason.clone(),
+                    };
+                }
+                RealtimeEvent::Error(_)
+                    if !matches!(&end, RealtimeConversationEnd::ProviderClosed { .. }) =>
+                {
+                    end = RealtimeConversationEnd::Error;
+                }
+                _ => {}
             }
             let maybe_routed_text = if handoff_owner == RealtimeHandoffOwner::Codex {
                 match &event {
@@ -1978,7 +1993,9 @@ async fn handle_start_inner(
             }
         }
         if let Some(error) = handoff_error {
-            end = RealtimeConversationEnd::Error;
+            if !matches!(&end, RealtimeConversationEnd::ProviderClosed { .. }) {
+                end = RealtimeConversationEnd::Error;
+            }
             sess_clone
                 .send_event_raw(ev(EventMsg::RealtimeConversationRealtime(
                     RealtimeConversationRealtimeEvent {
@@ -1992,13 +2009,16 @@ async fn handle_start_inner(
                 RealtimeConversationEnd::TransportClosed => {
                     info!("realtime conversation transport closed");
                 }
-                RealtimeConversationEnd::Requested | RealtimeConversationEnd::Error => {}
+                RealtimeConversationEnd::Requested
+                | RealtimeConversationEnd::Error
+                | RealtimeConversationEnd::ProviderClosed { .. } => {}
             }
             sess_clone
                 .conversation
-                .finish_if_active(&sess_clone, &fanout_realtime_active, sub_id, end)
+                .finish_if_active(&sess_clone, &fanout_realtime_active, sub_id, end.clone())
                 .await;
         }
+        end
     });
     sess.conversation
         .register_fanout_task(&realtime_active, fanout_task)
@@ -2195,16 +2215,26 @@ pub(crate) async fn handle_detach(sess: &Arc<Session>, expected: Option<&str>, s
         }) {
             return;
         }
+        if state.conversation.is_none()
+            && matches!(
+                state.last_close.as_ref(),
+                Some(RealtimeConversationEnd::ProviderClosed { .. })
+            )
+        {
+            return;
+        }
+        state.last_close = Some(RealtimeConversationEnd::Requested);
         state.conversation.take()
     };
-    let sub_id = if let Some(current) = current {
+    let (sub_id, end) = if let Some(current) = current {
         let sub_id = current.sub_id.clone();
-        stop_conversation_state(current, RealtimeFanoutTaskStop::Await).await;
-        sub_id
+        let end = stop_conversation_state(current, RealtimeFanoutTaskStop::Await).await;
+        (sub_id, end)
     } else {
-        stop_sub_id.to_owned()
+        (stop_sub_id.to_owned(), RealtimeConversationEnd::Requested)
     };
-    send_realtime_conversation_closed(sess, sub_id, RealtimeConversationEnd::Requested).await;
+    sess.conversation.state.lock().await.last_close = Some(end.clone());
+    send_realtime_conversation_closed(sess, sub_id, end).await;
 }
 
 fn spawn_realtime_input_task(
@@ -2215,8 +2245,12 @@ fn spawn_realtime_input_task(
         let events_tx = input.events_tx.clone();
         let transcript_state = input.events.transcript_state();
         let exit = run_realtime_input_task(input, /*pending_outbound*/ None).await;
-        if let RealtimeInputTaskExit::TransportLost { err, .. } = exit {
-            report_realtime_transport_loss(&events_tx, err).await;
+        match exit {
+            RealtimeInputTaskExit::ProviderClosed => return,
+            RealtimeInputTaskExit::TransportLost { err, .. } => {
+                report_realtime_transport_loss(&events_tx, err).await;
+            }
+            RealtimeInputTaskExit::Terminal => {}
         }
         let transcript_tail = transcript_state.take_transcript_tail().await;
         flush_realtime_transcript_tail(&transcript_tail_flush, &transcript_tail).await;
@@ -2225,6 +2259,7 @@ fn spawn_realtime_input_task(
 
 enum RealtimeInputTaskExit {
     Terminal,
+    ProviderClosed,
     TransportLost {
         err: ApiError,
         pending_outbound: Option<Box<RealtimePendingOutbound>>,
@@ -2299,7 +2334,12 @@ async fn run_realtime_input_task(
             realtime_event = events.next_event() => {
                 match realtime_event {
                     Ok(Some(event)) => {
-                        handle_realtime_server_event(
+                        if matches!(&event, RealtimeEvent::SessionClosed { .. }) {
+                            text_rx.close();
+                            handoff_output_rx.close();
+                            audio_rx.close();
+                        }
+                        match handle_realtime_server_event(
                             event,
                             &writer,
                             &events_tx,
@@ -2307,9 +2347,11 @@ async fn run_realtime_input_task(
                             session_kind,
                             &mut output_audio_state,
                             &mut response_create_queue,
-                        )
-                        .await
-                        .map_err(classify_realtime_input_error)
+                        ).await {
+                            Ok(Some(exit)) => Err(exit),
+                            Ok(None) => Ok(()),
+                            Err(err) => Err(classify_realtime_input_error(err)),
+                        }
                     }
                     Ok(None) => Err(RealtimeInputTaskExit::Terminal),
                     Err(err) => Err(RealtimeInputTaskExit::TransportLost {
@@ -2736,7 +2778,7 @@ async fn handle_realtime_server_event(
     session_kind: RealtimeSessionKind,
     output_audio_state: &mut Option<OutputAudioState>,
     response_create_queue: &mut RealtimeResponseCreateQueue,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<RealtimeInputTaskExit>> {
     let should_stop = match &event {
         RealtimeEvent::AudioOut(frame) => {
             match session_kind {
@@ -2858,7 +2900,11 @@ async fn handle_realtime_server_event(
             }
             false
         }
-        RealtimeEvent::Error(_) => true,
+        RealtimeEvent::Error(_) | RealtimeEvent::SessionClosed { .. } => true,
+        RealtimeEvent::ProviderError(_) => {
+            *output_audio_state = None;
+            false
+        }
         RealtimeEvent::SessionUpdated {
             realtime_session_id,
             ..
@@ -2877,14 +2923,18 @@ async fn handle_realtime_server_event(
         | RealtimeEvent::HistoryItemCompleted(_) => false,
     };
 
+    let provider_closed = matches!(&event, RealtimeEvent::SessionClosed { .. });
     if events_tx.send(event).await.is_err() {
         anyhow::bail!("realtime output event channel closed");
     }
+    if provider_closed {
+        return Ok(Some(RealtimeInputTaskExit::ProviderClosed));
+    }
     if should_stop {
         error!("realtime stream error event received");
-        anyhow::bail!("realtime stream error event received");
+        return Ok(Some(RealtimeInputTaskExit::Terminal));
     }
-    Ok(())
+    Ok(None)
 }
 
 async fn handle_user_audio_input(
@@ -2964,15 +3014,21 @@ async fn send_realtime_conversation_closed(
     sub_id: String,
     end: RealtimeConversationEnd,
 ) {
+    let provider_closed =
+        matches!(end, RealtimeConversationEnd::ProviderClosed { .. }).then_some(true);
     let reason = match end {
         RealtimeConversationEnd::Requested => Some("requested".to_string()),
         RealtimeConversationEnd::TransportClosed => Some("transport_closed".to_string()),
         RealtimeConversationEnd::Error => Some("error".to_string()),
+        RealtimeConversationEnd::ProviderClosed { reason } => reason,
     };
 
     sess.send_event_raw(Event {
         id: sub_id,
-        msg: EventMsg::RealtimeConversationClosed(RealtimeConversationClosedEvent { reason }),
+        msg: EventMsg::RealtimeConversationClosed(RealtimeConversationClosedEvent {
+            reason,
+            provider_closed,
+        }),
     })
     .await;
 }

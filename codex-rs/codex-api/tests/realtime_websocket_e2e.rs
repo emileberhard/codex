@@ -735,3 +735,131 @@ async fn realtime_ws_e2e_realtime_v2_parser_emits_handoff_requested() {
 fn test_client(provider: Provider) -> RealtimeWebsocketClient {
     RealtimeWebsocketClient::new(provider, HttpClientFactory::new(ReqwestDefault))
 }
+
+fn frameless_config() -> RealtimeSessionConfig {
+    RealtimeSessionConfig {
+        instructions: "fixture".to_string(),
+        initial_items: Vec::new(),
+        delegation_ack_filler: None,
+        model: Some("gpt-live-test".to_string()),
+        session_id: None,
+        event_parser: RealtimeEventParser::FramelessBidi,
+        session_mode: RealtimeSessionMode::Conversational,
+        output_modality: RealtimeOutputModality::Audio,
+        voice: RealtimeVoice::Marin,
+    }
+}
+
+#[tokio::test]
+async fn provider_closure_rejects_writes_and_ends_reads_once() {
+    let (addr, server) = spawn_realtime_ws_server(|mut ws| async move {
+        ws.next().await.unwrap().unwrap();
+        for event in [
+            json!({"type": "session.started", "session": {"id": "fixture"}}),
+            json!({"type": "output_transcript.added", "item": {"text": "interrupted"}}),
+            json!({"type": "error", "message": "original provider error"}),
+        ] {
+            ws.send(Message::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+        let next: Value =
+            serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+        assert_eq!(next["type"], "session.context.append");
+        assert_eq!(next["content"][0]["text"], "independent input");
+        for event in [
+            json!({"type": "output_transcript.added", "item": {"text": "independent output"}}),
+            json!({"type": "session.closed", "reason": "future_reason"}),
+            json!({"type": "output_transcript.added", "item": {"text": "stale output"}}),
+        ] {
+            ws.send(Message::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+        let next = tokio::time::timeout(Duration::from_secs(5), ws.next())
+            .await
+            .unwrap();
+        assert!(!matches!(next, Some(Ok(Message::Text(_)))));
+    })
+    .await;
+    let client = test_client(test_provider(format!("http://{addr}")));
+    let connection = client
+        .connect(frameless_config(), HeaderMap::new(), HeaderMap::new())
+        .await
+        .unwrap();
+    assert!(matches!(
+        connection.next_event().await.unwrap(),
+        Some(RealtimeEvent::SessionUpdated { .. })
+    ));
+    assert!(matches!(
+        connection.next_event().await.unwrap(),
+        Some(RealtimeEvent::OutputTranscriptDelta(_))
+    ));
+    assert!(matches!(
+        connection.next_event().await.unwrap(),
+        Some(RealtimeEvent::ProviderError(_))
+    ));
+    connection
+        .send_conversation_item_create(
+            "independent input".to_string(),
+            codex_protocol::protocol::ConversationTextRole::User,
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        connection.next_event().await.unwrap(),
+        Some(RealtimeEvent::OutputTranscriptDelta(_))
+    ));
+    assert_eq!(
+        connection.next_event().await.unwrap(),
+        Some(RealtimeEvent::SessionClosed {
+            reason: Some("future_reason".to_string())
+        })
+    );
+    assert!(
+        connection
+            .send_conversation_item_create(
+                "after close".to_string(),
+                codex_protocol::protocol::ConversationTextRole::User
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(connection.next_event().await.unwrap(), None);
+    assert_eq!(connection.next_event().await.unwrap(), None);
+    assert_eq!(
+        connection.events().take_transcript_tail().await,
+        vec![
+            RealtimeTranscriptEntry {
+                role: "assistant".to_string(),
+                text: "interrupted".to_string()
+            },
+            RealtimeTranscriptEntry {
+                role: "assistant".to_string(),
+                text: "independent output".to_string()
+            },
+        ]
+    );
+    drop(connection);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn provider_error_before_session_started_fails_allocation() {
+    let (addr, server) = spawn_realtime_ws_server(|mut ws| async move {
+        ws.next().await.unwrap().unwrap();
+        ws.send(Message::Text(
+            json!({"type": "error", "error": {"message": "startup refused", "code": "fixture"}})
+                .to_string()
+                .into(),
+        ))
+        .await
+        .unwrap();
+    })
+    .await;
+    let client = test_client(test_provider(format!("http://{addr}")));
+    assert!(
+        matches!(client.connect(frameless_config(), HeaderMap::new(), HeaderMap::new()).await, Err(ApiError::Stream(message)) if message == "startup refused")
+    );
+    server.await.unwrap();
+}

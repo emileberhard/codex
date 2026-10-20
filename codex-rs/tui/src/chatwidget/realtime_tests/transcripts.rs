@@ -231,7 +231,7 @@ async fn unexpected_voice_close_preserves_partial_transcripts_once() {
         activate_voice(&mut chat);
         chat.on_realtime_transcript_delta(role.to_string(), text.to_string());
 
-        chat.on_realtime_conversation_closed(/*reason*/ None);
+        chat.on_realtime_conversation_closed(/*reason*/ None, false);
         chat.on_realtime_transcript_done(role.to_string(), text.to_string());
 
         let mut appearances = 0;
@@ -259,7 +259,7 @@ async fn interleaved_partial_transcripts_survive_voice_close() {
     activate_voice(&mut chat);
     seed_interleaved_partials(&mut chat);
 
-    chat.on_realtime_conversation_closed(/*reason*/ None);
+    chat.on_realtime_conversation_closed(/*reason*/ None, false);
     chat.on_realtime_transcript_done("user".into(), "Correction".into());
     chat.on_realtime_transcript_done("assistant".into(), "First answer".into());
 
@@ -306,7 +306,7 @@ async fn intentional_stop_preserves_both_interleaved_partials_once() {
     seed_interleaved_partials(&mut chat);
 
     chat.stop_realtime_conversation();
-    chat.on_realtime_conversation_closed(/*reason*/ None);
+    chat.on_realtime_conversation_closed(/*reason*/ None, false);
 
     commit_realtime_history_events(&mut chat, &mut events);
     let rendered = std::iter::from_fn(|| events.try_recv().ok())
@@ -335,7 +335,7 @@ async fn stopping_voice_keeps_the_complete_late_final_caption() {
     chat.realtime_conversation.phase = RealtimeConversationPhase::Stopping;
     chat.on_realtime_transcript_delta("assistant".into(), "and last".into());
     chat.on_realtime_transcript_done("assistant".into(), "First and last".into());
-    chat.on_realtime_conversation_closed(Some("requested".into()));
+    chat.on_realtime_conversation_closed(Some("requested".into()), false);
 
     commit_realtime_history_events(&mut chat, &mut events);
     let rendered = std::iter::from_fn(|| events.try_recv().ok())
@@ -440,7 +440,7 @@ async fn stopping_voice_preserves_the_live_transcript_once() {
             );
         }
         chat.on_realtime_transcript_done("assistant".to_string(), "Answer in progress".to_string());
-        chat.on_realtime_conversation_closed(/*reason*/ None);
+        chat.on_realtime_conversation_closed(/*reason*/ None, false);
         chat.stop_realtime_conversation();
 
         assert_eq!(

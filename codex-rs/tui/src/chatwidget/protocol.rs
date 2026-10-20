@@ -345,12 +345,19 @@ impl ChatWidget {
             }
             ServerNotification::ThreadRealtimeError(notification) => {
                 if !from_replay {
-                    self.on_realtime_error(notification.message, RealtimeFailureCause::Backend);
+                    if notification.terminal == Some(false) {
+                        self.on_realtime_provider_error(notification.message);
+                    } else {
+                        self.on_realtime_error(notification.message, RealtimeFailureCause::Backend);
+                    }
                 }
             }
             ServerNotification::ThreadRealtimeClosed(notification) => {
                 if !from_replay {
-                    self.on_realtime_conversation_closed(notification.reason);
+                    self.on_realtime_conversation_closed(
+                        notification.reason,
+                        notification.provider_closed == Some(true),
+                    );
                 }
             }
             ServerNotification::ServerRequestResolved(_)

@@ -460,6 +460,7 @@ async fn host_drain_closes_realtime_after_handoff_error() -> anyhow::Result<()> 
         }),
         EventMsg::RealtimeConversationClosed(RealtimeConversationClosedEvent {
             reason: Some("error".to_string()),
+            provider_closed: None,
         }),
     ] {
         let event = wait_for_event(&test.codex, |event| match event {

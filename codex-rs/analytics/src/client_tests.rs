@@ -1063,6 +1063,7 @@ fn track_notification_records_realtime_session_boundaries() {
         ThreadRealtimeClosedNotification {
             thread_id: "thread-1".to_string(),
             reason: Some("completed".to_string()),
+            provider_closed: None,
         },
     ));
 

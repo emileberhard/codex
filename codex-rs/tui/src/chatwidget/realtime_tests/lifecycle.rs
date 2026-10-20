@@ -186,7 +186,7 @@ async fn voice_waits_for_the_previous_session_to_close_before_restarting() {
         RealtimeConversationPhase::Stopping
     );
 
-    chat.on_realtime_conversation_closed(/*reason*/ Some("requested".into()));
+    chat.on_realtime_conversation_closed(/*reason*/ Some("requested".into()), false);
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Inactive
@@ -293,7 +293,7 @@ async fn normal_voice_close_renders_the_ended_message() {
     activate_voice(&mut chat);
     while events.try_recv().is_ok() {}
 
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
 
     commit_realtime_history_events(&mut chat, &mut events);
     let rendered = std::iter::from_fn(|| events.try_recv().ok())
@@ -368,13 +368,13 @@ async fn startup_retry_waits_for_closed_then_uses_a_fresh_attempt_and_preserves_
         }
     }
     insta::assert_snapshot!("voice_startup_retry", rendered.join("\n"));
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Stopping
     );
     assert_eq!(chat.realtime_conversation.attempt_id, 0);
-    chat.on_realtime_conversation_closed(Some("requested".into()));
+    chat.on_realtime_conversation_closed(Some("requested".into()), false);
     let new_attempt = chat.realtime_conversation.attempt_id;
     assert_ne!(new_attempt, 0);
     assert_eq!(
@@ -417,12 +417,12 @@ async fn startup_retry_is_cancelled_while_waiting_for_backend_close() {
         Err(codex_realtime_webrtc::ConnectionError::NegotiationTimedOut),
     );
     chat.toggle_realtime_conversation();
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Stopping
     );
-    chat.on_realtime_conversation_closed(Some("requested".into()));
+    chat.on_realtime_conversation_closed(Some("requested".into()), false);
     assert_eq!(
         (
             chat.realtime_conversation.phase,
@@ -442,7 +442,7 @@ async fn startup_transport_close_before_peer_timeout_retries_once_and_ignores_ol
     chat.realtime_conversation.backend_started = false;
     chat.realtime_conversation.microphone_muted = true;
 
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
     let retry_attempt = chat.realtime_conversation.attempt_id;
     assert_ne!(retry_attempt, 0);
     assert_eq!(
@@ -494,7 +494,7 @@ async fn startup_transport_close_before_peer_timeout_retries_once_and_ignores_ol
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Active
     );
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Inactive
@@ -553,7 +553,7 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
         ),
         RealtimeFailureCause::AudioDevices,
     );
-    chat.on_realtime_conversation_closed(Some("requested".into()));
+    chat.on_realtime_conversation_closed(Some("requested".into()), false);
     assert_eq!(
         chat.realtime_conversation.phase,
         RealtimeConversationPhase::Inactive
@@ -573,4 +573,118 @@ async fn failure_cleanup_does_not_attribute_stop_to_the_user() {
         .collect::<Vec<_>>()
         .join("\n");
     insta::assert_snapshot!("voice_device_failure_cleanup", rendered);
+}
+
+#[tokio::test]
+async fn provider_error_keeps_voice_active_and_does_not_finish_the_caller() {
+    for assistant_first in [true, false] {
+        let (mut chat, _sender, _events, mut ops) = make_chatwidget_manual_with_sender().await;
+        activate_voice(&mut chat);
+        let parts = if assistant_first {
+            [("assistant", "interrupted"), ("user", "caller continues")]
+        } else {
+            [("user", "caller continues"), ("assistant", "interrupted")]
+        };
+        for (role, text) in parts {
+            chat.on_realtime_transcript_delta(role.into(), text.into());
+        }
+        chat.realtime_conversation
+            .pending_speech
+            .push_back(super::super::PendingRealtimeSpeech {
+                state: super::super::PendingSpeechState::Accepted,
+                captioned: false,
+                input_generation: chat.realtime_conversation.input_generation,
+                thread_id: chat.thread_id().unwrap(),
+                turn_id: "interrupted-turn".to_string(),
+                item: agent_item(
+                    "interrupted-answer",
+                    "interrupted",
+                    Some(MessagePhase::FinalAnswer),
+                ),
+            });
+        chat.realtime_conversation.assistant_transcript_generation =
+            Some(chat.realtime_conversation.input_generation);
+        chat.realtime_conversation
+            .assistant_caption_started_after_speech_queue = true;
+        chat.handle_server_notification(
+            ServerNotification::ThreadRealtimeError(
+                codex_app_server_protocol::ThreadRealtimeErrorNotification {
+                    thread_id: chat.thread_id().unwrap().to_string(),
+                    message: "provider declined output".into(),
+                    terminal: Some(false),
+                    provider_error: None,
+                },
+            ),
+            None,
+        );
+        assert_eq!(
+            chat.realtime_conversation.phase,
+            RealtimeConversationPhase::Active
+        );
+        assert!(!chat.realtime_conversation.failure_recorded);
+        assert_eq!(
+            chat.realtime_conversation.transcript_role.as_deref(),
+            Some("user")
+        );
+        assert_eq!(chat.realtime_conversation.transcript, "caller continues");
+        assert!(chat.realtime_conversation.interleaved_transcript.is_none());
+        assert!(
+            chat.realtime_conversation
+                .accepted_transcripts
+                .iter()
+                .any(|record| record.role == "assistant" && record.text == "interrupted")
+        );
+        assert_eq!(chat.realtime_conversation.pending_speech.len(), 1);
+        assert!(!chat.realtime_conversation.pending_speech[0].captioned);
+        assert!(ops.try_recv().is_err());
+        chat.on_realtime_transcript_delta("assistant".into(), "independent answer".into());
+        assert_eq!(chat.realtime_conversation.transcript, "independent answer");
+        assert_eq!(
+            chat.realtime_conversation.interleaved_transcript,
+            Some(("user".into(), "caller continues".into()))
+        );
+        chat.reset_realtime_conversation();
+    }
+}
+
+#[tokio::test]
+async fn provider_close_during_startup_cleanup_cancels_retry() {
+    for phase in [
+        RealtimeConversationPhase::Starting,
+        RealtimeConversationPhase::Stopping,
+    ] {
+        for reason in [
+            Some("content"),
+            Some("future_reason"),
+            Some("requested"),
+            Some("transport_closed"),
+            Some("error"),
+            None,
+        ] {
+            let (mut chat, _sender, _events, mut ops) = make_chatwidget_manual_with_sender().await;
+            activate_voice(&mut chat);
+            chat.realtime_conversation.phase = phase;
+            chat.realtime_conversation.startup_retry =
+                if phase == RealtimeConversationPhase::Starting {
+                    super::super::StartupRetry::Available
+                } else {
+                    super::super::StartupRetry::WaitingForStop
+                };
+            chat.handle_server_notification(
+                ServerNotification::ThreadRealtimeClosed(
+                    codex_app_server_protocol::ThreadRealtimeClosedNotification {
+                        thread_id: chat.thread_id().unwrap().to_string(),
+                        reason: reason.map(str::to_owned),
+                        provider_closed: Some(true),
+                    },
+                ),
+                None,
+            );
+            assert_eq!(
+                chat.realtime_conversation.phase,
+                RealtimeConversationPhase::Inactive
+            );
+            assert!(ops.try_recv().is_err());
+        }
+    }
 }

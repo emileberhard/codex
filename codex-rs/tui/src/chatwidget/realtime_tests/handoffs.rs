@@ -23,7 +23,7 @@ async fn closing_voice_before_turn_completion_restores_the_delegated_answer_once
     complete_item(&mut chat, thread_id, turn_id, answer.clone());
     assert!(events.try_recv().is_err());
 
-    chat.on_realtime_conversation_closed(/*reason*/ None);
+    chat.on_realtime_conversation_closed(/*reason*/ None, false);
     finish_turn(
         &mut chat,
         thread_id,

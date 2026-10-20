@@ -567,6 +567,10 @@ impl RealtimeWebsocketEvents {
                 Message::Text(text) => {
                     trace!(target: REALTIME_WIRE_LOG_TARGET, "realtime websocket event: {text}");
                     if let Some(mut event) = parse_realtime_event(&text, self.event_parser) {
+                        if matches!(&event, RealtimeEvent::SessionClosed { .. }) {
+                            self.is_closed.store(true, Ordering::SeqCst);
+                            return Ok(Some(event));
+                        }
                         self.update_active_transcript(&mut event).await;
                         debug!(?event, "realtime websocket parsed event");
                         return Ok(Some(event));
@@ -617,6 +621,7 @@ impl RealtimeWebsocketEvents {
                 Ok(())
             }
             RealtimeEvent::Error(message) => Err(ApiError::Stream(message.clone())),
+            RealtimeEvent::ProviderError(error) => Err(ApiError::Stream(error.message.clone())),
             _ => Err(ApiError::Stream(
                 "frameless realtime session received an event before session.started".to_string(),
             )),
@@ -685,10 +690,11 @@ impl RealtimeWebsocketEvents {
                 active_transcript.new_input_entry = true;
                 active_transcript.new_output_entry = true;
             }
-            RealtimeEvent::ResponseCreated(_) => {
+            RealtimeEvent::ResponseCreated(_) | RealtimeEvent::ProviderError(_) => {
                 active_transcript.new_output_entry = true;
             }
             RealtimeEvent::SessionUpdated { .. }
+            | RealtimeEvent::SessionClosed { .. }
             | RealtimeEvent::AudioOut(_)
             | RealtimeEvent::ResponseCancelled(_)
             | RealtimeEvent::ResponseDone(_)
@@ -1532,6 +1538,33 @@ mod tests {
         assert!(transcript_entries_bytes(&tail) <= MAX_ACTIVE_TRANSCRIPT_BYTES);
         assert!(tail[0].text.starts_with(TRUNCATED_TRANSCRIPT_PREFIX));
         assert!(tail[0].text.ends_with("new"));
+    }
+
+    #[tokio::test]
+    async fn provider_close_receipt_does_not_wait_for_transcript_coordination() {
+        let (tx_message, rx_message) = async_channel::unbounded();
+        let events = RealtimeWebsocketEvents {
+            rx_message,
+            pending_events: Arc::new(Mutex::new(VecDeque::new())),
+            transcript_state: RealtimeTranscriptState::default(),
+            event_parser: RealtimeEventParser::FramelessBidi,
+            is_closed: Arc::new(AtomicBool::new(false)),
+        };
+        let _transcript = events.transcript_state.active.lock().await;
+        tx_message
+            .send(Ok(Message::Text(
+                json!({"type": "session.closed", "reason": "content"})
+                    .to_string()
+                    .into(),
+            )))
+            .await
+            .unwrap();
+        let receipt = events.next_event();
+        tokio::pin!(receipt);
+        assert!(
+            matches!(futures::poll!(&mut receipt), std::task::Poll::Ready(Ok(Some(RealtimeEvent::SessionClosed { reason }))) if reason.as_deref() == Some("content"))
+        );
+        assert!(events.is_closed.load(Ordering::SeqCst));
     }
 
     #[test]

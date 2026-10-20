@@ -1,9 +1,9 @@
-use crate::endpoint::realtime_websocket::protocol_common::parse_error_event;
 use crate::endpoint::realtime_websocket::protocol_common::parse_realtime_payload;
 use crate::endpoint::realtime_websocket::protocol_common::parse_session_updated_event;
 use codex_protocol::protocol::RealtimeAudioFrame;
 use codex_protocol::protocol::RealtimeEvent;
 use codex_protocol::protocol::RealtimeHandoffRequested;
+use codex_protocol::protocol::RealtimeProviderError;
 use codex_protocol::protocol::RealtimeTranscriptDelta;
 use codex_protocol::protocol::RealtimeTranscriptDone;
 use serde_json::Value;
@@ -25,7 +25,13 @@ pub(super) fn parse_frameless_bidi_event(payload: &str) -> Option<RealtimeEvent>
         }
         "turn.done" => parse_turn_done(&parsed),
         "delegation.created" => parse_delegation_created(&parsed),
-        "error" => parse_error_event(&parsed),
+        "error" => parse_provider_error(&parsed),
+        "session.closed" => Some(RealtimeEvent::SessionClosed {
+            reason: parsed
+                .get("reason")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        }),
         _ => {
             debug!(
                 "received unsupported frameless bidi event type: {message_type}, data: {payload}"
@@ -33,6 +39,38 @@ pub(super) fn parse_frameless_bidi_event(payload: &str) -> Option<RealtimeEvent>
             None
         }
     }
+}
+
+fn parse_provider_error(parsed: &Value) -> Option<RealtimeEvent> {
+    let nested = parsed.get("error").filter(|error| error.is_object());
+    let error = nested.unwrap_or(parsed);
+    let field = |name| error.get(name).and_then(Value::as_str).map(str::to_owned);
+    Some(RealtimeEvent::ProviderError(RealtimeProviderError {
+        message: field("message")
+            .or_else(|| {
+                parsed
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .or_else(|| parsed.get("error").map(ToString::to_string))?,
+        code: field("code"),
+        r#type: nested
+            .and_then(|error| error.get("type"))
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        param: field("param"),
+        event_id: parsed
+            .get("event_id")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        client_event_id: field("client_event_id").or_else(|| {
+            parsed
+                .get("client_event_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        }),
+    }))
 }
 
 fn parse_output_audio_delta(parsed: &Value) -> Option<RealtimeEvent> {

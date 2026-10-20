@@ -557,6 +557,7 @@ export type { ThreadRealtimeItemCompletedNotification } from "./ThreadRealtimeIt
 export type { ThreadRealtimeItemStartedNotification } from "./ThreadRealtimeItemStartedNotification";
 export type { ThreadRealtimeItemTranscriptDeltaNotification } from "./ThreadRealtimeItemTranscriptDeltaNotification";
 export type { ThreadRealtimeOutputAudioDeltaNotification } from "./ThreadRealtimeOutputAudioDeltaNotification";
+export type { ThreadRealtimeProviderError } from "./ThreadRealtimeProviderError";
 export type { ThreadRealtimeSdpNotification } from "./ThreadRealtimeSdpNotification";
 export type { ThreadRealtimeSessionOutcome } from "./ThreadRealtimeSessionOutcome";
 export type { ThreadRealtimeStartTransport } from "./ThreadRealtimeStartTransport";

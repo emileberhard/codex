@@ -5899,15 +5899,8 @@ class ThreadRealtimeClosedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    provider_closed: Annotated[bool | None, Field(alias="providerClosed")] = None
     reason: str | None = None
-    thread_id: Annotated[str, Field(alias="threadId")]
-
-
-class ThreadRealtimeErrorNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    message: str
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
@@ -5973,6 +5966,17 @@ class ThreadRealtimeOutputAudioDeltaNotification(BaseModel):
     )
     audio: ThreadRealtimeAudioChunk
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadRealtimeProviderError(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    client_event_id: Annotated[str | None, Field(alias="clientEventId")] = None
+    code: str | None = None
+    event_id: Annotated[str | None, Field(alias="eventId")] = None
+    param: str | None = None
+    type: str | None = None
 
 
 class ThreadRealtimeSdpNotification(BaseModel):
@@ -9927,23 +9931,6 @@ class ThreadRealtimeSdpServerNotification(BaseModel):
     params: ThreadRealtimeSdpNotification
 
 
-class ThreadRealtimeErrorServerNotification(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    emitted_at_ms: Annotated[
-        int | None,
-        Field(
-            alias="emittedAtMs",
-            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
-        ),
-    ] = None
-    method: Annotated[
-        Literal["thread/realtime/error"], Field(title="Thread/realtime/errorNotificationMethod")
-    ]
-    params: ThreadRealtimeErrorNotification
-
-
 class ThreadRealtimeClosedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10433,6 +10420,18 @@ class ThreadReadStateChangedNotification(BaseModel):
         populate_by_name=True,
     )
     read_state: Annotated[ThreadReadState, Field(alias="readState")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadRealtimeErrorNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    message: str
+    provider_error: Annotated[ThreadRealtimeProviderError | None, Field(alias="providerError")] = (
+        None
+    )
+    terminal: bool | None = None
     thread_id: Annotated[str, Field(alias="threadId")]
 
 
@@ -11729,6 +11728,23 @@ class ThreadRealtimeItemCompletedServerNotification(BaseModel):
         Field(title="Thread/realtime/item/completedNotificationMethod"),
     ]
     params: ThreadRealtimeItemCompletedNotification
+
+
+class ThreadRealtimeErrorServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/realtime/error"], Field(title="Thread/realtime/errorNotificationMethod")
+    ]
+    params: ThreadRealtimeErrorNotification
 
 
 class WindowsSandboxSetupCompletedServerNotification(BaseModel):

@@ -467,7 +467,21 @@ pub struct RealtimeResponseDone {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct RealtimeProviderError {
+    pub message: String,
+    pub code: Option<String>,
+    pub r#type: Option<String>,
+    pub param: Option<String>,
+    pub event_id: Option<String>,
+    pub client_event_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
 pub enum RealtimeEvent {
+    ProviderError(RealtimeProviderError),
+    SessionClosed {
+        reason: Option<String>,
+    },
     SessionUpdated {
         realtime_session_id: String,
         instructions: Option<String>,
@@ -1963,6 +1977,9 @@ pub struct RealtimeConversationRealtimeEvent {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct RealtimeConversationClosedEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub provider_closed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }

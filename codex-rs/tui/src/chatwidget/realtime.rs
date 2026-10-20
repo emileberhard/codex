@@ -1615,6 +1615,10 @@ impl ChatWidget {
         if role == "user" {
             self.realtime_conversation.latest_voice_input_fingerprint = voice_input_fingerprint;
         }
+        self.record_realtime_transcript(role, text);
+    }
+
+    fn record_realtime_transcript(&mut self, role: String, text: String) {
         if !text.trim().is_empty() {
             while self.realtime_conversation.accepted_transcripts.len()
                 >= MAX_PENDING_TRANSCRIPT_CELLS
@@ -1704,6 +1708,49 @@ impl ChatWidget {
         self.realtime_conversation.startup_retry == StartupRetry::WaitingForStop
     }
 
+    pub(super) fn on_realtime_provider_error(&mut self, message: String) {
+        if self.realtime_conversation.phase == RealtimeConversationPhase::Inactive {
+            return;
+        }
+        let partial = if self.realtime_conversation.transcript_role.as_deref() == Some("assistant")
+        {
+            self.realtime_conversation.transcript_role = None;
+            self.realtime_conversation.live_transcript_cell = None;
+            let text = std::mem::take(&mut self.realtime_conversation.transcript);
+            if let Some((role, remaining)) =
+                self.realtime_conversation.interleaved_transcript.take()
+            {
+                self.realtime_conversation.transcript_role = Some(role);
+                self.realtime_conversation.transcript = remaining;
+                self.realtime_conversation.live_transcript_cell = self
+                    .realtime_conversation
+                    .interleaved_transcript_cell
+                    .take();
+            }
+            Some(text)
+        } else if self
+            .realtime_conversation
+            .interleaved_transcript
+            .as_ref()
+            .is_some_and(|(role, _)| role == "assistant")
+        {
+            self.realtime_conversation.interleaved_transcript_cell = None;
+            self.realtime_conversation
+                .interleaved_transcript
+                .take()
+                .map(|(_, text)| text)
+        } else {
+            None
+        };
+        self.realtime_conversation.assistant_transcript_generation = None;
+        self.realtime_conversation
+            .assistant_caption_started_after_speech_queue = false;
+        if let Some(text) = partial {
+            self.record_realtime_transcript("assistant".to_string(), text);
+        }
+        self.add_realtime_error(message);
+    }
+
     pub(crate) fn on_realtime_error(&mut self, message: String, cause: RealtimeFailureCause) {
         if self.realtime_conversation.phase == RealtimeConversationPhase::Inactive {
             return;
@@ -1717,7 +1764,11 @@ impl ChatWidget {
         self.add_realtime_error(message);
     }
 
-    pub(super) fn on_realtime_conversation_closed(&mut self, reason: Option<String>) {
+    pub(super) fn on_realtime_conversation_closed(
+        &mut self,
+        reason: Option<String>,
+        provider_closed: bool,
+    ) {
         if self.realtime_conversation.phase == RealtimeConversationPhase::Inactive {
             if self.realtime_conversation.recover_late_transcripts {
                 self.finish_realtime_partial_transcripts();
@@ -1725,13 +1776,16 @@ impl ChatWidget {
             }
             return;
         }
-        let retry_after_stop =
-            self.realtime_conversation.startup_retry == StartupRetry::WaitingForStop;
+        let retry_after_stop = self.realtime_conversation.startup_retry
+            == StartupRetry::WaitingForStop
+            && !provider_closed;
         let retry_after_early_close = self.realtime_conversation.phase
             == RealtimeConversationPhase::Starting
             && self.realtime_conversation.startup_retry == StartupRetry::Available
+            && !provider_closed
             && reason.as_deref() == Some("transport_closed");
         if self.realtime_conversation.phase == RealtimeConversationPhase::Stopping
+            && !provider_closed
             && reason.as_deref() != Some("requested")
         {
             return;
@@ -1747,9 +1801,15 @@ impl ChatWidget {
         } else {
             None
         };
-        if retry_thread_id.is_none()
-            && (reason.is_none() || matches!(reason.as_deref(), Some("transport_closed" | "error")))
-        {
+        let failed_close = if provider_closed {
+            !matches!(
+                reason.as_deref(),
+                Some("close_requested" | "expired" | "remote_hangup")
+            )
+        } else {
+            reason.is_none() || matches!(reason.as_deref(), Some("transport_closed" | "error"))
+        };
+        if retry_thread_id.is_none() && failed_close {
             let cause = match reason.as_deref() {
                 Some("transport_closed") => RealtimeFailureCause::TransportClosed,
                 Some("error") => RealtimeFailureCause::Backend,
@@ -1774,11 +1834,12 @@ impl ChatWidget {
             return;
         }
         if let Some(reason) = reason
-            && reason != "error"
-            && !(failed && reason == "requested")
+            && (provider_closed || (reason != "error" && !(failed && reason == "requested")))
         {
             let message = format!("Voice conversation ended: {reason}");
-            if self.app_event_tx.voice_only.load(Ordering::Relaxed) && reason != "requested" {
+            if self.app_event_tx.voice_only.load(Ordering::Relaxed)
+                && (provider_closed || reason != "requested")
+            {
                 self.add_realtime_error(message);
             } else {
                 self.add_info_message(message, /*hint*/ None);

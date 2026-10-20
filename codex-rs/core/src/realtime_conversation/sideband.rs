@@ -132,6 +132,10 @@ pub(super) fn spawn_webrtc_sideband_input_task(
             )
             .await;
 
+            if matches!(&exit, RealtimeInputTaskExit::ProviderClosed) {
+                return;
+            }
+
             let RealtimeInputTaskExit::TransportLost {
                 err,
                 pending_outbound: failed_outbound,

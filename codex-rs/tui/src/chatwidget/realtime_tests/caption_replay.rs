@@ -169,7 +169,7 @@ async fn accepted_voice_answer_with_only_an_old_caption_returns_to_history_on_cl
         Some(chat.realtime_conversation.input_generation.wrapping_sub(1));
     chat.on_realtime_transcript_done("assistant".into(), "Earlier speech".into());
     assert_eq!(chat.realtime_conversation.pending_speech.len(), 1);
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
     chat.restore_undelivered_realtime_speech(delivery_id);
     let mut answers = 0;
     commit_realtime_history_events(&mut chat, &mut events);
@@ -215,7 +215,7 @@ async fn unrelated_caption_started_before_speech_queue_keeps_answer_fallback() {
     chat.accept_realtime_speech(delivery_id);
     chat.on_realtime_transcript_done("assistant".into(), "Unrelated caption".into());
     assert_eq!(chat.realtime_conversation.pending_speech.len(), 1);
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
     let restored = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::InsertHistoryCell(cell) => Some(
@@ -265,7 +265,7 @@ async fn done_only_caption_cannot_retire_a_newer_voice_answer() {
     );
     chat.on_realtime_transcript_done("assistant".into(), "Old done-only caption".into());
     assert_eq!(chat.realtime_conversation.pending_speech.len(), 1);
-    chat.on_realtime_conversation_closed(Some("transport_closed".into()));
+    chat.on_realtime_conversation_closed(Some("transport_closed".into()), false);
     let restored = std::iter::from_fn(|| events.try_recv().ok())
         .filter_map(|event| match event {
             AppEvent::InsertHistoryCell(cell) => Some(

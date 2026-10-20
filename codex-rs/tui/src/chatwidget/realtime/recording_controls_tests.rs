@@ -533,7 +533,7 @@ async fn stopping_voice_clears_recording_title_without_restoring_cleared_titles(
             chat.clear_managed_terminal_title().expect("title clears");
         }
         chat.realtime_conversation.phase = RealtimeConversationPhase::Stopping;
-        chat.on_realtime_conversation_closed(/*reason*/ Some("requested".into()));
+        chat.on_realtime_conversation_closed(/*reason*/ Some("requested".into()), false);
         assert_eq!(
             chat.last_terminal_title.as_deref(),
             (thread_title && !clear_title).then_some("voice session")

@@ -501,6 +501,7 @@ async fn voice_handoff_attributes_plugin_events_after_realtime_closes() {
                 ThreadRealtimeClosedNotification {
                     thread_id: "thread-2".to_string(),
                     reason: None,
+                    provider_closed: None,
                 },
             ))),
             &mut events,
@@ -632,6 +633,7 @@ async fn voice_handoff_steering_active_turn_does_not_tag_next_text_turn() {
                 ThreadRealtimeClosedNotification {
                     thread_id: "thread-2".to_string(),
                     reason: None,
+                    provider_closed: None,
                 },
             ))),
             &mut events,

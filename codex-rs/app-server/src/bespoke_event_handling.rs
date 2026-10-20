@@ -61,6 +61,7 @@ use codex_app_server_protocol::ThreadRealtimeItemCompletedNotification;
 use codex_app_server_protocol::ThreadRealtimeItemStartedNotification;
 use codex_app_server_protocol::ThreadRealtimeItemTranscriptDeltaNotification;
 use codex_app_server_protocol::ThreadRealtimeOutputAudioDeltaNotification;
+use codex_app_server_protocol::ThreadRealtimeProviderError;
 use codex_app_server_protocol::ThreadRealtimeSdpNotification;
 use codex_app_server_protocol::ThreadRealtimeStartedNotification;
 use codex_app_server_protocol::ThreadRealtimeTranscriptDeltaNotification;
@@ -622,10 +623,37 @@ pub(crate) async fn apply_bespoke_event_handling(
                     ))
                     .await;
             }
+            RealtimeEvent::SessionClosed { .. } => {}
+            RealtimeEvent::ProviderError(error) => {
+                let notification = ThreadRealtimeErrorNotification {
+                    thread_id: conversation_id.to_string(),
+                    message: error.message,
+                    terminal: Some(false),
+                    provider_error: Some(ThreadRealtimeProviderError {
+                        r#type: error.r#type,
+                        code: error.code,
+                        param: error.param,
+                        event_id: error.event_id,
+                        client_event_id: error.client_event_id,
+                    })
+                    .filter(|details| {
+                        details.r#type.is_some()
+                            || details.code.is_some()
+                            || details.param.is_some()
+                            || details.event_id.is_some()
+                            || details.client_event_id.is_some()
+                    }),
+                };
+                outgoing
+                    .send_server_notification(ServerNotification::ThreadRealtimeError(notification))
+                    .await;
+            }
             RealtimeEvent::Error(message) => {
                 let notification = ThreadRealtimeErrorNotification {
                     thread_id: conversation_id.to_string(),
                     message,
+                    terminal: None,
+                    provider_error: None,
                 };
                 outgoing
                     .send_server_notification(ServerNotification::ThreadRealtimeError(notification))
@@ -636,6 +664,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             let notification = ThreadRealtimeClosedNotification {
                 thread_id: conversation_id.to_string(),
                 reason: event.reason,
+                provider_closed: event.provider_closed,
             };
             outgoing
                 .send_server_notification(ServerNotification::ThreadRealtimeClosed(notification))

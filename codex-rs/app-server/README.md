@@ -571,6 +571,41 @@ and optional `phase`, and return `{}`. `phase: "commentary"` and
 writers; with V3 `codexResponseHandoffMode: "bemTags"`, they use commentary and
 speakable channels respectively. A stale or completed handoff id is rejected.
 
+# Realtime provider lifecycle (experimental)
+
+`thread/realtime/error` retains `threadId` and `message`. V3 provider errors add
+`terminal: false` and optional `providerError` details: `type`, `code`, `param`,
+`eventId`, and `clientEventId`. Missing details remain unknown. An absent
+`terminal` field means terminal, preserving internal, protocol, V1, V2 and older
+runtime behavior. A nonterminal error grants no permission to retry refused
+content and does not imply that generated text was played.
+
+An explicit V3 provider `session.closed` ends processing and rejects further
+writes without sideband reconnect. One `thread/realtime/closed` notification
+adds `providerClosed: true` and preserves the raw provider `reason`, including
+unknown strings and `null` when missing. A racing local stop retains that reason
+and provenance. Legacy and local closes omit `providerClosed`; a provider reason
+such as `requested`, `transport_closed`, or `error` still denotes a provider close. Other transport reconnect policy is
+unchanged. Provider errors alone do not fail canonical session history;
+`content`, `connection_lost`, unknown and missing provider close reasons do.
+Interrupted assistant transcript text is retained as a separate segment without
+completing an open caller segment or recording playback delivery. Explicit
+provider closure suppresses synthetic transcript-tail handoffs, including when
+`flushTranscriptTailOnSessionEnd` is enabled; ordinary local stop keeps its tail
+flush behavior.
+
+The public [Live event reference](https://developers.openai.com/api/reference/resources/live/primary-websocket)
+and [moderation guide](https://developers.openai.com/api/docs/guides/live-conversations#handle-moderation)
+establish this lifecycle distinction. The adapter accepts hosted flat errors
+and documented nested errors; fixture coverage does not establish identical
+hosted subscription envelopes.
+
+Raw realtime envelopes are transient in `rollout/src/policy.rs` under
+`persisted_event_msg`, including `RealtimeConversationRealtime` and
+`RealtimeConversationClosed`. Core's `session/realtime_history.rs` persists
+only the existing `RolloutItem::RealtimeItem` effects. This change adds no
+persisted variants or fields to `protocol/src/realtime.rs`.
+
 # Unix socket proxy
 
 `codex app-server proxy` opens one websocket connection to

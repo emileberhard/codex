@@ -62,3 +62,70 @@ fn frameless_transcript_and_audio_events_reuse_existing_internal_events() {
         Some(RealtimeEvent::AudioOut(_))
     ));
 }
+
+#[test]
+fn provider_errors_preserve_details_without_changing_legacy_errors() {
+    use crate::endpoint::realtime_websocket::protocol_v2::parse_realtime_event_v2;
+    use codex_protocol::protocol::RealtimeProviderError;
+    use serde_json::json;
+
+    for payload in [
+        json!({"type": "error", "message": "original message", "code": "future_code", "param": "input", "event_id": "provider-1", "client_event_id": "client-1"}),
+        json!({"type": "error", "event_id": "provider-1", "error": {"message": "original message", "code": "future_code", "param": "input", "client_event_id": "client-1"}}),
+    ] {
+        assert_eq!(
+            parse_frameless_bidi_event(&payload.to_string()),
+            Some(RealtimeEvent::ProviderError(RealtimeProviderError {
+                message: "original message".to_string(),
+                code: Some("future_code".to_string()),
+                r#type: None,
+                param: Some("input".to_string()),
+                event_id: Some("provider-1".to_string()),
+                client_event_id: Some("client-1".to_string()),
+            }))
+        );
+        for parser in [parse_realtime_event_v1, parse_realtime_event_v2] {
+            assert_eq!(
+                parser(&payload.to_string()),
+                Some(RealtimeEvent::Error("original message".to_string()))
+            );
+        }
+    }
+    let payload = json!({"type": "error", "client_event_id": "outer", "error": {"message": "unchanged", "type": "invalid_request_error", "code": null}});
+    let Some(RealtimeEvent::ProviderError(error)) =
+        parse_frameless_bidi_event(&payload.to_string())
+    else {
+        panic!("provider error");
+    };
+    assert_eq!(error.r#type.as_deref(), Some("invalid_request_error"));
+    assert_eq!(error.client_event_id.as_deref(), Some("outer"));
+    assert_eq!(error.code, None);
+}
+
+#[test]
+fn provider_close_preserves_known_unknown_and_missing_reasons() {
+    for reason in [
+        Some("close_requested"),
+        Some("expired"),
+        Some("content"),
+        Some("remote_hangup"),
+        Some("connection_lost"),
+        Some("future_reason"),
+        Some("requested"),
+        Some("transport_closed"),
+        Some("error"),
+        None,
+    ] {
+        let payload = serde_json::json!({"type": "session.closed", "reason": reason});
+        assert_eq!(
+            parse_frameless_bidi_event(&payload.to_string()),
+            Some(RealtimeEvent::SessionClosed {
+                reason: reason.map(str::to_owned)
+            })
+        );
+    }
+    assert_eq!(
+        parse_frameless_bidi_event(r#"{"type":"session.closed"}"#),
+        Some(RealtimeEvent::SessionClosed { reason: None })
+    );
+}
