@@ -2422,7 +2422,7 @@ async fn provider_error_inactive_policy_survives_record_eviction_and_fresh_start
             codex_app_server_protocol::ThreadRealtimeStartedNotification {
                 thread_id: thread_id.to_string(),
                 realtime_session_id: Some("reused-logical-id".into()),
-                version: codex_app_server_protocol::RealtimeConversationVersion::V3,
+                version: codex_protocol::protocol::RealtimeConversationVersion::V3,
             },
         ),
     );
@@ -2464,7 +2464,7 @@ async fn provider_error_inactive_policy_survives_record_eviction_and_fresh_start
             codex_app_server_protocol::ThreadRealtimeStartedNotification {
                 thread_id: thread_id.to_string(),
                 realtime_session_id: Some("reused-logical-id".into()),
-                version: codex_app_server_protocol::RealtimeConversationVersion::V3,
+                version: codex_protocol::protocol::RealtimeConversationVersion::V3,
             },
         ),
         None,
