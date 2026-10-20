@@ -361,6 +361,7 @@ pub(crate) use realtime::MAX_REPLAY_TRANSCRIPT_CELLS;
 pub(crate) use realtime::MAX_TRANSCRIPT_BYTES;
 pub(crate) use realtime::RealtimeFailureCause;
 pub(crate) use realtime::RealtimeTranscriptRecord;
+pub(crate) use realtime::RealtimeTranscriptReplay;
 pub(crate) use realtime::is_private_realtime_agent_item;
 pub(crate) use realtime::realtime_delegation_display_text;
 pub(crate) use realtime::realtime_delegation_input;

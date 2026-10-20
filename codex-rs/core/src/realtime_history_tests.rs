@@ -941,3 +941,127 @@ fn provider_error_without_open_assistant_partial_preserves_final_only_output() {
             text: "Hello".into()
         }));
 }
+
+#[test]
+fn provider_error_delta_only_policy_survives_display_splits_and_both_final_orderings() {
+    for old_final in [0, 1, 2] {
+        let mut state = started_state();
+        observe_realtime(
+            &mut state,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "old".into(),
+            }),
+        );
+        let mut completed = state.seal_user_input(&[UserInput::Text {
+            text: "typed input".into(),
+            text_elements: Vec::new(),
+        }]);
+        assert_eq!(completed.len(), 1);
+        observe_realtime(
+            &mut state,
+            RealtimeEvent::ProviderError(codex_protocol::protocol::RealtimeProviderError {
+                message: "invalid request".into(),
+                code: None,
+                r#type: None,
+                param: None,
+                event_id: None,
+                client_event_id: None,
+            }),
+        );
+        if old_final == 0 {
+            completed.extend(
+                observe_realtime(
+                    &mut state,
+                    RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                        text: "old".into(),
+                    }),
+                )
+                .items,
+            );
+        }
+        observe_realtime(
+            &mut state,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "new".into(),
+            }),
+        );
+        if old_final == 1 {
+            completed.extend(
+                observe_realtime(
+                    &mut state,
+                    RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                        text: "old".into(),
+                    }),
+                )
+                .items,
+            );
+        }
+        for text in [
+            "new with final-only revision",
+            "new",
+            "unavailable final-only output",
+        ] {
+            let effect = observe_realtime(
+                &mut state,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone { text: text.into() }),
+            );
+            assert!(effect.transcript_stream.is_none());
+            completed.extend(effect.items);
+        }
+        observe_realtime(
+            &mut state,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "new".into(),
+            }),
+        );
+        completed.extend(
+            observe_realtime(
+                &mut state,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                    text: String::new(),
+                }),
+            )
+            .items,
+        );
+        assert_eq!(
+            completed
+                .iter()
+                .map(|item| &item.content)
+                .collect::<Vec<_>>(),
+            vec![
+                &RealtimeItemContent::TranscriptSegment {
+                    role: RealtimeTranscriptRole::Assistant,
+                    text: "old".into()
+                },
+                &RealtimeItemContent::TranscriptSegment {
+                    role: RealtimeTranscriptRole::Assistant,
+                    text: "new".into()
+                },
+                &RealtimeItemContent::TranscriptSegment {
+                    role: RealtimeTranscriptRole::Assistant,
+                    text: "new".into()
+                },
+            ]
+        );
+        state.observe(&EventMsg::RealtimeConversationStarted(
+            RealtimeConversationStartedEvent {
+                realtime_session_id: Some("voice-1".into()),
+                version: RealtimeConversationVersion::V3,
+            },
+        ));
+        let fresh = observe_realtime(
+            &mut state,
+            RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                text: "fresh final-only output".into(),
+            }),
+        );
+        assert_eq!(fresh.items.len(), 1);
+        assert_eq!(
+            fresh.items[0].content,
+            RealtimeItemContent::TranscriptSegment {
+                role: RealtimeTranscriptRole::Assistant,
+                text: "fresh final-only output".into()
+            }
+        );
+    }
+}

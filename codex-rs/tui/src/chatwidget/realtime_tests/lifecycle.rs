@@ -730,3 +730,100 @@ async fn provider_error_late_final_is_absorbed_after_reset_and_widget_replay() {
         assert!(ops.try_recv().is_err());
     }
 }
+
+#[tokio::test]
+async fn provider_error_delta_only_policy_preserves_deltas_for_both_final_orderings() {
+    for old_final in [0, 1, 2] {
+        let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
+        activate_voice(&mut chat);
+        chat.on_realtime_transcript_delta("user".into(), "caller continues".into());
+        chat.on_realtime_transcript_delta("assistant".into(), "old".into());
+        chat.on_realtime_provider_error("invalid request".into());
+        chat.on_realtime_provider_error("repeated error".into());
+        chat.on_realtime_transcript_delta("assistant".into(), String::new());
+        if old_final == 0 {
+            chat.on_realtime_transcript_done("assistant".into(), "old".into());
+        }
+        chat.on_realtime_transcript_delta("assistant".into(), "new".into());
+        if old_final == 1 {
+            chat.on_realtime_transcript_done("assistant".into(), "old".into());
+        }
+        for text in [
+            "new with final-only revision",
+            "new",
+            "unavailable final-only output",
+        ] {
+            chat.on_realtime_transcript_done("assistant".into(), text.into());
+        }
+        chat.on_realtime_transcript_delta("assistant".into(), "new".into());
+        chat.on_realtime_transcript_done("assistant".into(), String::new());
+        assert_eq!(
+            chat.realtime_conversation
+                .accepted_transcripts
+                .iter()
+                .map(|record| record.text.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old", "new", "new"]
+        );
+        assert_eq!(
+            chat.realtime_conversation.transcript_role.as_deref(),
+            Some("user")
+        );
+        assert_eq!(chat.realtime_conversation.transcript, "caller continues");
+        chat.reset_realtime_conversation();
+    }
+}
+
+#[tokio::test]
+async fn provider_error_policy_survives_committed_output_replay_and_caption_eviction() {
+    let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
+    activate_voice(&mut chat);
+    chat.on_realtime_transcript_delta("assistant".into(), "old".into());
+    chat.reset_realtime_conversation();
+    let mut replay = chat.take_realtime_transcript_cells_for_replay();
+    replay.records.clear();
+    let (mut replacement, _, _, _) = make_chatwidget_manual_with_sender().await;
+    replacement.restore_realtime_transcript_cells(replay);
+    replacement.on_realtime_provider_error("invalid request".into());
+    replacement
+        .on_realtime_transcript_done("assistant".into(), "unavailable final-only output".into());
+    assert!(
+        replacement
+            .realtime_conversation
+            .accepted_transcripts
+            .is_empty()
+    );
+    for _ in 0..(super::super::MAX_PENDING_TRANSCRIPT_CELLS + 2) {
+        replacement.on_realtime_transcript_delta("assistant".into(), "new".into());
+        replacement.on_realtime_transcript_done("assistant".into(), "uncorrelated final".into());
+    }
+    assert_eq!(
+        replacement.realtime_conversation.accepted_transcripts.len(),
+        super::super::MAX_PENDING_TRANSCRIPT_CELLS
+    );
+    let mut replay = replacement.take_realtime_transcript_cells_for_replay();
+    replay.records.clear();
+    chat.restore_realtime_transcript_cells(replay);
+    chat.on_realtime_transcript_done("assistant".into(), "unavailable final-only output".into());
+    assert!(chat.realtime_conversation.accepted_transcripts.is_empty());
+    chat.on_realtime_conversation_started();
+    chat.on_realtime_transcript_done("assistant".into(), "fresh final-only output".into());
+    assert_eq!(chat.realtime_conversation.accepted_transcripts.len(), 1);
+    assert_eq!(
+        chat.realtime_conversation.accepted_transcripts[0].text,
+        "fresh final-only output"
+    );
+}
+
+#[tokio::test]
+async fn provider_error_without_open_partial_keeps_final_only_captions() {
+    let (mut chat, _, _, _) = make_chatwidget_manual_with_sender().await;
+    activate_voice(&mut chat);
+    for _ in 0..2 {
+        chat.on_realtime_transcript_delta("assistant".into(), String::new());
+        chat.on_realtime_provider_error("invalid request".into());
+        chat.on_realtime_transcript_done("assistant".into(), "final-only output".into());
+    }
+    assert_eq!(chat.realtime_conversation.accepted_transcripts.len(), 2);
+    chat.reset_realtime_conversation();
+}

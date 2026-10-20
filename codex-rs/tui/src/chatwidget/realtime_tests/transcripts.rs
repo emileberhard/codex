@@ -290,13 +290,18 @@ async fn interleaved_partials_transfer_once_on_thread_switch() {
 
     let cells = chat.take_realtime_transcript_cells_for_replay();
     let rendered = cells
+        .records
         .iter()
         .map(|record| record.text.as_str())
         .collect::<String>();
-    assert_eq!(cells.len(), 2);
+    assert_eq!(cells.records.len(), 2);
     assert_eq!(rendered.matches("Correction").count(), 1);
     assert_eq!(rendered.matches("First answer").count(), 1);
-    assert!(chat.take_realtime_transcript_cells_for_replay().is_empty());
+    assert!(
+        chat.take_realtime_transcript_cells_for_replay()
+            .records
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -395,6 +400,7 @@ async fn direct_reset_preserves_both_partial_speakers_for_replay() {
     let records = chat.take_realtime_transcript_cells_for_replay();
     assert_eq!(
         records
+            .records
             .into_iter()
             .map(|record| (record.role, record.text))
             .collect::<Vec<_>>(),
@@ -539,8 +545,15 @@ async fn transcript_handoff_moves_deferred_repeats_and_partial_once() {
     );
 
     let cells = chat.take_realtime_transcript_cells_for_replay();
-    assert_eq!(cells.len(), super::super::MAX_PENDING_TRANSCRIPT_CELLS + 1);
-    assert!(chat.take_realtime_transcript_cells_for_replay().is_empty());
+    assert_eq!(
+        cells.records.len(),
+        super::super::MAX_PENDING_TRANSCRIPT_CELLS + 1
+    );
+    assert!(
+        chat.take_realtime_transcript_cells_for_replay()
+            .records
+            .is_empty()
+    );
     chat.restore_realtime_transcript_cells(cells);
     chat.finalize_completed_assistant_message(Some("ordinary stream"));
     chat.note_stream_consolidation_completed();
@@ -589,13 +602,16 @@ async fn dropped_deferred_captions_do_not_return_on_thread_replacement() {
         super::super::MAX_PENDING_TRANSCRIPT_CELLS
     );
     let records = chat.take_realtime_transcript_cells_for_replay();
-    assert_eq!(records.len(), super::super::MAX_PENDING_TRANSCRIPT_CELLS);
     assert_eq!(
-        records.front().map(|record| record.text.as_str()),
+        records.records.len(),
+        super::super::MAX_PENDING_TRANSCRIPT_CELLS
+    );
+    assert_eq!(
+        records.records.front().map(|record| record.text.as_str()),
         Some("caption 2")
     );
     assert_eq!(
-        records.back().map(|record| record.text.as_str()),
+        records.records.back().map(|record| record.text.as_str()),
         Some("caption 33")
     );
 }

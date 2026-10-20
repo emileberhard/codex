@@ -660,12 +660,16 @@ async fn replay_reconciles_only_matching_voice_captions_one_for_one() {
         role: role.to_string(),
         text: text.to_string(),
         complete: true,
-        interrupted_final_pending: false,
         before_turn_id: None,
     })
     .collect();
-    app.pending_realtime_transcript_replay
-        .insert(source, records);
+    app.pending_realtime_transcript_replay.insert(
+        source,
+        crate::chatwidget::RealtimeTranscriptReplay {
+            records,
+            ..Default::default()
+        },
+    );
     let voice = Turn {
         id: "voice-turn".into(),
         root_turn_id: None,
@@ -732,14 +736,16 @@ async fn retained_caption_consumes_only_one_matching_answer_fallback_on_reattach
     app.replace_chat_widget(widget);
     app.pending_realtime_transcript_replay.insert(
         source,
-        [crate::chatwidget::RealtimeTranscriptRecord {
-            role: "assistant".into(),
-            text: "Same   answer".into(),
-            complete: true,
-            interrupted_final_pending: false,
-            before_turn_id: None,
-        }]
-        .into(),
+        crate::chatwidget::RealtimeTranscriptReplay {
+            records: [crate::chatwidget::RealtimeTranscriptRecord {
+                role: "assistant".into(),
+                text: "Same   answer".into(),
+                complete: true,
+                before_turn_id: None,
+            }]
+            .into(),
+            ..Default::default()
+        },
     );
     let answer = |id: &str, text: &str| ThreadItem::AgentMessage {
         id: id.into(),
@@ -827,19 +833,21 @@ async fn buffered_voice_items_reconcile_captions_after_thread_switch() {
     app.replace_chat_widget(widget);
     app.pending_realtime_transcript_replay.insert(
         source,
-        [
-            ("user", "buffered question"),
-            ("assistant", "buffered answer"),
-        ]
-        .into_iter()
-        .map(|(role, text)| crate::chatwidget::RealtimeTranscriptRecord {
-            role: role.to_string(),
-            text: text.to_string(),
-            complete: true,
-            interrupted_final_pending: false,
-            before_turn_id: None,
-        })
-        .collect(),
+        crate::chatwidget::RealtimeTranscriptReplay {
+            records: [
+                ("user", "buffered question"),
+                ("assistant", "buffered answer"),
+            ]
+            .into_iter()
+            .map(|(role, text)| crate::chatwidget::RealtimeTranscriptRecord {
+                role: role.to_string(),
+                text: text.to_string(),
+                complete: true,
+                before_turn_id: None,
+            })
+            .collect(),
+            ..Default::default()
+        },
     );
     let items = [
         ThreadItem::UserMessage {
@@ -908,20 +916,22 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
     app.replace_chat_widget(widget);
     app.pending_realtime_transcript_replay.insert(
         source,
-        [
-            ("user", "started only"),
-            ("user", "evicted prompt"),
-            ("assistant", "interrupted answer"),
-        ]
-        .into_iter()
-        .map(|(role, text)| crate::chatwidget::RealtimeTranscriptRecord {
-            role: role.to_string(),
-            text: text.to_string(),
-            complete: true,
-            interrupted_final_pending: false,
-            before_turn_id: None,
-        })
-        .collect(),
+        crate::chatwidget::RealtimeTranscriptReplay {
+            records: [
+                ("user", "started only"),
+                ("user", "evicted prompt"),
+                ("assistant", "interrupted answer"),
+            ]
+            .into_iter()
+            .map(|(role, text)| crate::chatwidget::RealtimeTranscriptRecord {
+                role: role.to_string(),
+                text: text.to_string(),
+                complete: true,
+                before_turn_id: None,
+            })
+            .collect(),
+            ..Default::default()
+        },
     );
     let user_item = |id: &str, text: &str| ThreadItem::UserMessage {
         id: id.into(),
@@ -2346,11 +2356,99 @@ async fn provider_error_inactive_replay_absorbs_late_final_and_keeps_new_identic
     ] {
         app.retain_inactive_realtime_transcript(thread_id, &notification);
     }
-    let records = &app.pending_realtime_transcript_replay[&thread_id];
+    let records = &app.pending_realtime_transcript_replay[&thread_id].records;
     assert_eq!(records.len(), 2);
     assert!(
         records
             .iter()
             .all(|record| record.text == "Hello" && record.complete)
+    );
+}
+
+#[tokio::test]
+async fn provider_error_inactive_policy_survives_record_eviction_and_fresh_start() {
+    use codex_app_server_protocol::ThreadRealtimeTranscriptDeltaNotification;
+    use codex_app_server_protocol::ThreadRealtimeTranscriptDoneNotification;
+    let (mut app, _, _) = make_test_app_with_channels().await;
+    let thread_id = ThreadId::new();
+    let delta = |text: &str| {
+        ServerNotification::ThreadRealtimeTranscriptDelta(
+            ThreadRealtimeTranscriptDeltaNotification {
+                thread_id: thread_id.to_string(),
+                role: "assistant".into(),
+                delta: text.into(),
+            },
+        )
+    };
+    let done = |text: &str| {
+        ServerNotification::ThreadRealtimeTranscriptDone(ThreadRealtimeTranscriptDoneNotification {
+            thread_id: thread_id.to_string(),
+            role: "assistant".into(),
+            text: text.into(),
+        })
+    };
+    app.retain_inactive_realtime_transcript(thread_id, &delta("old"));
+    app.pending_realtime_transcript_replay
+        .get_mut(&thread_id)
+        .unwrap()
+        .records
+        .clear();
+    app.retain_inactive_realtime_transcript(
+        thread_id,
+        &ServerNotification::ThreadRealtimeError(
+            codex_app_server_protocol::ThreadRealtimeErrorNotification {
+                thread_id: thread_id.to_string(),
+                message: "invalid request".into(),
+                terminal: Some(false),
+                provider_error: None,
+            },
+        ),
+    );
+    app.retain_inactive_realtime_transcript(thread_id, &delta("new"));
+    app.retain_inactive_realtime_transcript(thread_id, &done("old"));
+    app.retain_inactive_realtime_transcript(thread_id, &done("new"));
+    let records = &app.pending_realtime_transcript_replay[&thread_id].records;
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].text, "new");
+    assert!(records[0].complete);
+    for _ in 0..35 {
+        app.retain_inactive_realtime_transcript(thread_id, &delta("new"));
+        app.retain_inactive_realtime_transcript(thread_id, &done("uncorrelated final"));
+    }
+    let mut replay = app
+        .pending_realtime_transcript_replay
+        .remove(&thread_id)
+        .unwrap();
+    assert!(replay.records.iter().all(|record| record.text == "new"));
+    replay.records.clear();
+    app.chat_widget
+        .queue_realtime_transcripts_for_replay(replay);
+    app.chat_widget.finish_realtime_transcript_replay();
+    app.chat_widget
+        .handle_server_notification(done("unavailable final-only output"), None);
+    assert!(
+        app.chat_widget
+            .realtime_transcript_cells_for_replay()
+            .records
+            .is_empty()
+    );
+    app.chat_widget.handle_server_notification(
+        ServerNotification::ThreadRealtimeStarted(
+            codex_app_server_protocol::ThreadRealtimeStartedNotification {
+                thread_id: thread_id.to_string(),
+                realtime_session_id: Some("reused-logical-id".into()),
+                version: codex_app_server_protocol::RealtimeConversationVersion::V3,
+            },
+        ),
+        None,
+    );
+    app.chat_widget
+        .handle_server_notification(done("fresh final-only output"), None);
+    assert_eq!(
+        app.chat_widget
+            .realtime_transcript_cells_for_replay()
+            .records[0]
+            .text,
+        "fresh final-only output"
     );
 }

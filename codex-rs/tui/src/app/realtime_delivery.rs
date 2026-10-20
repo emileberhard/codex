@@ -147,31 +147,33 @@ impl App {
         notification: &ServerNotification,
     ) {
         if let ServerNotification::TurnStarted(started) = notification
-            && let Some(records) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
+            && let Some(replay) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
         {
-            for record in records {
+            for record in &mut replay.records {
                 if record.complete && record.before_turn_id.is_none() {
                     record.before_turn_id = Some(started.turn.id.clone());
                 }
             }
         }
         if matches!(notification, ServerNotification::ThreadRealtimeStarted(_))
-            && let Some(records) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
+            && let Some(replay) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
         {
-            for record in records {
-                record.interrupted_final_pending = false;
-            }
+            replay.assistant_output = Default::default();
         }
         if let ServerNotification::ThreadRealtimeError(error) = notification
             && error.terminal == Some(false)
-            && let Some(records) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
-            && let Some(partial) = records
+            && let Some(replay) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
+        {
+            replay.assistant_output.deltas_only |= replay.assistant_output.open;
+            replay.assistant_output.open = false;
+            if let Some(partial) = replay
+                .records
                 .iter_mut()
                 .rev()
                 .find(|record| record.role == "assistant" && !record.complete)
-        {
-            partial.complete = true;
-            partial.interrupted_final_pending = true;
+            {
+                partial.complete = true;
+            }
         }
         let (role, text, complete) = match notification {
             ServerNotification::ThreadRealtimeTranscriptDelta(n) => {
@@ -186,24 +188,29 @@ impl App {
             return;
         }
         self.note_realtime_replay_thread(thread_id);
-        let records = self
+        let replay = self
             .pending_realtime_transcript_replay
             .entry(thread_id)
             .or_default();
-        if role == "assistant"
-            && let Some(record) = records
-                .iter_mut()
-                .rev()
-                .find(|record| record.interrupted_final_pending)
-        {
+        if role == "assistant" {
             if complete {
-                record.interrupted_final_pending = false;
-                return;
-            }
-            if !text.is_empty() {
-                record.interrupted_final_pending = false;
+                replay.assistant_output.open = false;
+                if replay.assistant_output.deltas_only {
+                    if let Some(partial) = replay
+                        .records
+                        .iter_mut()
+                        .rev()
+                        .find(|record| record.role == "assistant" && !record.complete)
+                    {
+                        partial.complete = true;
+                    }
+                    return;
+                }
+            } else if !text.is_empty() {
+                replay.assistant_output.open = true;
             }
         }
+        let records = &mut replay.records;
         if complete {
             if text.trim().is_empty() {
                 if let Some(index) = records
@@ -238,7 +245,6 @@ impl App {
                 role: role.to_string(),
                 text: bounded,
                 complete: true,
-                interrupted_final_pending: false,
                 before_turn_id: None,
             });
         } else {
@@ -274,7 +280,6 @@ impl App {
                     role: role.to_string(),
                     text: bounded,
                     complete: false,
-                    interrupted_final_pending: false,
                     before_turn_id: None,
                 });
             }
@@ -292,7 +297,10 @@ impl App {
                     .or_default();
             }
             let cells = self.chat_widget.take_realtime_transcript_cells_for_replay();
-            if !cells.is_empty() {
+            if !cells.records.is_empty()
+                || cells.assistant_output.open
+                || cells.assistant_output.deltas_only
+            {
                 self.note_realtime_replay_thread(thread_id);
                 let pending = self
                     .pending_realtime_transcript_replay
@@ -301,8 +309,9 @@ impl App {
                 // Only the active widget produces these cells; reattachment consumes them
                 // before another widget for this thread can become active.
                 // Up to 32 accepted cells plus one partial for each speaker.
-                debug_assert!(pending.len() + cells.len() <= 34);
-                pending.extend(cells);
+                debug_assert!(pending.records.len() + cells.records.len() <= 34);
+                pending.records.extend(cells.records);
+                pending.assistant_output = cells.assistant_output;
             }
         }
         for (thread_id, turn_id, item) in self
@@ -344,7 +353,7 @@ impl App {
             .retain(|saved| *saved != thread_id);
         let mut retained_assistant_captions = HashMap::<String, usize>::new();
         if let Some(mut cells) = self.pending_realtime_transcript_replay.remove(&thread_id) {
-            cells.retain(|record| {
+            cells.records.retain(|record| {
                 if !record.complete {
                     return true;
                 }
@@ -357,7 +366,7 @@ impl App {
                 }
                 true
             });
-            for record in &cells {
+            for record in &cells.records {
                 if record.complete && record.role == "assistant" {
                     *retained_assistant_captions
                         .entry(normalized_replay_text(&record.text))

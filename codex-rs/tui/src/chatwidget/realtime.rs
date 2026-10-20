@@ -81,8 +81,19 @@ pub(crate) struct RealtimeTranscriptRecord {
     pub(crate) role: String,
     pub(crate) text: String,
     pub(crate) complete: bool,
-    pub(crate) interrupted_final_pending: bool,
     pub(crate) before_turn_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Default)]
+pub(crate) struct RealtimeAssistantTranscriptState {
+    pub(crate) open: bool,
+    pub(crate) deltas_only: bool,
+}
+
+#[derive(Default)]
+pub(crate) struct RealtimeTranscriptReplay {
+    pub(crate) records: VecDeque<RealtimeTranscriptRecord>,
+    pub(crate) assistant_output: RealtimeAssistantTranscriptState,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -142,6 +153,7 @@ pub(super) struct RealtimeConversationUiState {
     startup_retry: StartupRetry,
     pub(super) phase: RealtimeConversationPhase,
     recover_late_transcripts: bool,
+    assistant_output: RealtimeAssistantTranscriptState,
     attempt_id: u64,
     thread_id: Option<ThreadId>,
     pub(super) handle: Option<RealtimeWebrtcSessionHandle>,
@@ -322,9 +334,6 @@ impl ChatWidget {
             return;
         };
         self.realtime_conversation.recover_late_transcripts = false;
-        for record in &mut self.realtime_conversation.accepted_transcripts {
-            record.interrupted_final_pending = false;
-        }
         self.realtime_conversation.attempt_id =
             NEXT_REALTIME_ATTEMPT_ID.fetch_add(1, Ordering::Relaxed);
         self.realtime_conversation.thread_id = Some(thread_id);
@@ -476,6 +485,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_realtime_conversation_started(&mut self) {
+        self.realtime_conversation.assistant_output = RealtimeAssistantTranscriptState::default();
         if self.realtime_conversation.phase != RealtimeConversationPhase::Starting {
             return;
         }
@@ -1084,9 +1094,7 @@ impl ChatWidget {
             .collect()
     }
 
-    pub(crate) fn take_realtime_transcript_cells_for_replay(
-        &mut self,
-    ) -> VecDeque<RealtimeTranscriptRecord> {
+    pub(crate) fn take_realtime_transcript_cells_for_replay(&mut self) -> RealtimeTranscriptReplay {
         let records = self.realtime_transcript_cells_for_replay();
         self.realtime_conversation.accepted_transcripts.clear();
         self.realtime_conversation.pending_history_cells.clear();
@@ -1098,9 +1106,7 @@ impl ChatWidget {
         records
     }
 
-    pub(crate) fn realtime_transcript_cells_for_replay(
-        &self,
-    ) -> VecDeque<RealtimeTranscriptRecord> {
+    pub(crate) fn realtime_transcript_cells_for_replay(&self) -> RealtimeTranscriptReplay {
         let mut records = self.realtime_conversation.accepted_transcripts.clone();
         // Accepted records include cells already flushed into the old widget as
         // well as those still deferred behind another assistant stream.
@@ -1123,7 +1129,6 @@ impl ChatWidget {
                 role,
                 text,
                 complete: false,
-                interrupted_final_pending: false,
                 before_turn_id: None,
             });
         };
@@ -1133,15 +1138,16 @@ impl ChatWidget {
         if let Some(role) = self.realtime_conversation.transcript_role.clone() {
             retain_partial(role, self.realtime_conversation.transcript.clone());
         }
-        records
+        RealtimeTranscriptReplay {
+            records,
+            assistant_output: self.realtime_conversation.assistant_output,
+        }
     }
 
-    pub(crate) fn restore_realtime_transcript_cells(
-        &mut self,
-        records: VecDeque<RealtimeTranscriptRecord>,
-    ) {
+    pub(crate) fn restore_realtime_transcript_cells(&mut self, replay: RealtimeTranscriptReplay) {
+        self.realtime_conversation.assistant_output = replay.assistant_output;
         self.realtime_conversation.recover_late_transcripts = true;
-        for record in records {
+        for record in replay.records {
             if self.realtime_conversation.accepted_transcripts.len() >= MAX_REPLAY_TRANSCRIPT_CELLS
             {
                 self.realtime_conversation.accepted_transcripts.pop_front();
@@ -1282,20 +1288,11 @@ impl ChatWidget {
         {
             return;
         }
-        if role == "assistant"
-            && delta.is_empty()
-            && self
-                .realtime_conversation
-                .accepted_transcripts
-                .iter()
-                .any(|record| record.interrupted_final_pending)
-        {
-            return;
-        }
-        if role == "assistant" && !delta.is_empty() {
-            for record in &mut self.realtime_conversation.accepted_transcripts {
-                record.interrupted_final_pending = false;
+        if role == "assistant" {
+            if delta.is_empty() {
+                return;
             }
+            self.realtime_conversation.assistant_output.open = true;
         }
         let active = matches!(
             self.realtime_conversation.phase,
@@ -1435,16 +1432,12 @@ impl ChatWidget {
     }
 
     pub(super) fn on_realtime_transcript_done(&mut self, role: String, mut text: String) {
-        if role == "assistant"
-            && let Some(record) = self
-                .realtime_conversation
-                .accepted_transcripts
-                .iter_mut()
-                .rev()
-                .find(|record| record.interrupted_final_pending)
-        {
-            record.interrupted_final_pending = false;
-            return;
+        if role == "assistant" {
+            self.realtime_conversation.assistant_output.open = false;
+            if self.realtime_conversation.assistant_output.deltas_only {
+                self.seal_realtime_assistant_partial();
+                return;
+            }
         }
         if matches!(
             self.realtime_conversation.phase,
@@ -1513,7 +1506,6 @@ impl ChatWidget {
                         role: role.clone(),
                         text: text.clone(),
                         complete: true,
-                        interrupted_final_pending: false,
                         before_turn_id: None,
                     },
                 );
@@ -1663,7 +1655,6 @@ impl ChatWidget {
                     role: role.clone(),
                     text: text.clone(),
                     complete: true,
-                    interrupted_final_pending: false,
                     before_turn_id: None,
                 });
             while self.realtime_conversation.pending_history_cells.len()
@@ -1682,6 +1673,10 @@ impl ChatWidget {
     }
 
     fn finish_realtime_partial_transcripts(&mut self) {
+        let assistant_output = self.realtime_conversation.assistant_output;
+        if assistant_output.deltas_only {
+            self.seal_realtime_assistant_partial();
+        }
         if let Some((role, text)) = self.realtime_conversation.interleaved_transcript.take() {
             self.realtime_conversation.interleaved_transcript_cell = None;
             self.on_realtime_transcript_done(role, text);
@@ -1690,6 +1685,7 @@ impl ChatWidget {
             let text = std::mem::take(&mut self.realtime_conversation.transcript);
             self.on_realtime_transcript_done(role, text);
         }
+        self.realtime_conversation.assistant_output = assistant_output;
     }
 
     fn realtime_transcript_history_cell(&self, role: &str, text: &str) -> Box<dyn HistoryCell> {
@@ -1741,10 +1737,7 @@ impl ChatWidget {
         self.realtime_conversation.startup_retry == StartupRetry::WaitingForStop
     }
 
-    pub(super) fn on_realtime_provider_error(&mut self, message: String) {
-        if self.realtime_conversation.phase == RealtimeConversationPhase::Inactive {
-            return;
-        }
+    fn seal_realtime_assistant_partial(&mut self) {
         let partial = if self.realtime_conversation.transcript_role.as_deref() == Some("assistant")
         {
             self.realtime_conversation.transcript_role = None;
@@ -1779,11 +1772,23 @@ impl ChatWidget {
         self.realtime_conversation
             .assistant_caption_started_after_speech_queue = false;
         if let Some(text) = partial.filter(|text| !text.trim().is_empty()) {
+            self.realtime_conversation
+                .accepted_transcripts
+                .retain(|record| record.role != "assistant" || record.complete);
             self.record_realtime_transcript("assistant".to_string(), text);
-            if let Some(record) = self.realtime_conversation.accepted_transcripts.back_mut() {
-                record.interrupted_final_pending = true;
-            }
         }
+    }
+
+    pub(super) fn on_realtime_provider_error(&mut self, message: String) {
+        if self.realtime_conversation.phase == RealtimeConversationPhase::Inactive
+            && !self.realtime_conversation.assistant_output.open
+        {
+            return;
+        }
+        self.realtime_conversation.assistant_output.deltas_only |=
+            self.realtime_conversation.assistant_output.open;
+        self.realtime_conversation.assistant_output.open = false;
+        self.seal_realtime_assistant_partial();
         self.add_realtime_error(message);
     }
 
@@ -1990,7 +1995,6 @@ impl ChatWidget {
                     role,
                     text,
                     complete: true,
-                    interrupted_final_pending: false,
                     before_turn_id: None,
                 });
         }
@@ -2006,6 +2010,7 @@ impl ChatWidget {
             .next()
             .is_some();
         self.realtime_conversation = RealtimeConversationUiState {
+            assistant_output: self.realtime_conversation.assistant_output,
             attempt_id: self.realtime_conversation.attempt_id,
             // Keep parked speech tied to its input until it is taken for replay.
             input_generation: self.realtime_conversation.input_generation,

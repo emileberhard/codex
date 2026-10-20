@@ -100,6 +100,8 @@ pub(crate) struct RealtimeHistoryState {
     promoted_bem_presentation_keys: HashSet<String>,
     pending_handoffs: VecDeque<String>,
     failed: bool,
+    assistant_output_open: bool,
+    assistant_deltas_only: bool,
 }
 
 impl RealtimeHistoryState {
@@ -183,8 +185,10 @@ impl RealtimeHistoryState {
                     .realtime_session_id
                     .clone()
                     .unwrap_or_else(|| Uuid::now_v7().to_string());
+                self.seal_segments(&mut items, Continuation::Finish);
+                self.assistant_output_open = false;
+                self.assistant_deltas_only = false;
                 if self.active_session_id.as_deref() != Some(session_id.as_str()) {
-                    self.seal_segments(&mut items, Continuation::Finish);
                     self.active_session_id = Some(session_id.clone());
                     self.failed = false;
                     items.push(RealtimeItem {
@@ -203,6 +207,7 @@ impl RealtimeHistoryState {
                     transcript_stream = self.add_delta(RealtimeTranscriptRole::User, delta);
                 }
                 RealtimeEvent::OutputTranscriptDelta(delta) => {
+                    self.assistant_output_open |= !delta.delta.is_empty();
                     transcript_stream = self.add_delta(RealtimeTranscriptRole::Assistant, delta);
                 }
                 RealtimeEvent::InputTranscriptDone(done) => {
@@ -210,6 +215,7 @@ impl RealtimeHistoryState {
                         self.finish_segment(&mut items, RealtimeTranscriptRole::User, done);
                 }
                 RealtimeEvent::OutputTranscriptDone(done) => {
+                    self.assistant_output_open = false;
                     transcript_stream =
                         self.finish_segment(&mut items, RealtimeTranscriptRole::Assistant, done);
                 }
@@ -219,10 +225,12 @@ impl RealtimeHistoryState {
                     }
                 }
                 RealtimeEvent::ProviderError(_) => {
+                    self.assistant_deltas_only |= self.assistant_output_open;
+                    self.assistant_output_open = false;
                     if let Some(segment) =
                         self.active_segments.take(RealtimeTranscriptRole::Assistant)
                     {
-                        self.seal_active_segment(&mut items, segment, Continuation::Continue);
+                        self.seal_active_segment(&mut items, segment, Continuation::Finish);
                     }
                 }
                 RealtimeEvent::Error(_) => self.failed = true,
@@ -391,7 +399,9 @@ impl RealtimeHistoryState {
         done: &RealtimeTranscriptDone,
     ) -> Option<RealtimeTranscriptStream> {
         let Some(segment) = self.active_segments.take(role) else {
-            if done.text.is_empty() {
+            if done.text.is_empty()
+                || (role == RealtimeTranscriptRole::Assistant && self.assistant_deltas_only)
+            {
                 return None;
             }
             let stream = self.add_delta(

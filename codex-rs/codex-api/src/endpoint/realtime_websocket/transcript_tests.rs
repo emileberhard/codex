@@ -230,3 +230,109 @@ async fn provider_error_without_open_assistant_output_preserves_final_only_outpu
         vec![entry("assistant", "Hello"); 2]
     );
 }
+
+#[tokio::test]
+async fn provider_error_delta_only_policy_survives_interleaved_finals_and_handoffs() {
+    for old_final in [0, 1, 2] {
+        let first = events(RealtimeTranscriptState::default());
+        observe(
+            &first,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "old".into(),
+            }),
+        )
+        .await;
+        let mut retained = first.take_transcript_tail().await;
+        observe(
+            &first,
+            RealtimeEvent::ProviderError(codex_protocol::protocol::RealtimeProviderError {
+                message: "invalid request".into(),
+                code: None,
+                r#type: None,
+                param: None,
+                event_id: None,
+                client_event_id: None,
+            }),
+        )
+        .await;
+        let reconnected = events(first.transcript_state());
+        if old_final == 0 {
+            observe(
+                &reconnected,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone { text: "old".into() }),
+            )
+            .await;
+        }
+        observe(
+            &reconnected,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "new".into(),
+            }),
+        )
+        .await;
+        let mut handoff =
+            RealtimeEvent::HandoffRequested(codex_protocol::protocol::RealtimeHandoffRequested {
+                handoff_id: "handoff".into(),
+                item_id: "handoff".into(),
+                input_transcript: String::new(),
+                active_transcript: Vec::new(),
+            });
+        reconnected.update_active_transcript(&mut handoff).await;
+        if let RealtimeEvent::HandoffRequested(handoff) = handoff {
+            retained.extend(handoff.active_transcript);
+        }
+        if old_final == 1 {
+            observe(
+                &reconnected,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone { text: "old".into() }),
+            )
+            .await;
+        }
+        for text in [
+            "new with final-only revision",
+            "new",
+            "unavailable final-only output",
+        ] {
+            observe(
+                &reconnected,
+                RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone { text: text.into() }),
+            )
+            .await;
+        }
+        observe(
+            &reconnected,
+            RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
+                delta: "new".into(),
+            }),
+        )
+        .await;
+        observe(
+            &reconnected,
+            RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                text: String::new(),
+            }),
+        )
+        .await;
+        retained.extend(reconnected.take_transcript_tail().await);
+        assert_eq!(
+            retained,
+            vec![
+                entry("assistant", "old"),
+                entry("assistant", "new"),
+                entry("assistant", "new")
+            ]
+        );
+        let fresh = events(RealtimeTranscriptState::default());
+        observe(
+            &fresh,
+            RealtimeEvent::OutputTranscriptDone(RealtimeTranscriptDone {
+                text: "fresh final-only output".into(),
+            }),
+        )
+        .await;
+        assert_eq!(
+            fresh.take_transcript_tail().await,
+            vec![entry("assistant", "fresh final-only output")]
+        );
+    }
+}

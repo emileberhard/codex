@@ -335,20 +335,20 @@ async fn captioned_voice_answer_does_not_duplicate_on_close() {
 async fn restored_partial_caption_accepts_late_completion_without_duplicate_history() {
     let (mut chat, _sender, mut events, _ops) = make_chatwidget_manual_with_sender().await;
     chat.local_settings.tui.animations = false;
-    chat.restore_realtime_transcript_cells(VecDeque::from([
-        super::super::RealtimeTranscriptRecord {
+    chat.restore_realtime_transcript_cells(super::super::RealtimeTranscriptReplay {
+        records: VecDeque::from([super::super::RealtimeTranscriptRecord {
             role: "user".into(),
             text: "last ".into(),
             complete: false,
-            interrupted_final_pending: false,
             before_turn_id: None,
-        },
-    ]));
+        }]),
+        ..Default::default()
+    });
     assert!(chat.realtime_conversation.live_transcript_cell.is_none());
     chat.on_realtime_transcript_delta("user".into(), "words".into());
     let retained = chat.take_realtime_transcript_cells_for_replay();
-    assert_eq!(retained.len(), 1);
-    assert_eq!(retained[0].text, "last words");
+    assert_eq!(retained.records.len(), 1);
+    assert_eq!(retained.records[0].text, "last words");
     chat.restore_realtime_transcript_cells(retained);
     chat.on_realtime_transcript_done("user".into(), "last words".into());
     assert!(chat.realtime_conversation.live_transcript_cell.is_none());
@@ -376,15 +376,15 @@ async fn restored_partial_caption_accepts_late_completion_without_duplicate_hist
 #[tokio::test]
 async fn empty_late_completion_discards_the_restored_partial() {
     let (mut chat, _sender, mut events, _ops) = make_chatwidget_manual_with_sender().await;
-    chat.restore_realtime_transcript_cells(VecDeque::from([
-        super::super::RealtimeTranscriptRecord {
+    chat.restore_realtime_transcript_cells(super::super::RealtimeTranscriptReplay {
+        records: VecDeque::from([super::super::RealtimeTranscriptRecord {
             role: "user".into(),
             text: "unfinished".into(),
             complete: false,
-            interrupted_final_pending: false,
             before_turn_id: None,
-        },
-    ]));
+        }]),
+        ..Default::default()
+    });
     chat.on_realtime_transcript_done("user".into(), String::new());
 
     assert!(chat.realtime_conversation.live_transcript_cell.is_none());

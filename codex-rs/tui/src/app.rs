@@ -624,7 +624,7 @@ pub(crate) struct App {
     thread_event_channels: HashMap<ThreadId, ThreadEventChannel>,
     pending_realtime_speech_replay: HashMap<ThreadId, Vec<(String, ThreadItem)>>,
     pending_realtime_transcript_replay:
-        HashMap<ThreadId, VecDeque<crate::chatwidget::RealtimeTranscriptRecord>>,
+        HashMap<ThreadId, crate::chatwidget::RealtimeTranscriptReplay>,
     realtime_replay_order: VecDeque<ThreadId>,
     background_voice: Option<Box<ChatWidget>>,
     background_voice_error: Option<(ThreadId, String)>,

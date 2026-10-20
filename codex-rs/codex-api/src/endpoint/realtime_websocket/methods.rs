@@ -266,19 +266,12 @@ pub struct RealtimeTranscriptState {
 }
 
 #[derive(Default)]
-enum OutputTranscriptState {
-    #[default]
-    Idle,
-    Open,
-    Interrupted,
-}
-
-#[derive(Default)]
 struct ActiveTranscriptState {
     entries: Vec<RealtimeTranscriptEntry>,
     new_input_entry: bool,
     new_output_entry: bool,
-    output_state: OutputTranscriptState,
+    output_open: bool,
+    assistant_deltas_only: bool,
 }
 
 impl RealtimeWebsocketConnection {
@@ -667,7 +660,7 @@ impl RealtimeWebsocketEvents {
                 );
                 if !delta.is_empty() || self.event_parser != RealtimeEventParser::FramelessBidi {
                     active_transcript.new_output_entry = false;
-                    active_transcript.output_state = OutputTranscriptState::Open;
+                    active_transcript.output_open = true;
                 }
             }
             RealtimeEvent::InputTranscriptDone(done) => {
@@ -684,10 +677,7 @@ impl RealtimeWebsocketEvents {
             }
             RealtimeEvent::OutputTranscriptDone(done) => {
                 let force_new = active_transcript.new_output_entry;
-                if !matches!(
-                    active_transcript.output_state,
-                    OutputTranscriptState::Interrupted
-                ) {
+                if !active_transcript.assistant_deltas_only {
                     apply_transcript_done(
                         &mut active_transcript.entries,
                         "assistant",
@@ -698,7 +688,7 @@ impl RealtimeWebsocketEvents {
                 }
                 active_transcript.new_output_entry =
                     self.event_parser == RealtimeEventParser::FramelessBidi;
-                active_transcript.output_state = OutputTranscriptState::Idle;
+                active_transcript.output_open = false;
             }
             RealtimeEvent::HandoffRequested(handoff) => {
                 append_handoff_input(&mut active_transcript.entries, &handoff.input_transcript);
@@ -708,12 +698,11 @@ impl RealtimeWebsocketEvents {
             }
             RealtimeEvent::ResponseCreated(_) => {
                 active_transcript.new_output_entry = true;
-                active_transcript.output_state = OutputTranscriptState::Idle;
+                active_transcript.output_open = false;
             }
             RealtimeEvent::ProviderError(_) => {
-                if matches!(active_transcript.output_state, OutputTranscriptState::Open) {
-                    active_transcript.output_state = OutputTranscriptState::Interrupted;
-                }
+                active_transcript.assistant_deltas_only |= active_transcript.output_open;
+                active_transcript.output_open = false;
                 active_transcript.new_output_entry = true;
             }
             RealtimeEvent::SessionUpdated { .. }
