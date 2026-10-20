@@ -158,6 +158,14 @@ impl App {
         if matches!(notification, ServerNotification::ThreadRealtimeStarted(_))
             && let Some(replay) = self.pending_realtime_transcript_replay.get_mut(&thread_id)
         {
+            if let Some(partial) = replay
+                .records
+                .iter_mut()
+                .rev()
+                .find(|record| record.role == "assistant" && !record.complete)
+            {
+                partial.complete = true;
+            }
             replay.assistant_output = Default::default();
         }
         if let ServerNotification::ThreadRealtimeError(error) = notification

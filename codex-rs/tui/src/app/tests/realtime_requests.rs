@@ -2415,11 +2415,38 @@ async fn provider_error_inactive_policy_survives_record_eviction_and_fresh_start
         app.retain_inactive_realtime_transcript(thread_id, &delta("new"));
         app.retain_inactive_realtime_transcript(thread_id, &done("uncorrelated final"));
     }
+    app.retain_inactive_realtime_transcript(thread_id, &delta("old session partial"));
+    app.retain_inactive_realtime_transcript(
+        thread_id,
+        &ServerNotification::ThreadRealtimeStarted(
+            codex_app_server_protocol::ThreadRealtimeStartedNotification {
+                thread_id: thread_id.to_string(),
+                realtime_session_id: Some("reused-logical-id".into()),
+                version: codex_app_server_protocol::RealtimeConversationVersion::V3,
+            },
+        ),
+    );
+    app.retain_inactive_realtime_transcript(thread_id, &delta("fresh delta"));
+    app.retain_inactive_realtime_transcript(thread_id, &done("fresh delta"));
+    let records = &app.pending_realtime_transcript_replay[&thread_id].records;
+    assert_eq!(records[records.len() - 2].text, "old session partial");
+    assert_eq!(records[records.len() - 1].text, "fresh delta");
+    app.retain_inactive_realtime_transcript(thread_id, &delta("interrupted again"));
+    app.retain_inactive_realtime_transcript(
+        thread_id,
+        &ServerNotification::ThreadRealtimeError(
+            codex_app_server_protocol::ThreadRealtimeErrorNotification {
+                thread_id: thread_id.to_string(),
+                message: "invalid request".into(),
+                terminal: Some(false),
+                provider_error: None,
+            },
+        ),
+    );
     let mut replay = app
         .pending_realtime_transcript_replay
         .remove(&thread_id)
         .unwrap();
-    assert!(replay.records.iter().all(|record| record.text == "new"));
     replay.records.clear();
     app.chat_widget
         .queue_realtime_transcripts_for_replay(replay);

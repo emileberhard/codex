@@ -485,6 +485,7 @@ impl ChatWidget {
     }
 
     pub(super) fn on_realtime_conversation_started(&mut self) {
+        self.seal_realtime_assistant_partial();
         self.realtime_conversation.assistant_output = RealtimeAssistantTranscriptState::default();
         if self.realtime_conversation.phase != RealtimeConversationPhase::Starting {
             return;

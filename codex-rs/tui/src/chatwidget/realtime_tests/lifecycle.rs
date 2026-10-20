@@ -806,12 +806,16 @@ async fn provider_error_policy_survives_committed_output_replay_and_caption_evic
     chat.restore_realtime_transcript_cells(replay);
     chat.on_realtime_transcript_done("assistant".into(), "unavailable final-only output".into());
     assert!(chat.realtime_conversation.accepted_transcripts.is_empty());
+    chat.on_realtime_transcript_delta("assistant".into(), "old session partial".into());
     chat.on_realtime_conversation_started();
     chat.on_realtime_transcript_done("assistant".into(), "fresh final-only output".into());
-    assert_eq!(chat.realtime_conversation.accepted_transcripts.len(), 1);
     assert_eq!(
-        chat.realtime_conversation.accepted_transcripts[0].text,
-        "fresh final-only output"
+        chat.realtime_conversation
+            .accepted_transcripts
+            .iter()
+            .map(|record| record.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["old session partial", "fresh final-only output"]
     );
 }
 
