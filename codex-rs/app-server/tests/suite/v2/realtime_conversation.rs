@@ -4783,6 +4783,7 @@ async fn realtime_provider_error_allows_independent_input_and_provider_close_is_
             realtime_end_instructions: None,
             prompt: Some(Some("fixture".to_string())),
             realtime_session_id: None,
+            voice_session_id: None,
             transport: Some(ThreadRealtimeStartTransport::Webrtc {
                 sdp: "v=offer\r\n".to_string(),
             }),

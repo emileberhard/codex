@@ -293,6 +293,7 @@ impl Session {
     ) -> codex_protocol::error::Result<()> {
         self.reconcile_mailbox_before_consumption().await?;
         let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await?;
+        // Replace the cache; in-flight acquisitions retain their previous Arc.
         self.services
             .thread_extension_data
             .insert(ExecutorCapabilityDiscoveryV2Cache::default());
@@ -301,6 +302,7 @@ impl Session {
             .features
             .enabled(Feature::ExecutorCapabilityDiscoveryV2)
         {
+            // MCP contributors must project the new inventory even if their other inputs match.
             self.request_mcp_runtime_reprojection();
         }
         self.activate_plugin_selection(&turn_context).await;

@@ -1121,6 +1121,7 @@ async fn conversation_webrtc_retries_after_chatgpt_auth_refresh() -> Result<()> 
             realtime_end_instructions: None,
             prompt: Some(Some("backend prompt".to_string())),
             realtime_session_id: None,
+            voice_session_id: None,
             transport: Some(ConversationStartTransport::Webrtc {
                 sdp: "v=offer\r\n".to_string(),
             }),
@@ -6368,6 +6369,7 @@ async fn realtime_provider_close_receipt_wins_local_stop_and_closes_once(
             realtime_end_instructions: None,
             prompt: Some(Some("fixture".to_string())),
             realtime_session_id: None,
+            voice_session_id: None,
             transport: None,
             version: Some(RealtimeConversationVersion::V3),
             voice: None,
