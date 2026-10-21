@@ -209,6 +209,9 @@ pub struct ConversationStartParams {
     pub realtime_end_instructions: Option<String>,
     pub prompt: Option<Option<String>>,
     pub realtime_session_id: Option<String>,
+    /// Client-generated identifier for the product voice session. This is distinct from the
+    /// Realtime API session identifier.
+    pub voice_session_id: Option<String>,
     pub transport: Option<ConversationStartTransport>,
     /// Overrides the configured realtime protocol version for this session only.
     pub version: Option<RealtimeConversationVersion>,

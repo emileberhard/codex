@@ -6,10 +6,14 @@ use super::App;
 use crate::app_event::AgentsOverviewAction;
 use crate::app_event::AppEvent;
 use crate::app_server_session::AppServerSession;
+use crate::bottom_pane::BottomPaneView;
+use crate::bottom_pane::CenteredView;
+use crate::bottom_pane::DialogOverlay;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionViewParams;
 use crate::chatwidget::ChatWidget;
 use crate::render::renderable::Renderable;
+use crate::render::renderable::RenderableItem;
 use crate::tui;
 use crate::wrapping::word_wrap_lines;
 use codex_app_server_protocol::ClientRequest;
@@ -75,14 +79,21 @@ impl Renderable for LifecycleProgress {
     }
 }
 
+impl BottomPaneView for LifecycleProgress {}
+
 /// Keep the terminal responsive without dispatching navigation or queued task events.
 async fn run_lifecycle_modal<T>(
     tui: &mut tui::Tui,
     action: AgentsOverviewAction,
+    backdrop: &dyn Renderable,
     operation: impl Future<Output = T>,
     events: impl Stream<Item = tui::TuiEvent> + Unpin,
 ) -> color_eyre::Result<T> {
     let progress = LifecycleProgress(action);
+    let progress = DialogOverlay {
+        backdrop: RenderableItem::Borrowed(backdrop),
+        dialog: CenteredView(&progress),
+    };
     tui.draw(u16::MAX, |frame| {
         progress.render(frame.area(), frame.buffer_mut());
     })?;
@@ -265,6 +276,20 @@ impl App {
         let mut removes_primary = self.primary_thread_id == Some(thread_id);
         let mut attempted = false;
         let primary_thread_id = self.primary_thread_id;
+        // Retain the displayed selection and shared scroll/filter state while the RPC
+        // borrows the live widget to stop voice. Re-render on resize rather than freezing pixels.
+        let selected_thread_id = self
+            .chat_widget
+            .selected_index_for_present_view(super::agents_overview::AGENTS_OVERVIEW_VIEW_ID)
+            .and_then(|index| self.agents_overview.visible_thread_ids.get(index).copied());
+        let threads = self
+            .agents_overview
+            .threads
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        let backdrop = self.agents_overview_view(threads, selected_thread_id);
         let events = tui.event_stream();
         let operation = async {
             let result = async {
@@ -310,7 +335,8 @@ impl App {
             }
             (result, detach_primary)
         };
-        let (result, detach_primary) = run_lifecycle_modal(tui, action, operation, events).await?;
+        let (result, detach_primary) =
+            run_lifecycle_modal(tui, action, &backdrop, operation, events).await?;
         if attempted {
             // A read started before the RPC can contain stale task and approval state.
             if let Some(refresh) = self.agents_overview.refresh_task.take() {

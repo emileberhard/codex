@@ -4120,6 +4120,7 @@ mod tests {
                 realtime_end_instructions: Some("Resume normal text responses.".to_string()),
                 prompt: Some(Some("You are on a call".to_string())),
                 realtime_session_id: Some("sess_456".to_string()),
+                voice_session_id: Some("voice_789".to_string()),
                 transport: None,
                 version: Some(RealtimeConversationVersion::V3),
                 voice: Some(RealtimeVoice::Marin),
@@ -4160,6 +4161,7 @@ mod tests {
                     "realtimeEndInstructions": "Resume normal text responses.",
                     "prompt": "You are on a call",
                     "realtimeSessionId": "sess_456",
+                    "voiceSessionId": "voice_789",
                     "transport": null,
                     "version": "v3",
                     "voice": "marin"
@@ -4193,6 +4195,7 @@ mod tests {
                 realtime_end_instructions: None,
                 prompt: None,
                 realtime_session_id: None,
+                voice_session_id: None,
                 transport: None,
                 version: None,
                 voice: None,
@@ -4219,6 +4222,7 @@ mod tests {
                     "realtimeStartInstructions": null,
                     "realtimeEndInstructions": null,
                     "realtimeSessionId": null,
+                    "voiceSessionId": null,
                     "transport": null,
                     "version": null,
                     "voice": null
@@ -4248,6 +4252,7 @@ mod tests {
                 realtime_end_instructions: None,
                 prompt: Some(None),
                 realtime_session_id: None,
+                voice_session_id: None,
                 transport: None,
                 version: None,
                 voice: None,
@@ -4275,6 +4280,7 @@ mod tests {
                     "realtimeEndInstructions": null,
                     "prompt": null,
                     "realtimeSessionId": null,
+                    "voiceSessionId": null,
                     "transport": null,
                     "version": null,
                     "voice": null

@@ -436,6 +436,7 @@ async fn host_drain_closes_realtime_after_handoff_error() -> anyhow::Result<()> 
             realtime_end_instructions: None,
             prompt: Some(Some("backend prompt".to_string())),
             realtime_session_id: None,
+            voice_session_id: None,
             transport: None,
             version: None,
             voice: None,

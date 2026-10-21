@@ -62,10 +62,12 @@ const OPERATION_LOCK_FILE_NAME: &str = "daemon.lock";
 const SETTINGS_FILE_NAME: &str = "settings.json";
 const STATE_DIR_NAME: &str = "app-server-daemon";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LifecycleCommand {
     Start,
-    Restart,
+    Restart {
+        feature_overrides: BTreeMap<String, bool>,
+    },
     PrepareRestart,
     CancelRestart,
     Stop,
@@ -233,7 +235,10 @@ enum RestartDecision {
 pub async fn run(command: LifecycleCommand) -> Result<LifecycleOutput> {
     ensure_supported_platform()?;
     #[cfg(windows)]
-    if matches!(command, LifecycleCommand::Start | LifecycleCommand::Restart) {
+    if matches!(
+        command,
+        LifecycleCommand::Start | LifecycleCommand::Restart { .. }
+    ) {
         backend::windows::ensure_not_elevated()?;
     }
     // Keep daemon package preparation off callers' async stack frames.
@@ -399,12 +404,14 @@ impl Daemon {
         let selected = self.current_installation()?;
         match command {
             LifecycleCommand::Start => selected.start(&BTreeMap::new()).await,
-            LifecycleCommand::Restart => selected.restart().await,
             LifecycleCommand::PrepareRestart => {
                 selected.set_restart_prepared(/*prepared*/ true).await
             }
             LifecycleCommand::CancelRestart => {
                 selected.set_restart_prepared(/*prepared*/ false).await
+            }
+            LifecycleCommand::Restart { feature_overrides } => {
+                selected.restart(&feature_overrides).await
             }
             LifecycleCommand::Stop => {
                 let output = selected.stop().await?;

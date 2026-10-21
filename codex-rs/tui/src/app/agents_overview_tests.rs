@@ -242,7 +242,7 @@ async fn overview_right_preserves_editors_and_offline_state() {
     assert!(rx.try_recv().is_err());
 }
 
-fn overview_thread(
+pub(in crate::app) fn overview_thread(
     thread_id: ThreadId,
     parent_thread_id: Option<ThreadId>,
     name: &str,

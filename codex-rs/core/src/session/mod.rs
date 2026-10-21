@@ -3948,6 +3948,9 @@ impl Session {
                 .await;
             let ready_selected_capability_roots =
                 Self::ready_selected_capability_roots(&selected_capability_roots);
+            let executor_capability_discovery_v2 = self
+                .executor_capability_discovery_for_step_v2(&turn_context.config, &environments)
+                .await;
             let executor_capability_discovery = self
                 .executor_capability_discovery_for_step(
                     &turn_context.config,
@@ -3957,6 +3960,9 @@ impl Session {
                 .await;
             let extension_data =
                 codex_extension_api::ExtensionData::new(turn_context.sub_id.clone());
+            if let Some(snapshots) = &executor_capability_discovery_v2 {
+                extension_data.insert(snapshots.clone());
+            }
             if let Some(messages) = settings
                 .model_info
                 .model_messages
@@ -3994,6 +4000,7 @@ impl Session {
                         &turn_context.originator,
                         &ready_selected_capability_roots,
                         executor_capability_discovery.as_deref(),
+                        executor_capability_discovery_v2.as_deref(),
                     )
                     .with_session_source(&turn_context.session_source)
                     .with_selected_environments(&environments.all_selections()),
@@ -4015,6 +4022,7 @@ impl Session {
             Ok::<_, CodexErr>((
                 selected_capability_roots,
                 executor_capability_discovery,
+                executor_capability_discovery_v2,
                 mcp,
                 tool_router,
                 extension_data,
@@ -4030,6 +4038,7 @@ impl Session {
         let (
             selected_capability_roots,
             executor_capability_discovery,
+            executor_capability_discovery_v2,
             mcp,
             tool_router,
             extension_data,
@@ -4049,6 +4058,7 @@ impl Session {
             selected_capability_roots,
             executor_capability_discovery,
             extension_data,
+            executor_capability_discovery_v2,
             mcp,
             tool_router,
             loaded_agents_md,

@@ -1891,6 +1891,10 @@ impl BottomPane {
         self.composer.end_mouse_drag();
     }
 
+    pub(crate) fn cancel_composer_primary(&mut self) {
+        self.composer.cancel_primary();
+    }
+
     pub(crate) fn finish_composer_copy(
         &mut self,
         completion: &(u64, crate::clipboard_copy::worker::CopyResult),
@@ -1909,6 +1913,25 @@ impl BottomPane {
             return None;
         }
         self.composer.copy_selection(event, copy)
+    }
+
+    pub(crate) fn copy_composer_selection_on_release(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        selection_copy: crate::tui::SelectionCopy,
+        copy: impl FnOnce(
+            &str,
+            crate::tui::SelectionCopy,
+        ) -> (
+            crate::clipboard_copy::worker::CopyResult,
+            Option<std::sync::Arc<()>>,
+        ),
+    ) -> Option<(usize, Option<crate::clipboard_copy::worker::CopyResult>)> {
+        if self.has_active_view() || self.questions.as_ref().is_some_and(|q| q.expanded) {
+            return None;
+        }
+        self.composer
+            .copy_selection_on_release(event, selection_copy, copy)
     }
 
     pub(crate) fn clipboard_paste_target(

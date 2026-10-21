@@ -94,6 +94,8 @@ mod windows_console;
 #[cfg(any(windows, test))]
 mod windows_key_sequence;
 
+pub(crate) use selection_clipboard::SelectionCopy;
+
 /// Target frame interval for UI redraw scheduling.
 pub(crate) const TARGET_FRAME_INTERVAL: Duration = frame_rate_limiter::MIN_FRAME_INTERVAL;
 

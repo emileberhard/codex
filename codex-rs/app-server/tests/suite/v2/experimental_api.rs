@@ -150,6 +150,7 @@ async fn realtime_conversation_start_requires_experimental_api_capability() -> R
             realtime_end_instructions: None,
             prompt: Some(Some("hello".to_string())),
             realtime_session_id: None,
+            voice_session_id: None,
             transport: None,
             version: None,
             voice: None,
@@ -293,6 +294,7 @@ async fn realtime_webrtc_start_requires_experimental_api_capability() -> Result<
             realtime_end_instructions: None,
             prompt: Some(Some("hello".to_string())),
             realtime_session_id: None,
+            voice_session_id: None,
             transport: Some(ThreadRealtimeStartTransport::Webrtc {
                 sdp: "v=offer\r\n".to_string(),
             }),

@@ -78,7 +78,7 @@ async fn seeds_full_package() {
         std::fs::read_to_string(standalone.join("auto-update-version")).expect("marker"),
         selected.file_name().expect("name").to_string_lossy()
     );
-    assert!(validate_package(&selected).is_ok());
+    assert!(validate_package(&selected, "bin/codex").is_ok());
 }
 
 #[tokio::test]

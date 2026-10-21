@@ -340,17 +340,23 @@ fn classifier_mode_uses_local_override_then_model_default() {
             ..Default::default()
         })
         .unwrap();
-        let defaults = GuardianV2ModelConfig {
-            async_classifier_mode: Some(AsyncClassifierMode::Conversation),
-            ..Default::default()
-        };
-        assert_eq!(
-            config.classifier_mode(Some(&defaults)),
-            local.unwrap_or(AsyncClassifierMode::Conversation)
-        );
+        for model in [
+            None,
+            Some(AsyncClassifierMode::Snapshot),
+            Some(AsyncClassifierMode::Conversation),
+        ] {
+            let defaults = GuardianV2ModelConfig {
+                async_classifier_mode: model,
+                ..Default::default()
+            };
+            assert_eq!(
+                config.classifier_mode(Some(&defaults)),
+                local.or(model).unwrap_or(AsyncClassifierMode::Conversation)
+            );
+        }
         assert_eq!(
             config.classifier_mode(/*model_defaults*/ None),
-            local.unwrap_or_default()
+            local.unwrap_or(AsyncClassifierMode::Conversation)
         );
     }
 }

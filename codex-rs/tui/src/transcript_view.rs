@@ -30,6 +30,7 @@ use crate::history_cell::HistoryCell;
 use crate::history_cell::HistoryRenderMode;
 use crate::pager_overlay::TranscriptHistoryState;
 use crate::terminal_hyperlinks::HyperlinkLine;
+use crate::tui::SelectionCopy;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Stylize;
@@ -48,26 +49,6 @@ pub(crate) use bookmark::TranscriptBookmark;
 pub(crate) use input::JumpTarget;
 pub(crate) use input::ViewAction;
 pub(crate) use layout::ActivityTranscriptLines;
-
-/// Copy origin plus the deselection policy applied after confirmed delivery.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum SelectionCopy {
-    Explicit,
-    OnSelect { clear_selection: bool },
-}
-
-impl SelectionCopy {
-    fn clear_selection(self) -> bool {
-        match self {
-            Self::Explicit => true,
-            Self::OnSelect { clear_selection } => clear_selection,
-        }
-    }
-
-    fn publishes_primary(self) -> bool {
-        matches!(self, Self::OnSelect { .. })
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum EntryKey {

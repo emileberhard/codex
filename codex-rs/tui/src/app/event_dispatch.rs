@@ -166,7 +166,9 @@ impl App {
                     && self.daemon_restart.is_none()
                 {
                     self.daemon_restart = Some(tokio::spawn(codex_app_server_daemon::run(
-                        codex_app_server_daemon::LifecycleCommand::Restart,
+                        codex_app_server_daemon::LifecycleCommand::Restart {
+                            feature_overrides: Default::default(),
+                        },
                     )));
                 }
             }
@@ -3423,7 +3425,7 @@ impl App {
                 key,
                 intent,
             } => {
-                self.apply_keymap_capture(context, action, key, intent)
+                self.apply_keymap_capture(app_server, context, action, key, intent)
                     .await;
                 self.merge_startup_warnings(tui, &history_cell::StartupWarningsCell::default());
             }
@@ -3508,6 +3510,7 @@ impl App {
 
     async fn apply_keymap_capture(
         &mut self,
+        app_server: &mut AppServerSession,
         context: String,
         action: String,
         key: String,
@@ -3557,13 +3560,41 @@ impl App {
             }
         };
 
-        let edit =
-            crate::legacy_core::config::edit::keymap_bindings_edit(&context, &action, &bindings);
-        match ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
-            .with_edits([edit])
-            .apply()
-            .await
-        {
+        let save = if matches!(self.app_server_target, AppServerTarget::LocalDaemon { .. }) {
+            // Let the daemon validate shared config before writing: older daemons may
+            // not understand bindings introduced by this TUI, including new defaults.
+            app_server
+                .request_handle()
+                .request_typed::<codex_app_server_protocol::ConfigWriteResponse>(
+                    codex_app_server_protocol::ClientRequest::ConfigValueWrite {
+                        request_id: app_server.next_request_id(),
+                        params: codex_app_server_protocol::ConfigValueWriteParams {
+                            key_path: format!("tui.keymap.{context}.{action}"),
+                            value: match bindings.as_slice() {
+                                [binding] => serde_json::json!(binding),
+                                bindings => serde_json::json!(bindings),
+                            },
+                            merge_strategy: codex_app_server_protocol::MergeStrategy::Replace,
+                            file_path: Some(
+                                self.local_settings.user_config_path.display().to_string(),
+                            ),
+                            expected_version: None,
+                        },
+                    },
+                )
+                .await
+                .map(|_| ())
+                .map_err(anyhow::Error::new)
+        } else {
+            let edit = crate::legacy_core::config::edit::keymap_bindings_edit(
+                &context, &action, &bindings,
+            );
+            ConfigEditsBuilder::for_config_path(self.local_settings.user_config_path.as_path())
+                .with_edits([edit])
+                .apply()
+                .await
+        };
+        match save {
             Ok(()) => {
                 self.cancel_pending_key_chord();
                 self.local_settings.tui.keymap = keymap_config.clone();

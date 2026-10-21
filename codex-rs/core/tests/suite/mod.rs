@@ -257,5 +257,6 @@ mod window_headers;
 mod workspace_roots;
 mod worktree_trust;
 
+mod executor_discovery_v2;
 #[path = "guardian_sender_messages_tests.rs"]
 mod guardian_sender_messages;

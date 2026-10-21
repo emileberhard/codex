@@ -1209,6 +1209,7 @@ impl Session {
                     },
                     /*ready_selected_capability_roots*/ &[],
                     /*executor_capability_discovery*/ None,
+                    /*executor_capability_discovery_v2*/ None,
                 )
                 .await;
             (auth, mcp_projection)
@@ -1937,6 +1938,7 @@ impl Session {
                         },
                         /*ready_selected_capability_roots*/ &[],
                         /*executor_capability_discovery*/ None,
+                        /*executor_capability_discovery_v2*/ None,
                     )
                     .await
             } else {

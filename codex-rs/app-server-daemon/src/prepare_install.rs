@@ -1,5 +1,6 @@
 //! Installs complete CLI packages after confirmation. Initial starts preserve
 //! existing selections; explicit replacements migrate to dedicated packages and stay pinned.
+//! WinGet sources are verified in their original layout before staging a canonical daemon package.
 
 use std::path::Path;
 use std::path::PathBuf;
@@ -154,17 +155,21 @@ async fn prepare_from_package(
     let manifest: CodexPackageManifest = serde_json::from_slice(&manifest_bytes)?;
     let version = manifest.version.to_string();
     let target = platform_target()?;
-    let metadata: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
+    let mut metadata: serde_json::Value = serde_json::from_slice(&manifest_bytes)?;
     let entrypoint = if cfg!(windows) {
         "bin/codex.exe"
     } else {
         "bin/codex"
     };
+    let source_entrypoint = metadata["entrypoint"].as_str().unwrap_or_default();
+    let winget = cfg!(windows)
+        && metadata["layoutVersion"] == 1
+        && source_entrypoint == format!("codex-{target}.exe");
     anyhow::ensure!(
-        metadata["target"] == target && metadata["entrypoint"] == entrypoint,
+        metadata["target"] == target && (source_entrypoint == entrypoint || winget),
         "the CLI package does not match this platform or executable"
     );
-    validate_package(source)?;
+    validate_package(source, source_entrypoint)?;
     // A local build may replace the executable while confirmation is pending.
     let running_identity = managed_install::executable_identity(running_exe).await?;
     if mode == InstallMode::Replace {
@@ -227,11 +232,10 @@ async fn prepare_from_package(
         .prefix(".staging.")
         .tempdir_in(&releases)?;
     let digest = package_tree(source, Some(stage.path()))?;
-    validate_package(stage.path())?;
     let staged_exe = if cfg!(target_os = "macos") && stage.path().join("CodexCLI.app").is_dir() {
         stage.path().join("CodexCLI.app/Contents/MacOS/codex")
     } else {
-        stage.path().join(entrypoint)
+        stage.path().join(source_entrypoint)
     };
     anyhow::ensure!(
         package_tree(source, /*destination*/ None)? == digest
@@ -241,6 +245,42 @@ async fn prepare_from_package(
                 .same_contents(&running_identity),
         "the CLI package changed while preparing the daemon or differs from the running executable"
     );
+    // Reverse the WinGet archive's root filenames only after verifying the copied
+    // source. Hash the final tree for reuse, since it now differs from the source.
+    let digest = if winget {
+        std::fs::create_dir_all(stage.path().join("bin"))?;
+        #[cfg(windows)]
+        {
+            windows::publish_release(&staged_exe, &stage.path().join(entrypoint)).await?;
+            windows::publish_release(
+                &stage.path().join("codex-code-mode-host.exe"),
+                &stage.path().join("bin/codex-code-mode-host.exe"),
+            )
+            .await?;
+        }
+        let voice_path = stage.path().join("codex-resources/voice/manifest.json");
+        if voice_path.try_exists()? {
+            let mut voice: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&voice_path)?)?;
+            let checksums = voice["sha256"]
+                .as_object_mut()
+                .context("invalid WinGet voice manifest checksums")?;
+            let checksum = checksums
+                .remove(source_entrypoint)
+                .context("WinGet voice manifest is missing the CLI checksum")?;
+            checksums.insert(entrypoint.to_string(), checksum);
+            std::fs::write(voice_path, serde_json::to_vec_pretty(&voice)?)?;
+        }
+        metadata["entrypoint"] = entrypoint.into();
+        std::fs::write(
+            stage.path().join("codex-package.json"),
+            serde_json::to_vec_pretty(&metadata)?,
+        )?;
+        package_tree(stage.path(), /*destination*/ None)?
+    } else {
+        digest
+    };
+    validate_package(stage.path(), entrypoint)?;
     let binary_version =
         managed_install::managed_codex_version(&stage.path().join(entrypoint)).await?;
     anyhow::ensure!(
@@ -429,19 +469,17 @@ fn stable_version(value: &str) -> Option<semver::Version> {
         .then_some(version)
 }
 
-fn validate_package(root: &Path) -> Result<()> {
+fn validate_package(root: &Path, entrypoint: &str) -> Result<()> {
+    let code_mode_host = Path::new(entrypoint).with_file_name(if cfg!(windows) {
+        "codex-code-mode-host.exe"
+    } else {
+        "codex-code-mode-host"
+    });
+    let code_mode_host = code_mode_host.to_string_lossy();
     let mut names = vec![
         "codex-package.json",
-        if cfg!(windows) {
-            "bin/codex.exe"
-        } else {
-            "bin/codex"
-        },
-        if cfg!(windows) {
-            "bin/codex-code-mode-host.exe"
-        } else {
-            "bin/codex-code-mode-host"
-        },
+        entrypoint,
+        code_mode_host.as_ref(),
         if cfg!(windows) {
             "codex-path/rg.exe"
         } else {

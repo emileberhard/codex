@@ -2092,7 +2092,7 @@ async fn contributor_samples_tool_calls_with_the_existing_luna_pool() -> Result<
         conversation_history,
         r#"{"path":"README.md"}"#,
         Some(TEST_GUARDIAN_POLICY),
-        "[features.guardianv2.transcript]\nmax_message_entry_tokens = 100\nmax_message_transcript_tokens = 100\n",
+        "[features.guardianv2]\nasync_classifier_mode = \"snapshot\"\n[features.guardianv2.transcript]\nmax_message_entry_tokens = 100\nmax_message_transcript_tokens = 100\n",
         /*model_defaults*/ None,
     )
     .await?;

@@ -828,10 +828,10 @@ pub struct Config {
     /// Mouse wheel speed multiplier for transcript scrolling; defaults to one row per event.
     pub tui_mouse_scroll_speed: Option<f64>,
 
-    /// Override the terminal-specific default for copying transcript mouse selections.
+    /// Override the terminal default for copying transcript, footer, and composer selections.
     pub tui_copy_on_select: codex_config::types::CopyOnSelect,
 
-    /// Whether to deselect transcript text after a confirmed automatic copy.
+    /// Whether to deselect read-only transcript or footer text after confirmed automatic copy.
     pub tui_copy_on_select_clear_selection: bool,
 
     /// Right-click text paste fallback for the fullscreen TUI.

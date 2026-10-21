@@ -1,6 +1,9 @@
 //! Progress rendering and input isolation while lifecycle requests are pending.
 
 use super::*;
+use crate::app::agents_overview::tests::overview_thread;
+use crate::chatwidget::tests::helpers::normalize_agent_center_snapshot;
+use codex_app_server_protocol::ThreadStatus;
 use futures::stream;
 use pretty_assertions::assert_eq;
 use ratatui::Terminal;
@@ -37,6 +40,7 @@ async fn modal_consumes_input_and_finishes_after_input_closes() -> color_eyre::R
         run_lifecycle_modal(
             &mut tui,
             AgentsOverviewAction::Archive,
+            &Paragraph::new("Agent command center"),
             async {
                 wait_for_input.await.expect("all modal input was consumed");
                 tokio::task::yield_now().await;
@@ -50,18 +54,38 @@ async fn modal_consumes_input_and_finishes_after_input_closes() -> color_eyre::R
     Ok(())
 }
 
-#[test]
-fn lifecycle_progress_wraps_at_narrow_widths() {
+#[tokio::test]
+async fn lifecycle_progress_wraps_at_narrow_widths() {
+    let (app, _rx, _op_rx) = crate::app::tests::make_test_app_with_channels().await;
+    let threads = ["First task", "Selected task", "Last task"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            overview_thread(
+                ThreadId::from_u128(index as u128 + 1),
+                /*parent_thread_id*/ None,
+                name,
+                ThreadStatus::Idle,
+            )
+        })
+        .collect();
+    let backdrop = app.agents_overview_view(threads, Some(ThreadId::from_u128(/*value*/ 2)));
     for (action, name) in [
         (AgentsOverviewAction::Archive, "archive_progress"),
         (AgentsOverviewAction::Delete, "delete_progress"),
     ] {
         let progress = LifecycleProgress(action);
-        let mut terminal =
-            Terminal::new(TestBackend::new(36, progress.desired_height(/*width*/ 36))).unwrap();
+        let progress = DialogOverlay {
+            backdrop: RenderableItem::Borrowed(&backdrop),
+            dialog: CenteredView(&progress),
+        };
+        let mut terminal = Terminal::new(TestBackend::new(36, 24)).unwrap();
         terminal
             .draw(|frame| progress.render(frame.area(), frame.buffer_mut()))
             .unwrap();
-        insta::assert_snapshot!(name, terminal.backend());
+        insta::assert_snapshot!(
+            name,
+            normalize_agent_center_snapshot(terminal.backend().to_string())
+        );
     }
 }

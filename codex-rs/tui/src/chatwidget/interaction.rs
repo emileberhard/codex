@@ -23,12 +23,26 @@ impl ChatWidget {
         self.bottom_pane.end_composer_drag();
     }
 
+    pub(crate) fn cancel_composer_primary(&mut self) {
+        self.bottom_pane.cancel_composer_primary();
+    }
+
     pub(crate) fn copy_composer_selection(
         &mut self,
         event: &crate::tui::TuiEvent,
         copy: impl FnOnce(&str) -> Result<crate::clipboard_copy::CopyStatus, String>,
     ) -> Option<(usize, Result<crate::clipboard_copy::CopyStatus, String>)> {
         self.bottom_pane.copy_composer_selection(event, copy)
+    }
+
+    pub(crate) fn copy_composer_selection_on_release(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        selection_copy: crate::tui::SelectionCopy,
+        copy: impl FnOnce(&str, crate::tui::SelectionCopy) -> (CopyResult, Option<Arc<()>>),
+    ) -> Option<(usize, Option<CopyResult>)> {
+        self.bottom_pane
+            .copy_composer_selection_on_release(event, selection_copy, copy)
     }
 
     pub(crate) fn handle_composer_mouse(&mut self, event: crossterm::event::MouseEvent) -> bool {

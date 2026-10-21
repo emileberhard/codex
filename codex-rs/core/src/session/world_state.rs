@@ -339,6 +339,9 @@ impl Session {
         for contributor in self.services.extensions.context_contributors() {
             for section in contributor
                 .contribute_world_state(WorldStateContributionInput {
+                    executor_capability_discovery_v2: step_context
+                        .executor_capability_discovery_v2
+                        .as_deref(),
                     thread_id: self.thread_id(),
                     turn_id: turn_context.sub_id.as_str(),
                     model_info: &step_context.settings.model_info,
