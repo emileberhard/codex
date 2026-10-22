@@ -5,7 +5,9 @@ The following upstream files contain changes for shared app-server lifecycle,
 exact recovery, passive history, native agent mail, realtime provider lifecycle,
 and connection-owned external authentication. The upstream LICENSE and NOTICE
 remain unchanged. Non-comment formats carry the modification notice in a
-sibling `.license` file.
+sibling `.license` file. The listed SQL migrations and generated protocol files
+carry their modification notice here to preserve deployed migration checksums
+and generator-owned output bytes.
 
 - `.gitignore`
 - `codex-rs/Cargo.lock`

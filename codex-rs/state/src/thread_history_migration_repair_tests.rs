@@ -115,6 +115,22 @@ async fn applied_migrations(pool: &SqlitePool) -> Vec<(i64, String, Vec<u8>)> {
 }
 
 #[test]
+fn private_thread_history_migrations_match_deployed_checksums() {
+    let expected = [
+        (1_000_001, "10932A16F620025C36FBC728435CD4A23F0CE3E4A63C73A108C9BED7DA7C2EB57CAFFDD528875CD7E5DF92FF6CA67F08"),
+        (1_000_002, "F80B721E6B83601CA48FDE446D7CB8B61D7DB6FFBC47F202EDF26D28B5070FD18E78BC073D74BEC934FBF9BE222A0E04"),
+        (1_000_003, "99F9D1AE40E67909874069780B70D60EB872758FF69332F43AB149D5EA2CDD22919999ABAC5335BB1D0C7C065AC56B67"),
+        (1_000_004, "E93C5F01A9260B8556991F9DB10A2FA92A0F266D0B641D9E3706390F43F1DEF61FCAB44B2D30E676CD1B7A1B8C4B75D4"),
+    ]
+    .map(|(version, checksum)| (version, checksum.to_string()));
+    let actual = expected
+        .each_ref()
+        .map(|(version, _)| (*version, hex_checksum(current_migration(*version))));
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn legacy_fork_migrations_match_deployed_checksums() {
     let legacy = legacy_fork_migrator(LEGACY_STARTED_AT_VERSION)
         .migrations

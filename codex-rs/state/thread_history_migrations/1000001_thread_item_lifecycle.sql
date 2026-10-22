@@ -1,4 +1,3 @@
--- Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 -- Existing rows were projected only at completion. Preserve their ordinal as the legacy fallback.
 ALTER TABLE thread_items ADD COLUMN is_complete INTEGER NOT NULL DEFAULT 1;
 

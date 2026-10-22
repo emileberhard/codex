@@ -1,4 +1,3 @@
--- Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 ALTER TABLE thread_turns ADD COLUMN updated_at_ordinal INTEGER NOT NULL DEFAULT 0;
 
 -- Observation boundaries are committed projection prefixes. Keep the current turn
