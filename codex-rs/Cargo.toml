@@ -549,7 +549,7 @@ whoami = "1.6.1"
 wildmatch = "2.6.1"
 winapi-util = "0.1.11"
 windows-sys = "0.61.2"
-zip = "9.0.0"
+zip = { version = "9.0.0", default-features = false, features = ["deflate"] }
 zstd = "0.13"
 
 wiremock = "0.6"

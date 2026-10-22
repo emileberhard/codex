@@ -13,7 +13,6 @@ Unmodified registry source is available from each versioned source archive below
 | adler2 2.0.1 | 0BSD OR MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/adler2/adler2-2.0.1.crate) |
 | aead 0.5.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/aead/aead-0.5.2.crate) |
 | aes 0.8.4 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/aes/aes-0.8.4.crate) |
-| aes 0.9.3 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/aes/aes-0.9.3.crate) |
 | aes-gcm 0.10.3 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/aes-gcm/aes-gcm-0.10.3.crate) |
 | age 0.12.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/age/age-0.12.1.crate) |
 | age-core 0.12.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/age-core/age-core-0.12.0.crate) |
@@ -88,7 +87,6 @@ Unmodified registry source is available from each versioned source archive below
 | blake2 0.10.6 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/blake2/blake2-0.10.6.crate) |
 | blake3 1.8.2 | CC0-1.0 OR Apache-2.0 OR Apache-2.0 WITH LLVM-exception | [Source](https://static.crates.io/crates/blake3/blake3-1.8.2.crate) |
 | block-buffer 0.10.4 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/block-buffer/block-buffer-0.10.4.crate) |
-| block-buffer 0.12.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/block-buffer/block-buffer-0.12.0.crate) |
 | block2 0.6.2 | MIT | [Source](https://static.crates.io/crates/block2/block2-0.6.2.crate) |
 | bm25 2.3.2 | MIT | [Source](https://static.crates.io/crates/bm25/bm25-2.3.2.crate) |
 | bstr 1.12.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/bstr/bstr-1.12.1.crate) |
@@ -99,7 +97,6 @@ Unmodified registry source is available from each versioned source archive below
 | byteorder-lite 0.1.0 | Unlicense OR MIT | [Source](https://static.crates.io/crates/byteorder-lite/byteorder-lite-0.1.0.crate) |
 | bytes 1.12.1 | MIT | [Source](https://static.crates.io/crates/bytes/bytes-1.12.1.crate) |
 | bytes-utils 0.1.4 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/bytes-utils/bytes-utils-0.1.4.crate) |
-| bzip2 0.6.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/bzip2/bzip2-0.6.1.crate) |
 | cached 0.56.0 | MIT | [Source](https://static.crates.io/crates/cached/cached-0.56.0.crate) |
 | cached_proc_macro 0.25.0 | MIT | [Source](https://static.crates.io/crates/cached_proc_macro/cached_proc_macro-0.25.0.crate) |
 | cached_proc_macro_types 0.1.1 | MIT | [Source](https://static.crates.io/crates/cached_proc_macro_types/cached_proc_macro_types-0.1.1.crate) |
@@ -117,7 +114,6 @@ Unmodified registry source is available from each versioned source archive below
 | chunked_transfer 1.5.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/chunked_transfer/chunked_transfer-1.5.0.crate) |
 | cidr 0.3.2 | MIT | [Source](https://static.crates.io/crates/cidr/cidr-0.3.2.crate) |
 | cipher 0.4.4 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cipher/cipher-0.4.4.crate) |
-| cipher 0.5.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cipher/cipher-0.5.2.crate) |
 | clap 4.5.58 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/clap/clap-4.5.58.crate) |
 | clap_builder 4.5.58 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/clap_builder/clap_builder-4.5.58.crate) |
 | clap_complete 4.5.65 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/clap_complete/clap_complete-4.5.65.crate) |
@@ -126,7 +122,6 @@ Unmodified registry source is available from each versioned source archive below
 | clatter 2.2.0 | MIT | [Source](https://static.crates.io/crates/clatter/clatter-2.2.0.crate) |
 | clru 0.6.3 | MIT | [Source](https://static.crates.io/crates/clru/clru-0.6.3.crate) |
 | cmake 0.1.57 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cmake/cmake-0.1.57.crate) |
-| cmov 0.5.3 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/cmov/cmov-0.5.3.crate) |
 | cmp_any 0.8.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cmp_any/cmp_any-0.8.1.crate) |
 | cobs 0.3.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cobs/cobs-0.3.0.crate) |
 | color-eyre 0.6.5 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/color-eyre/color-eyre-0.6.5.crate) |
@@ -136,12 +131,10 @@ Unmodified registry source is available from each versioned source archive below
 | compact_str 0.9.1 | MIT | [Source](https://static.crates.io/crates/compact_str/compact_str-0.9.1.crate) |
 | concurrent-queue 2.5.0 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/concurrent-queue/concurrent-queue-2.5.0.crate) |
 | const-hex 1.17.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/const-hex/const-hex-1.17.0.crate) |
-| const-oid 0.10.2 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/const-oid/const-oid-0.10.2.crate) |
 | const-oid 0.9.6 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/const-oid/const-oid-0.9.6.crate) |
 | const_format 0.2.35 | Zlib | [Source](https://static.crates.io/crates/const_format/const_format-0.2.35.crate) |
 | const_format_proc_macros 0.2.34 | Zlib | [Source](https://static.crates.io/crates/const_format_proc_macros/const_format_proc_macros-0.2.34.crate) |
 | constant_time_eq 0.3.1 | CC0-1.0 OR MIT-0 OR Apache-2.0 | [Source](https://static.crates.io/crates/constant_time_eq/constant_time_eq-0.3.1.crate) |
-| constant_time_eq 0.4.2 | CC0-1.0 OR MIT-0 OR Apache-2.0 | [Source](https://static.crates.io/crates/constant_time_eq/constant_time_eq-0.4.2.crate) |
 | convert_case 0.10.0 | MIT | [Source](https://static.crates.io/crates/convert_case/convert_case-0.10.0.crate) |
 | convert_case 0.6.0 | MIT | [Source](https://static.crates.io/crates/convert_case/convert_case-0.6.0.crate) |
 | cookie 0.18.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cookie/cookie-0.18.1.crate) |
@@ -150,9 +143,7 @@ Unmodified registry source is available from each versioned source archive below
 | core-foundation 0.10.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/core-foundation/core-foundation-0.10.1.crate) |
 | core-foundation 0.9.4 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/core-foundation/core-foundation-0.9.4.crate) |
 | core-foundation-sys 0.8.7 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/core-foundation-sys/core-foundation-sys-0.8.7.crate) |
-| cpubits 0.1.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cpubits/cpubits-0.1.1.crate) |
 | cpufeatures 0.2.17 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cpufeatures/cpufeatures-0.2.17.crate) |
-| cpufeatures 0.3.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/cpufeatures/cpufeatures-0.3.0.crate) |
 | crc 3.4.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/crc/crc-3.4.0.crate) |
 | crc-catalog 2.4.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/crc-catalog/crc-catalog-2.4.0.crate) |
 | crc32fast 1.5.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/crc32fast/crc32fast-1.5.0.crate) |
@@ -165,7 +156,6 @@ Unmodified registry source is available from each versioned source archive below
 | crossterm 0.29.0 | MIT | [Source](https://github.com/openai-oss-forks/crossterm/tree/ed1cdab335221515706178d68495bba2aed1924f) |
 | crypto-bigint 0.5.5 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/crypto-bigint/crypto-bigint-0.5.5.crate) |
 | crypto-common 0.1.7 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/crypto-common/crypto-common-0.1.7.crate) |
-| crypto-common 0.2.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/crypto-common/crypto-common-0.2.2.crate) |
 | crypto_box 0.9.1 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/crypto_box/crypto_box-0.9.1.crate) |
 | crypto_secretbox 0.1.1 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/crypto_secretbox/crypto_secretbox-0.1.1.crate) |
 | csv 1.4.0 | Unlicense OR MIT | [Source](https://static.crates.io/crates/csv/csv-1.4.0.crate) |
@@ -174,7 +164,6 @@ Unmodified registry source is available from each versioned source archive below
 | ctor 1.0.6 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/ctor/ctor-1.0.6.crate) |
 | ctor-proc-macro 0.0.7 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/ctor-proc-macro/ctor-proc-macro-0.0.7.crate) |
 | ctr 0.9.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/ctr/ctr-0.9.2.crate) |
-| ctutils 0.4.2 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/ctutils/ctutils-0.4.2.crate) |
 | curve25519-dalek 4.1.3 | BSD-3-Clause | [Source](https://static.crates.io/crates/curve25519-dalek/curve25519-dalek-4.1.3.crate) |
 | darling 0.20.11 | MIT | [Source](https://static.crates.io/crates/darling/darling-0.20.11.crate) |
 | darling 0.21.3 | MIT | [Source](https://static.crates.io/crates/darling/darling-0.21.3.crate) |
@@ -194,7 +183,6 @@ Unmodified registry source is available from each versioned source archive below
 | deadpool-runtime 0.1.4 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/deadpool-runtime/deadpool-runtime-0.1.4.crate) |
 | debugid 0.8.0 | Apache-2.0 | [Source](https://static.crates.io/crates/debugid/debugid-0.8.0.crate) |
 | debugserver-types 0.5.0 | MIT | [Source](https://static.crates.io/crates/debugserver-types/debugserver-types-0.5.0.crate) |
-| deflate64 0.1.10 | MIT | [Source](https://static.crates.io/crates/deflate64/deflate64-0.1.10.crate) |
 | der 0.7.10 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/der/der-0.7.10.crate) |
 | der-parser 10.0.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/der-parser/der-parser-10.0.0.crate) |
 | deranged 0.5.5 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/deranged/deranged-0.5.5.crate) |
@@ -206,7 +194,6 @@ Unmodified registry source is available from each versioned source archive below
 | deunicode 1.6.2 | BSD-3-Clause | [Source](https://static.crates.io/crates/deunicode/deunicode-1.6.2.crate) |
 | diffy 0.4.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/diffy/diffy-0.4.2.crate) |
 | digest 0.10.7 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/digest/digest-0.10.7.crate) |
-| digest 0.11.3 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/digest/digest-0.11.3.crate) |
 | dirs 6.0.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/dirs/dirs-6.0.0.crate) |
 | dirs-next 2.0.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/dirs-next/dirs-next-2.0.0.crate) |
 | dirs-sys 0.5.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/dirs-sys/dirs-sys-0.5.0.crate) |
@@ -352,7 +339,6 @@ Unmodified registry source is available from each versioned source archive below
 | hickory-resolver 0.25.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hickory-resolver/hickory-resolver-0.25.2.crate) |
 | hkdf 0.12.4 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hkdf/hkdf-0.12.4.crate) |
 | hmac 0.12.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hmac/hmac-0.12.1.crate) |
-| hmac 0.13.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hmac/hmac-0.13.0.crate) |
 | home 0.5.12 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/home/home-0.5.12.crate) |
 | hpke 0.12.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hpke/hpke-0.12.0.crate) |
 | http 0.2.12 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/http/http-0.2.12.crate) |
@@ -364,7 +350,6 @@ Unmodified registry source is available from each versioned source archive below
 | httparse 1.10.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/httparse/httparse-1.10.1.crate) |
 | httpdate 1.0.3 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/httpdate/httpdate-1.0.3.crate) |
 | hybrid-array 0.2.3 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hybrid-array/hybrid-array-0.2.3.crate) |
-| hybrid-array 0.4.12 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hybrid-array/hybrid-array-0.4.12.crate) |
 | hyper 1.11.1 | MIT | [Source](https://static.crates.io/crates/hyper/hyper-1.11.1.crate) |
 | hyper-rustls 0.27.7 | Apache-2.0 OR ISC OR MIT | [Source](https://static.crates.io/crates/hyper-rustls/hyper-rustls-0.27.7.crate) |
 | hyper-timeout 0.5.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/hyper-timeout/hyper-timeout-0.5.2.crate) |
@@ -398,7 +383,6 @@ Unmodified registry source is available from each versioned source archive below
 | indexmap 2.14.0 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/indexmap/indexmap-2.14.0.crate) |
 | indoc 2.0.7 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/indoc/indoc-2.0.7.crate) |
 | inout 0.1.4 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/inout/inout-0.1.4.crate) |
-| inout 0.2.5 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/inout/inout-0.2.5.crate) |
 | instability 0.3.11 | MIT | [Source](https://static.crates.io/crates/instability/instability-0.3.11.crate) |
 | intl-memoizer 0.5.3 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/intl-memoizer/intl-memoizer-0.5.3.crate) |
 | intl_pluralrules 7.0.2 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/intl_pluralrules/intl_pluralrules-7.0.2.crate) |
@@ -420,7 +404,6 @@ Unmodified registry source is available from each versioned source archive below
 | kem 0.3.0-pre.0 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/kem/kem-0.3.0-pre.0.crate) |
 | keyring 3.6.3 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/keyring/keyring-3.6.3.crate) |
 | lazy_static 1.5.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/lazy_static/lazy_static-1.5.0.crate) |
-| libbz2-rs-sys 0.2.5 | bzip2-1.0.6 | [Source](https://static.crates.io/crates/libbz2-rs-sys/libbz2-rs-sys-0.2.5.crate) |
 | libc 0.2.186 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/libc/libc-0.2.186.crate) |
 | libsqlite3-sys 0.37.0 | MIT | [Source](https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.37.0.crate) |
 | line-clipping 0.3.7 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/line-clipping/line-clipping-0.3.7.crate) |
@@ -438,7 +421,6 @@ Unmodified registry source is available from each versioned source archive below
 | lru 0.18.2 | MIT | [Source](https://static.crates.io/crates/lru/lru-0.18.2.crate) |
 | lru-slab 0.1.2 | MIT OR Apache-2.0 OR Zlib | [Source](https://static.crates.io/crates/lru-slab/lru-slab-0.1.2.crate) |
 | lsp-types 0.97.0 | MIT | [Source](https://static.crates.io/crates/lsp-types/lsp-types-0.97.0.crate) |
-| lzma-rust2 0.21.0 | Apache-2.0 | [Source](https://static.crates.io/crates/lzma-rust2/lzma-rust2-0.21.0.crate) |
 | maplit 1.0.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/maplit/maplit-1.0.2.crate) |
 | matchers 0.2.0 | MIT | [Source](https://static.crates.io/crates/matchers/matchers-0.2.0.crate) |
 | matchit 0.8.4 | MIT AND BSD-3-Clause | [Source](https://static.crates.io/crates/matchit/matchit-0.8.4.crate) |
@@ -515,7 +497,6 @@ Unmodified registry source is available from each versioned source archive below
 | pastey 0.2.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/pastey/pastey-0.2.1.crate) |
 | pathdiff 0.2.3 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/pathdiff/pathdiff-0.2.3.crate) |
 | pbkdf2 0.12.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/pbkdf2/pbkdf2-0.12.2.crate) |
-| pbkdf2 0.13.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/pbkdf2/pbkdf2-0.13.0.crate) |
 | pem 3.0.6 | MIT | [Source](https://static.crates.io/crates/pem/pem-3.0.6.crate) |
 | pem-rfc7468 0.7.0 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/pem-rfc7468/pem-rfc7468-0.7.0.crate) |
 | percent-encoding 2.3.2 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/percent-encoding/percent-encoding-2.3.2.crate) |
@@ -535,7 +516,6 @@ Unmodified registry source is available from each versioned source archive below
 | postcard 1.1.3 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/postcard/postcard-1.1.3.crate) |
 | potential_utf 0.1.4 | Unicode-3.0 | [Source](https://static.crates.io/crates/potential_utf/potential_utf-0.1.4.crate) |
 | powerfmt 0.2.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/powerfmt/powerfmt-0.2.0.crate) |
-| ppmd-rust 1.5.2 | CC0-1.0 OR MIT-0 | [Source](https://static.crates.io/crates/ppmd-rust/ppmd-rust-1.5.2.crate) |
 | ppv-lite86 0.2.21 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/ppv-lite86/ppv-lite86-0.2.21.crate) |
 | prettyplease 0.2.37 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/prettyplease/prettyplease-0.2.37.crate) |
 | primeorder 0.13.6 | Apache-2.0 OR MIT | [Source](https://static.crates.io/crates/primeorder/primeorder-0.13.6.crate) |
@@ -675,11 +655,9 @@ Unmodified registry source is available from each versioned source archive below
 | serde_yaml 0.9.34+deprecated | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/serde_yaml/serde_yaml-0.9.34+deprecated.crate) |
 | serial2 0.2.33 | BSD-2-Clause OR Apache-2.0 | [Source](https://static.crates.io/crates/serial2/serial2-0.2.33.crate) |
 | sha1 0.10.6 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/sha1/sha1-0.10.6.crate) |
-| sha1 0.11.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/sha1/sha1-0.11.0.crate) |
 | sha1-checked 0.10.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/sha1-checked/sha1-checked-0.10.0.crate) |
 | sha1_smol 1.0.1 | BSD-3-Clause | [Source](https://static.crates.io/crates/sha1_smol/sha1_smol-1.0.1.crate) |
 | sha2 0.10.9 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/sha2/sha2-0.10.9.crate) |
-| sha2 0.11.0 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/sha2/sha2-0.11.0.crate) |
 | sha3 0.10.9 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/sha3/sha3-0.10.9.crate) |
 | sharded-slab 0.1.7 | MIT | [Source](https://static.crates.io/crates/sharded-slab/sharded-slab-0.1.7.crate) |
 | shell-words 1.1.1 | MIT OR Apache-2.0 | [Source](https://static.crates.io/crates/shell-words/shell-words-1.1.1.crate) |
@@ -1735,7 +1713,7 @@ Apache License
 
 ### Apache-2.0
 
-Used by: chardetng 0.1.17, cmov 0.5.3, ctutils 0.4.2, encoding_rs 0.8.35, env_home 0.1.0, iri-string 0.7.10, lru-slab 0.1.2, secrecy 0.10.3, sse-stream 0.2.5, static_assertions 1.1.0, tinyvec 1.10.0, utf8_iter 1.0.4, wildcard 0.3.0, zeroize 1.8.2, zeroize_derive 1.4.3
+Used by: chardetng 0.1.17, encoding_rs 0.8.35, env_home 0.1.0, iri-string 0.7.10, lru-slab 0.1.2, secrecy 0.10.3, sse-stream 0.2.5, static_assertions 1.1.0, tinyvec 1.10.0, utf8_iter 1.0.4, wildcard 0.3.0, zeroize 1.8.2, zeroize_derive 1.4.3
 
 Apache License
                            Version 2.0, January 2004
@@ -4279,212 +4257,6 @@ Apache License
       identification within third-party archives.
 
    Copyright 2024 Radzivon Bartoshyk
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-
-### Apache-2.0
-
-Used by: lzma-rust2 0.21.0
-
-Apache License
-                           Version 2.0, January 2004
-                        http://www.apache.org/licenses/
-
-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
-
-   1. Definitions.
-
-      "License" shall mean the terms and conditions for use, reproduction,
-      and distribution as defined by Sections 1 through 9 of this document.
-
-      "Licensor" shall mean the copyright owner or entity authorized by
-      the copyright owner that is granting the License.
-
-      "Legal Entity" shall mean the union of the acting entity and all
-      other entities that control, are controlled by, or are under common
-      control with that entity. For the purposes of this definition,
-      "control" means (i) the power, direct or indirect, to cause the
-      direction or management of such entity, whether by contract or
-      otherwise, or (ii) ownership of fifty percent (50%) or more of the
-      outstanding shares, or (iii) beneficial ownership of such entity.
-
-      "You" (or "Your") shall mean an individual or Legal Entity
-      exercising permissions granted by this License.
-
-      "Source" form shall mean the preferred form for making modifications,
-      including but not limited to software source code, documentation
-      source, and configuration files.
-
-      "Object" form shall mean any form resulting from mechanical
-      transformation or translation of a Source form, including but
-      not limited to compiled object code, generated documentation,
-      and conversions to other media types.
-
-      "Work" shall mean the work of authorship, whether in Source or
-      Object form, made available under the License, as indicated by a
-      copyright notice that is included in or attached to the work
-      (an example is provided in the Appendix below).
-
-      "Derivative Works" shall mean any work, whether in Source or Object
-      form, that is based on (or derived from) the Work and for which the
-      editorial revisions, annotations, elaborations, or other modifications
-      represent, as a whole, an original work of authorship. For the purposes
-      of this License, Derivative Works shall not include works that remain
-      separable from, or merely link (or bind by name) to the interfaces of,
-      the Work and Derivative Works thereof.
-
-      "Contribution" shall mean any work of authorship, including
-      the original version of the Work and any modifications or additions
-      to that Work or Derivative Works thereof, that is intentionally
-      submitted to Licensor for inclusion in the Work by the copyright owner
-      or by an individual or Legal Entity authorized to submit on behalf of
-      the copyright owner. For the purposes of this definition, "submitted"
-      means any form of electronic, verbal, or written communication sent
-      to the Licensor or its representatives, including but not limited to
-      communication on electronic mailing lists, source code control systems,
-      and issue tracking systems that are managed by, or on behalf of, the
-      Licensor for the purpose of discussing and improving the Work, but
-      excluding communication that is conspicuously marked or otherwise
-      designated in writing by the copyright owner as "Not a Contribution."
-
-      "Contributor" shall mean Licensor and any individual or Legal Entity
-      on behalf of whom a Contribution has been received by Licensor and
-      subsequently incorporated within the Work.
-
-   2. Grant of Copyright License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      copyright license to reproduce, prepare Derivative Works of,
-      publicly display, publicly perform, sublicense, and distribute the
-      Work and such Derivative Works in Source or Object form.
-
-   3. Grant of Patent License. Subject to the terms and conditions of
-      this License, each Contributor hereby grants to You a perpetual,
-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
-      (except as stated in this section) patent license to make, have made,
-      use, offer to sell, sell, import, and otherwise transfer the Work,
-      where such license applies only to those patent claims licensable
-      by such Contributor that are necessarily infringed by their
-      Contribution(s) alone or by combination of their Contribution(s)
-      with the Work to which such Contribution(s) was submitted. If You
-      institute patent litigation against any entity (including a
-      cross-claim or counterclaim in a lawsuit) alleging that the Work
-      or a Contribution incorporated within the Work constitutes direct
-      or contributory patent infringement, then any patent licenses
-      granted to You under this License for that Work shall terminate
-      as of the date such litigation is filed.
-
-   4. Redistribution. You may reproduce and distribute copies of the
-      Work or Derivative Works thereof in any medium, with or without
-      modifications, and in Source or Object form, provided that You
-      meet the following conditions:
-
-      (a) You must give any other recipients of the Work or
-          Derivative Works a copy of this License; and
-
-      (b) You must cause any modified files to carry prominent notices
-          stating that You changed the files; and
-
-      (c) You must retain, in the Source form of any Derivative Works
-          that You distribute, all copyright, patent, trademark, and
-          attribution notices from the Source form of the Work,
-          excluding those notices that do not pertain to any part of
-          the Derivative Works; and
-
-      (d) If the Work includes a "NOTICE" text file as part of its
-          distribution, then any Derivative Works that You distribute must
-          include a readable copy of the attribution notices contained
-          within such NOTICE file, excluding those notices that do not
-          pertain to any part of the Derivative Works, in at least one
-          of the following places: within a NOTICE text file distributed
-          as part of the Derivative Works; within the Source form or
-          documentation, if provided along with the Derivative Works; or,
-          within a display generated by the Derivative Works, if and
-          wherever such third-party notices normally appear. The contents
-          of the NOTICE file are for informational purposes only and
-          do not modify the License. You may add Your own attribution
-          notices within Derivative Works that You distribute, alongside
-          or as an addendum to the NOTICE text from the Work, provided
-          that such additional attribution notices cannot be construed
-          as modifying the License.
-
-      You may add Your own copyright statement to Your modifications and
-      may provide additional or different license terms and conditions
-      for use, reproduction, or distribution of Your modifications, or
-      for any such Derivative Works as a whole, provided Your use,
-      reproduction, and distribution of the Work otherwise complies with
-      the conditions stated in this License.
-
-   5. Submission of Contributions. Unless You explicitly state otherwise,
-      any Contribution intentionally submitted for inclusion in the Work
-      by You to the Licensor shall be under the terms and conditions of
-      this License, without any additional terms or conditions.
-      Notwithstanding the above, nothing herein shall supersede or modify
-      the terms of any separate license agreement you may have executed
-      with Licensor regarding such Contributions.
-
-   6. Trademarks. This License does not grant permission to use the trade
-      names, trademarks, service marks, or product names of the Licensor,
-      except as required for reasonable and customary use in describing the
-      origin of the Work and reproducing the content of the NOTICE file.
-
-   7. Disclaimer of Warranty. Unless required by applicable law or
-      agreed to in writing, Licensor provides the Work (and each
-      Contributor provides its Contributions) on an "AS IS" BASIS,
-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-      implied, including, without limitation, any warranties or conditions
-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
-      PARTICULAR PURPOSE. You are solely responsible for determining the
-      appropriateness of using or redistributing the Work and assume any
-      risks associated with Your exercise of permissions under this License.
-
-   8. Limitation of Liability. In no event and under no legal theory,
-      whether in tort (including negligence), contract, or otherwise,
-      unless required by applicable law (such as deliberate and grossly
-      negligent acts) or agreed to in writing, shall any Contributor be
-      liable to You for damages, including any direct, indirect, special,
-      incidental, or consequential damages of any character arising as a
-      result of this License or out of the use or inability to use the
-      Work (including but not limited to damages for loss of goodwill,
-      work stoppage, computer failure or malfunction, or any and all
-      other commercial damages or losses), even if such Contributor
-      has been advised of the possibility of such damages.
-
-   9. Accepting Warranty or Additional Liability. While redistributing
-      the Work or Derivative Works thereof, You may choose to offer,
-      and charge a fee for, acceptance of support, warranty, indemnity,
-      or other liability obligations and/or rights consistent with this
-      License. However, in accepting such obligations, You may act only
-      on Your own behalf and on Your sole responsibility, not on behalf
-      of any other Contributor, and only if You agree to indemnify,
-      defend, and hold each Contributor harmless for any liability
-      incurred by, or claims asserted against, such Contributor by reason
-      of your accepting any such warranty or additional liability.
-
-   END OF TERMS AND CONDITIONS
-
-   APPENDIX: How to apply the Apache License to your work.
-
-      To apply the Apache License to your work, attach the following
-      boilerplate notice, with the fields enclosed by brackets "[]"
-      replaced with your own identifying information. (Don't include
-      the brackets!)  The text should be enclosed in the appropriate
-      comment syntax for the file format. We also recommend that a
-      file or class name and description of purpose be included on the
-      same "printed page" as the copyright notice for easier
-      identification within third-party archives.
-
-   Copyright [yyyy] [name of copyright owner]
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -11495,7 +11267,7 @@ limitations under the License.
 
 ### Apache-2.0
 
-Used by: addr2line 0.25.1, ahash 0.8.12, arc-swap 1.9.0, arrayvec 0.7.6, asn1-rs 0.7.1, asn1-rs-derive 0.6.0, async-channel 2.5.0, atomic 0.5.3, atomic-waker 1.1.2, autocfg 1.5.0, backtrace 0.3.76, base64 0.22.1, base64 0.23.1, bitflags 1.3.2, bitflags 2.13.1, bstr 1.12.1, bumpalo 3.19.1, bytes-utils 0.1.4, bzip2 0.6.1, cc 1.2.55, cfg-if 1.0.4, chunked_transfer 1.5.0, cmake 0.1.57, color-eyre 0.6.5, color-spantrace 0.3.0, concurrent-queue 2.5.0, core-foundation 0.10.1, core-foundation 0.9.4, core-foundation-sys 0.8.7, critical-section 1.2.0, crossbeam-channel 0.5.15, crossbeam-deque 0.8.6, crossbeam-epoch 0.9.20, crossbeam-queue 0.3.12, crossbeam-utils 0.8.21, debugid 0.8.0, der-parser 10.0.0, derivative 2.2.0, diffy 0.4.2, displaydoc 0.2.5, either 1.15.0, equivalent 1.0.2, errno 0.3.14, event-listener 5.4.1, event-listener-strategy 0.5.4, eyre 0.6.12, fastrand 2.3.0, filetime 0.2.27, find-msvc-tools 0.1.9, fixedbitset 0.5.7, flate2 1.1.8, fnv 1.0.7, form_urlencoded 1.2.2, gethostname 1.1.0, gimli 0.32.3, glob 0.3.3, group 0.13.0, hash32 0.2.1, hash32 0.3.1, hashbrown 0.14.5, hashbrown 0.15.5, hashbrown 0.16.1, hashbrown 0.17.1, heapless 0.7.17, heapless 0.8.0, heck 0.5.0, httparse 1.10.1, hyper-rustls 0.27.7, hyper-timeout 0.5.2, hyper-tls 0.6.0, idna 1.1.0, idna_adapter 1.2.1, indexmap 2.14.0, itertools 0.14.0, jobserver 0.1.34, lazy_static 1.5.0, linkify 0.11.0, lock_api 0.4.14, log 0.4.34, maplit 1.0.2, mime 0.3.17, multimap 0.10.1, num-bigint 0.4.6, num-complex 0.4.6, num-integer 0.1.46, num-traits 0.2.19, num_cpus 1.17.0, oauth2 5.0.0, object 0.37.3, oid-registry 0.8.1, once_cell 1.21.4, parking 2.2.1, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, petgraph 0.8.3, pkg-config 0.3.32, png 0.18.0, postcard 1.1.3, prost 0.14.3, prost-build 0.14.3, prost-derive 0.14.3, prost-types 0.14.3, psl-types 2.0.11, publicsuffix 2.3.0, rayon 1.11.0, rayon-core 1.13.0, regex 1.12.3, regex-automata 0.4.13, regex-lite 0.1.8, regex-syntax 0.8.8, ring 0.17.14, rustc-demangle 0.1.27, rustc_version 0.4.1, rusticata-macros 4.1.0, rustix 1.1.4, rustls 0.23.46, rustls-native-certs 0.8.3, scopeguard 1.2.0, security-framework 2.11.1, security-framework 3.5.1, security-framework-sys 2.15.0, serde_with 3.17.0, serde_with_macros 3.17.0, signal-hook 0.3.18, signal-hook-mio 0.2.5, signal-hook-registry 1.4.8, similar 2.7.0, smallvec 1.15.1, smol_str 0.3.5, socket2 0.6.3, stable_deref_trait 1.2.1, syn 1.0.109, system-configuration 0.7.0, system-configuration-sys 0.6.0, tar 0.4.45, tempfile 3.27.0, thiserror-impl-no-std 2.0.2, thiserror-no-std 2.0.2, thread_local 1.1.9, tiny_http 0.12.0, toml 0.5.11, tungstenite 0.27.0, unic-langid 0.9.6, unic-langid-impl 0.9.6, unicase 2.9.0, unicode-normalization 0.1.25, unicode-segmentation 1.12.0, unicode-truncate 2.0.1, unicode-width 0.1.14, unicode-width 0.2.1, unicode-xid 0.2.6, url 2.5.8, uuid 1.20.0, version_check 0.9.5, wiremock 0.6.5, x509-parser 0.18.1, xmlparser 0.13.6, yasna 0.6.0
+Used by: addr2line 0.25.1, ahash 0.8.12, arc-swap 1.9.0, arrayvec 0.7.6, asn1-rs 0.7.1, asn1-rs-derive 0.6.0, async-channel 2.5.0, atomic 0.5.3, atomic-waker 1.1.2, autocfg 1.5.0, backtrace 0.3.76, base64 0.22.1, base64 0.23.1, bitflags 1.3.2, bitflags 2.13.1, bstr 1.12.1, bumpalo 3.19.1, bytes-utils 0.1.4, cc 1.2.55, cfg-if 1.0.4, chunked_transfer 1.5.0, cmake 0.1.57, color-eyre 0.6.5, color-spantrace 0.3.0, concurrent-queue 2.5.0, core-foundation 0.10.1, core-foundation 0.9.4, core-foundation-sys 0.8.7, critical-section 1.2.0, crossbeam-channel 0.5.15, crossbeam-deque 0.8.6, crossbeam-epoch 0.9.20, crossbeam-queue 0.3.12, crossbeam-utils 0.8.21, debugid 0.8.0, der-parser 10.0.0, derivative 2.2.0, diffy 0.4.2, displaydoc 0.2.5, either 1.15.0, equivalent 1.0.2, errno 0.3.14, event-listener 5.4.1, event-listener-strategy 0.5.4, eyre 0.6.12, fastrand 2.3.0, filetime 0.2.27, find-msvc-tools 0.1.9, fixedbitset 0.5.7, flate2 1.1.8, fnv 1.0.7, form_urlencoded 1.2.2, gethostname 1.1.0, gimli 0.32.3, glob 0.3.3, group 0.13.0, hash32 0.2.1, hash32 0.3.1, hashbrown 0.14.5, hashbrown 0.15.5, hashbrown 0.16.1, hashbrown 0.17.1, heapless 0.7.17, heapless 0.8.0, heck 0.5.0, httparse 1.10.1, hyper-rustls 0.27.7, hyper-timeout 0.5.2, hyper-tls 0.6.0, idna 1.1.0, idna_adapter 1.2.1, indexmap 2.14.0, itertools 0.14.0, jobserver 0.1.34, lazy_static 1.5.0, linkify 0.11.0, lock_api 0.4.14, log 0.4.34, maplit 1.0.2, mime 0.3.17, multimap 0.10.1, num-bigint 0.4.6, num-complex 0.4.6, num-integer 0.1.46, num-traits 0.2.19, num_cpus 1.17.0, oauth2 5.0.0, object 0.37.3, oid-registry 0.8.1, once_cell 1.21.4, parking 2.2.1, parking_lot 0.12.5, parking_lot_core 0.9.12, percent-encoding 2.3.2, petgraph 0.8.3, pkg-config 0.3.32, png 0.18.0, postcard 1.1.3, prost 0.14.3, prost-build 0.14.3, prost-derive 0.14.3, prost-types 0.14.3, psl-types 2.0.11, publicsuffix 2.3.0, rayon 1.11.0, rayon-core 1.13.0, regex 1.12.3, regex-automata 0.4.13, regex-lite 0.1.8, regex-syntax 0.8.8, ring 0.17.14, rustc-demangle 0.1.27, rustc_version 0.4.1, rusticata-macros 4.1.0, rustix 1.1.4, rustls 0.23.46, rustls-native-certs 0.8.3, scopeguard 1.2.0, security-framework 2.11.1, security-framework 3.5.1, security-framework-sys 2.15.0, serde_with 3.17.0, serde_with_macros 3.17.0, signal-hook 0.3.18, signal-hook-mio 0.2.5, signal-hook-registry 1.4.8, similar 2.7.0, smallvec 1.15.1, smol_str 0.3.5, socket2 0.6.3, stable_deref_trait 1.2.1, syn 1.0.109, system-configuration 0.7.0, system-configuration-sys 0.6.0, tar 0.4.45, tempfile 3.27.0, thiserror-impl-no-std 2.0.2, thiserror-no-std 2.0.2, thread_local 1.1.9, tiny_http 0.12.0, toml 0.5.11, tungstenite 0.27.0, unic-langid 0.9.6, unic-langid-impl 0.9.6, unicase 2.9.0, unicode-normalization 0.1.25, unicode-segmentation 1.12.0, unicode-truncate 2.0.1, unicode-width 0.1.14, unicode-width 0.2.1, unicode-xid 0.2.6, url 2.5.8, uuid 1.20.0, version_check 0.9.5, wiremock 0.6.5, x509-parser 0.18.1, xmlparser 0.13.6, yasna 0.6.0
 
 Apache License
                         Version 2.0, January 2004
@@ -12525,7 +12297,7 @@ limitations under the License.
 
 ### Apache-2.0
 
-Used by: aes 0.8.4, aes 0.9.3, aes-gcm 0.10.3, base16ct 0.2.0, base64ct 1.8.3, blake2 0.10.6, block-buffer 0.10.4, block-buffer 0.12.0, chacha20 0.10.2, chacha20 0.9.1, chacha20poly1305 0.10.1, cipher 0.4.4, cipher 0.5.2, const-oid 0.10.2, const-oid 0.9.6, cpubits 0.1.1, cpufeatures 0.2.17, cpufeatures 0.3.0, crypto-bigint 0.5.5, crypto-common 0.1.7, crypto-common 0.2.2, crypto_box 0.9.1, crypto_secretbox 0.1.1, ctr 0.9.2, der 0.7.10, digest 0.10.7, digest 0.11.3, elliptic-curve 0.13.8, ghash 0.5.1, hmac 0.12.1, hmac 0.13.0, hybrid-array 0.2.3, hybrid-array 0.4.12, inout 0.1.4, inout 0.2.5, keccak 0.1.6, ml-kem 0.2.3, opaque-debug 0.3.1, p256 0.13.2, pbkdf2 0.12.2, pbkdf2 0.13.0, pem-rfc7468 0.7.0, pkcs8 0.10.2, poly1305 0.8.0, polyval 0.6.2, primeorder 0.13.6, salsa20 0.10.2, scrypt 0.11.0, sec1 0.7.3, sha1 0.10.6, sha1 0.11.0, sha1-checked 0.10.0, sha2 0.10.9, sha2 0.11.0, sha3 0.10.9, signature 2.2.0, spki 0.7.3, universal-hash 0.5.1
+Used by: aes 0.8.4, aes-gcm 0.10.3, base16ct 0.2.0, base64ct 1.8.3, blake2 0.10.6, block-buffer 0.10.4, chacha20 0.10.2, chacha20 0.9.1, chacha20poly1305 0.10.1, cipher 0.4.4, const-oid 0.9.6, cpufeatures 0.2.17, crypto-bigint 0.5.5, crypto-common 0.1.7, crypto_box 0.9.1, crypto_secretbox 0.1.1, ctr 0.9.2, der 0.7.10, digest 0.10.7, elliptic-curve 0.13.8, ghash 0.5.1, hmac 0.12.1, hybrid-array 0.2.3, inout 0.1.4, keccak 0.1.6, ml-kem 0.2.3, opaque-debug 0.3.1, p256 0.13.2, pbkdf2 0.12.2, pem-rfc7468 0.7.0, pkcs8 0.10.2, poly1305 0.8.0, polyval 0.6.2, primeorder 0.13.6, salsa20 0.10.2, scrypt 0.11.0, sec1 0.7.3, sha1 0.10.6, sha1-checked 0.10.0, sha2 0.10.9, sha3 0.10.9, signature 2.2.0, spki 0.7.3, universal-hash 0.5.1
 
 Apache License
                         Version 2.0, January 2004
@@ -16303,7 +16075,7 @@ limitations under the License.
 
 ### Apache-2.0
 
-Used by: age 0.12.1, age-core 0.12.0, allocative 0.3.6, allocative_derive 0.3.6, allocator-api2 0.2.21, anyhow 1.0.103, arboard 3.6.1, asn1-rs-impl 0.2.0, async-trait 0.1.89, asynk-strim 0.1.5, aws-config 1.8.12, aws-credential-types 1.2.11, aws-lc-sys 0.45.0, aws-runtime 1.5.17, aws-sigv4 1.3.7, aws-smithy-async 1.2.14, aws-smithy-http 0.62.6, aws-smithy-http-client 1.1.12, aws-smithy-json 0.61.9, aws-smithy-observability 0.1.5, aws-smithy-query 0.60.9, aws-smithy-runtime 1.9.5, aws-smithy-runtime-api 1.12.0, aws-smithy-runtime-api-macros 1.0.0, aws-smithy-types 1.4.7, aws-smithy-xml 0.60.13, aws-types 1.3.11, basic-toml 0.1.10, blake3 1.8.2, const-hex 1.17.0, constant_time_eq 0.3.1, constant_time_eq 0.4.2, dirs 6.0.0, dirs-next 2.0.0, dirs-sys 0.5.0, dirs-sys-next 0.1.2, display_container 0.9.0, document-features 0.2.12, dunce 1.0.5, dyn-clone 1.0.20, erased-serde 0.3.31, erased-serde 0.4.10, eventsource-stream 0.2.3, fdeflate 0.3.7, find-crate 0.6.3, fluent-langneg 0.13.1, fxhash 0.2.1, gix 0.81.0, gix-actor 0.40.0, gix-chunk 0.7.0, gix-command 0.8.0, gix-commitgraph 0.35.0, gix-config 0.54.0, gix-config-value 0.17.1, gix-date 0.15.1, gix-diff 0.61.0, gix-discover 0.49.0, gix-error 0.2.1, gix-features 0.46.2, gix-fs 0.19.2, gix-glob 0.24.0, gix-hash 0.23.0, gix-hashtable 0.13.0, gix-lock 21.0.2, gix-object 0.58.0, gix-odb 0.78.0, gix-pack 0.68.0, gix-packetline 0.21.2, gix-path 0.11.2, gix-protocol 0.59.0, gix-quote 0.7.0, gix-ref 0.61.0, gix-refspec 0.39.0, gix-revision 0.43.0, gix-revwalk 0.29.0, gix-sec 0.13.2, gix-shallow 0.10.0, gix-tempfile 21.0.2, gix-trace 0.1.18, gix-transport 0.55.1, gix-traverse 0.55.0, gix-url 0.35.2, gix-utils 0.3.1, gix-validate 0.11.0, half 2.7.1, hpke 0.12.0, ident_case 1.0.1, image 0.25.9, image-webp 0.2.4, indenter 0.3.4, indoc 2.0.7, intl_pluralrules 7.0.2, inventory 0.3.24, io_tee 0.1.1, itoa 1.0.17, kem 0.3.0-pre.0, libc 0.2.186, litrs 1.0.0, lock_free_hashtable 0.1.4, md5 0.8.0, miniz_oxide 0.8.9, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-local-authentication 0.3.2, objc2-security 0.3.2, opentelemetry 0.31.0, opentelemetry-appender-tracing 0.31.1, opentelemetry-http 0.31.0, opentelemetry-otlp 0.31.0, opentelemetry-proto 0.31.0, opentelemetry-semantic-conventions 0.31.0, opentelemetry_sdk 0.31.0, pagable 0.4.1, pagable_derive 0.4.1, paste 1.0.15, pastey 0.2.1, pin-project 1.1.10, pin-project-internal 1.1.10, pin-project-lite 0.2.16, portable-atomic 1.13.1, prettyplease 0.2.37, proc-macro2 1.0.106, process-wrap 10.0.0, psl 2.1.184, quote 1.0.45, rama-core 0.3.0-alpha.4, rama-dns 0.3.0-alpha.4, rama-error 0.3.0-alpha.4, rama-http 0.3.0-alpha.4, rama-http-backend 0.3.0-alpha.4, rama-http-core 0.3.0-alpha.4, rama-http-headers 0.3.0-alpha.4, rama-http-types 0.3.0-alpha.4, rama-macros 0.3.0-alpha.4, rama-net 0.3.0-alpha.4, rama-socks5 0.3.0-alpha.4, rama-tcp 0.3.0-alpha.4, rama-tls-rustls 0.3.0-alpha.4, rama-udp 0.3.0-alpha.4, rama-unix 0.3.0-alpha.4, rama-utils 0.3.0-alpha.4, rand 0.10.1, rand 0.8.6, rand 0.9.3, rand_chacha 0.9.0, rcgen 0.14.9, ref-cast 1.0.25, ref-cast-impl 1.0.25, rmcp 3.5.1, rmcp-macros 3.5.1, rustc-hash 2.1.1, rustversion 1.0.22, ryu 1.0.22, semver 1.0.27, sequence_trie 0.3.6, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_derive_internals 0.29.1, serde_ignored 0.1.14, serde_json 1.0.149, serde_path_to_error 0.1.20, serde_repr 0.1.20, serde_urlencoded 0.7.1, serde_yaml 0.9.34+deprecated, serial2 0.2.33, shlex 1.3.0, simdutf8 0.1.5, sorted_vector_map 0.2.1, sqlx-core 0.9.0, sqlx-macros 0.9.0, sqlx-macros-core 0.9.0, sqlx-sqlite 0.9.0, starlark 0.14.2, starlark_derive 0.14.2, starlark_map 0.14.2, starlark_syntax 0.14.2, static_interner 0.1.2, stop-words 0.9.0, strong_hash 0.1.0, strong_hash_derive 0.1.0, syn 2.0.117, syn 3.0.3, sync_wrapper 1.0.2, tagptr 0.2.0, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, time 0.3.47, time-core 0.1.8, time-macros 0.2.27, tokio-graceful 0.2.2, type-map 0.5.1, typed-path 0.12.4, typeid 1.0.3, unicode-ident 1.0.22, utf-8 0.7.6, utf8parse 0.2.2, whoami 1.6.1, zstd-safe 7.2.4, zune-core 0.4.12, zune-jpeg 0.4.21
+Used by: age 0.12.1, age-core 0.12.0, allocative 0.3.6, allocative_derive 0.3.6, allocator-api2 0.2.21, anyhow 1.0.103, arboard 3.6.1, asn1-rs-impl 0.2.0, async-trait 0.1.89, asynk-strim 0.1.5, aws-config 1.8.12, aws-credential-types 1.2.11, aws-lc-sys 0.45.0, aws-runtime 1.5.17, aws-sigv4 1.3.7, aws-smithy-async 1.2.14, aws-smithy-http 0.62.6, aws-smithy-http-client 1.1.12, aws-smithy-json 0.61.9, aws-smithy-observability 0.1.5, aws-smithy-query 0.60.9, aws-smithy-runtime 1.9.5, aws-smithy-runtime-api 1.12.0, aws-smithy-runtime-api-macros 1.0.0, aws-smithy-types 1.4.7, aws-smithy-xml 0.60.13, aws-types 1.3.11, basic-toml 0.1.10, blake3 1.8.2, const-hex 1.17.0, constant_time_eq 0.3.1, dirs 6.0.0, dirs-next 2.0.0, dirs-sys 0.5.0, dirs-sys-next 0.1.2, display_container 0.9.0, document-features 0.2.12, dunce 1.0.5, dyn-clone 1.0.20, erased-serde 0.3.31, erased-serde 0.4.10, eventsource-stream 0.2.3, fdeflate 0.3.7, find-crate 0.6.3, fluent-langneg 0.13.1, fxhash 0.2.1, gix 0.81.0, gix-actor 0.40.0, gix-chunk 0.7.0, gix-command 0.8.0, gix-commitgraph 0.35.0, gix-config 0.54.0, gix-config-value 0.17.1, gix-date 0.15.1, gix-diff 0.61.0, gix-discover 0.49.0, gix-error 0.2.1, gix-features 0.46.2, gix-fs 0.19.2, gix-glob 0.24.0, gix-hash 0.23.0, gix-hashtable 0.13.0, gix-lock 21.0.2, gix-object 0.58.0, gix-odb 0.78.0, gix-pack 0.68.0, gix-packetline 0.21.2, gix-path 0.11.2, gix-protocol 0.59.0, gix-quote 0.7.0, gix-ref 0.61.0, gix-refspec 0.39.0, gix-revision 0.43.0, gix-revwalk 0.29.0, gix-sec 0.13.2, gix-shallow 0.10.0, gix-tempfile 21.0.2, gix-trace 0.1.18, gix-transport 0.55.1, gix-traverse 0.55.0, gix-url 0.35.2, gix-utils 0.3.1, gix-validate 0.11.0, half 2.7.1, hpke 0.12.0, ident_case 1.0.1, image 0.25.9, image-webp 0.2.4, indenter 0.3.4, indoc 2.0.7, intl_pluralrules 7.0.2, inventory 0.3.24, io_tee 0.1.1, itoa 1.0.17, kem 0.3.0-pre.0, libc 0.2.186, litrs 1.0.0, lock_free_hashtable 0.1.4, md5 0.8.0, miniz_oxide 0.8.9, objc2-app-kit 0.3.2, objc2-core-foundation 0.3.2, objc2-core-graphics 0.3.2, objc2-local-authentication 0.3.2, objc2-security 0.3.2, opentelemetry 0.31.0, opentelemetry-appender-tracing 0.31.1, opentelemetry-http 0.31.0, opentelemetry-otlp 0.31.0, opentelemetry-proto 0.31.0, opentelemetry-semantic-conventions 0.31.0, opentelemetry_sdk 0.31.0, pagable 0.4.1, pagable_derive 0.4.1, paste 1.0.15, pastey 0.2.1, pin-project 1.1.10, pin-project-internal 1.1.10, pin-project-lite 0.2.16, portable-atomic 1.13.1, prettyplease 0.2.37, proc-macro2 1.0.106, process-wrap 10.0.0, psl 2.1.184, quote 1.0.45, rama-core 0.3.0-alpha.4, rama-dns 0.3.0-alpha.4, rama-error 0.3.0-alpha.4, rama-http 0.3.0-alpha.4, rama-http-backend 0.3.0-alpha.4, rama-http-core 0.3.0-alpha.4, rama-http-headers 0.3.0-alpha.4, rama-http-types 0.3.0-alpha.4, rama-macros 0.3.0-alpha.4, rama-net 0.3.0-alpha.4, rama-socks5 0.3.0-alpha.4, rama-tcp 0.3.0-alpha.4, rama-tls-rustls 0.3.0-alpha.4, rama-udp 0.3.0-alpha.4, rama-unix 0.3.0-alpha.4, rama-utils 0.3.0-alpha.4, rand 0.10.1, rand 0.8.6, rand 0.9.3, rand_chacha 0.9.0, rcgen 0.14.9, ref-cast 1.0.25, ref-cast-impl 1.0.25, rmcp 3.5.1, rmcp-macros 3.5.1, rustc-hash 2.1.1, rustversion 1.0.22, ryu 1.0.22, semver 1.0.27, sequence_trie 0.3.6, serde 1.0.228, serde_core 1.0.228, serde_derive 1.0.228, serde_derive_internals 0.29.1, serde_ignored 0.1.14, serde_json 1.0.149, serde_path_to_error 0.1.20, serde_repr 0.1.20, serde_urlencoded 0.7.1, serde_yaml 0.9.34+deprecated, serial2 0.2.33, shlex 1.3.0, simdutf8 0.1.5, sorted_vector_map 0.2.1, sqlx-core 0.9.0, sqlx-macros 0.9.0, sqlx-macros-core 0.9.0, sqlx-sqlite 0.9.0, starlark 0.14.2, starlark_derive 0.14.2, starlark_map 0.14.2, starlark_syntax 0.14.2, static_interner 0.1.2, stop-words 0.9.0, strong_hash 0.1.0, strong_hash_derive 0.1.0, syn 2.0.117, syn 3.0.3, sync_wrapper 1.0.2, tagptr 0.2.0, thiserror 1.0.69, thiserror 2.0.18, thiserror-impl 1.0.69, thiserror-impl 2.0.18, time 0.3.47, time-core 0.1.8, time-macros 0.2.27, tokio-graceful 0.2.2, type-map 0.5.1, typed-path 0.12.4, typeid 1.0.3, unicode-ident 1.0.22, utf-8 0.7.6, utf8parse 0.2.2, whoami 1.6.1, zstd-safe 7.2.4, zune-core 0.4.12, zune-jpeg 0.4.21
 
 Apache License
 Version 2.0, January 2004
@@ -17044,130 +16816,6 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
 ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-### CC0-1.0
-
-Used by: ppmd-rust 1.5.2
-
-CC0 1.0 Universal
-
-    CREATIVE COMMONS CORPORATION IS NOT A LAW FIRM AND DOES NOT PROVIDE
-    LEGAL SERVICES. DISTRIBUTION OF THIS DOCUMENT DOES NOT CREATE AN
-    ATTORNEY-CLIENT RELATIONSHIP. CREATIVE COMMONS PROVIDES THIS
-    INFORMATION ON AN "AS-IS" BASIS. CREATIVE COMMONS MAKES NO WARRANTIES
-    REGARDING THE USE OF THIS DOCUMENT OR THE INFORMATION OR WORKS
-    PROVIDED HEREUNDER, AND DISCLAIMS LIABILITY FOR DAMAGES RESULTING FROM
-    THE USE OF THIS DOCUMENT OR THE INFORMATION OR WORKS PROVIDED
-    HEREUNDER.
-
-Statement of Purpose
-
-The laws of most jurisdictions throughout the world automatically confer
-exclusive Copyright and Related Rights (defined below) upon the creator
-and subsequent owner(s) (each and all, an "owner") of an original work of
-authorship and/or a database (each, a "Work").
-
-Certain owners wish to permanently relinquish those rights to a Work for
-the purpose of contributing to a commons of creative, cultural and
-scientific works ("Commons") that the public can reliably and without fear
-of later claims of infringement build upon, modify, incorporate in other
-works, reuse and redistribute as freely as possible in any form whatsoever
-and for any purposes, including without limitation commercial purposes.
-These owners may contribute to the Commons to promote the ideal of a free
-culture and the further production of creative, cultural and scientific
-works, or to gain reputation or greater distribution for their Work in
-part through the use and efforts of others.
-
-For these and/or other purposes and motivations, and without any
-expectation of additional consideration or compensation, the person
-associating CC0 with a Work (the "Affirmer"), to the extent that he or she
-is an owner of Copyright and Related Rights in the Work, voluntarily
-elects to apply CC0 to the Work and publicly distribute the Work under its
-terms, with knowledge of his or her Copyright and Related Rights in the
-Work and the meaning and intended legal effect of CC0 on those rights.
-
-1. Copyright and Related Rights. A Work made available under CC0 may be
-   protected by copyright and related or neighboring rights ("Copyright and
-   Related Rights"). Copyright and Related Rights include, but are not
-   limited to, the following:
-
-i. the right to reproduce, adapt, distribute, perform, display,
-communicate, and translate a Work;
-ii. moral rights retained by the original author(s) and/or performer(s);
-iii. publicity and privacy rights pertaining to a person's image or
-likeness depicted in a Work;
-iv. rights protecting against unfair competition in regards to a Work,
-subject to the limitations in paragraph 4(a), below;
-v. rights protecting the extraction, dissemination, use and reuse of data
-in a Work;
-vi. database rights (such as those arising under Directive 96/9/EC of the
-European Parliament and of the Council of 11 March 1996 on the legal
-protection of databases, and under any national implementation
-thereof, including any amended or successor version of such
-directive); and
-vii. other similar, equivalent or corresponding rights throughout the
-world based on applicable law or treaty, and any national
-implementations thereof.
-
-2. Waiver. To the greatest extent permitted by, but not in contravention
-   of, applicable law, Affirmer hereby overtly, fully, permanently,
-   irrevocably and unconditionally waives, abandons, and surrenders all of
-   Affirmer's Copyright and Related Rights and associated claims and causes
-   of action, whether now known or unknown (including existing as well as
-   future claims and causes of action), in the Work (i) in all territories
-   worldwide, (ii) for the maximum duration provided by applicable law or
-   treaty (including future time extensions), (iii) in any current or future
-   medium and for any number of copies, and (iv) for any purpose whatsoever,
-   including without limitation commercial, advertising or promotional
-   purposes (the "Waiver"). Affirmer makes the Waiver for the benefit of each
-   member of the public at large and to the detriment of Affirmer's heirs and
-   successors, fully intending that such Waiver shall not be subject to
-   revocation, rescission, cancellation, termination, or any other legal or
-   equitable action to disrupt the quiet enjoyment of the Work by the public
-   as contemplated by Affirmer's express Statement of Purpose.
-
-3. Public License Fallback. Should any part of the Waiver for any reason
-   be judged legally invalid or ineffective under applicable law, then the
-   Waiver shall be preserved to the maximum extent permitted taking into
-   account Affirmer's express Statement of Purpose. In addition, to the
-   extent the Waiver is so judged Affirmer hereby grants to each affected
-   person a royalty-free, non transferable, non sublicensable, non exclusive,
-   irrevocable and unconditional license to exercise Affirmer's Copyright and
-   Related Rights in the Work (i) in all territories worldwide, (ii) for the
-   maximum duration provided by applicable law or treaty (including future
-   time extensions), (iii) in any current or future medium and for any number
-   of copies, and (iv) for any purpose whatsoever, including without
-   limitation commercial, advertising or promotional purposes (the
-   "License"). The License shall be deemed effective as of the date CC0 was
-   applied by Affirmer to the Work. Should any part of the License for any
-   reason be judged legally invalid or ineffective under applicable law, such
-   partial invalidity or ineffectiveness shall not invalidate the remainder
-   of the License, and in such case Affirmer hereby affirms that he or she
-   will not (i) exercise any of his or her remaining Copyright and Related
-   Rights in the Work or (ii) assert any associated claims and causes of
-   action with respect to the Work, in either case contrary to Affirmer's
-   express Statement of Purpose.
-
-4. Limitations and Disclaimers.
-
-a. No trademark or patent rights held by Affirmer are waived, abandoned,
-surrendered, licensed or otherwise affected by this document.
-b. Affirmer offers the Work as-is and makes no representations or
-warranties of any kind concerning the Work, express, implied,
-statutory or otherwise, including without limitation warranties of
-title, merchantability, fitness for a particular purpose, non
-infringement, or the absence of latent or other defects, accuracy, or
-the present or absence of errors, whether or not discoverable, all to
-the greatest extent permissible under applicable law.
-c. Affirmer disclaims responsibility for clearing rights of other persons
-that may apply to the Work or any use thereof, including without
-limitation any person's Copyright and Related Rights in the Work.
-Further, Affirmer disclaims responsibility for obtaining any necessary
-consents, permissions or other rights required for any use of the
-Work.
-d. Affirmer understands and acknowledges that Creative Commons is not a
-party to this document and has no duty or obligation with respect to
-this CC0 or use of the Work.
 
 ### CC0-1.0
 
@@ -20210,35 +19858,6 @@ THE SOFTWARE.
 
 ### MIT
 
-Used by: deflate64 0.1.10
-
-The MIT License (MIT)
-
-Copyright (c) .NET Foundation and Contributors
-Copyright (c) anatawa12 2023
-
-All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-### MIT
-
 Used by: spin 0.9.8
 
 The MIT License (MIT)
@@ -22367,55 +21986,3 @@ the following restrictions:
     misrepresented as being the original software.
 
 3. This notice may not be removed or altered from any source distribution.
-
-### bzip2-1.0.6
-
-Used by: libbz2-rs-sys 0.2.5
-
---------------------------------------------------------------------------
-
-The original program, "bzip2", the associated library "libbzip2", and all
-documentation, are
-
-Copyright (C) 1996-2021 Julian R Seward.
-Copyright (C) 2019-2020 Federico Mena Quintero
-Copyright (C) 2021 Micah Snyder
-
-This Rust translation, "libbzip2-rs" is a derived work based on "bzip2" and
-"libbzip2", and is Copyright (C) 2024-2025 Trifecta Tech Foundation and contributors
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions
-are met:
-
-1. Redistributions of source code must retain the above copyright
-   notice, this list of conditions and the following disclaimer.
-
-2. The origin of this software must not be misrepresented; you must
-   not claim that you wrote the original software.  If you use this
-   software in a product, an acknowledgment in the product
-   documentation would be appreciated but is not required.
-
-3. Altered source versions must be plainly marked as such, and must
-   not be misrepresented as being the original software.
-
-4. The name of the author may not be used to endorse or promote
-   products derived from this software without specific prior written
-   permission.
-
-THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS
-OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE
-GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-Julian Seward, jseward@acm.org
-bzip2/libbzip2 version 1.1.0 of 6 September 2010
-
---------------------------------------------------------------------------
