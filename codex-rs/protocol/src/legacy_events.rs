@@ -584,6 +584,7 @@ impl TurnItem {
                 vec![EventMsg::ViewImageToolCall(ViewImageToolCallEvent {
                     call_id: item.id.clone(),
                     path: item.path.clone(),
+                    saved_path: item.saved_path.clone(),
                 })]
             }
             TurnItem::Extension(_) => Vec::new(),

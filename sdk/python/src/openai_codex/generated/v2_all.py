@@ -5554,6 +5554,7 @@ class ImageViewThreadItem(BaseModel):
     )
     id: str
     path: LegacyAppPathString
+    saved_path: Annotated[AbsolutePathBuf | None, Field(alias="savedPath")] = None
     type: Annotated[Literal["imageView"], Field(title="ImageViewThreadItemType")]
 
 

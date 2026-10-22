@@ -3,13 +3,21 @@
 Copyright 2026 Emil Eberhard. These modifications remain under Apache-2.0.
 The following upstream files contain changes for shared app-server lifecycle,
 exact recovery, passive history, native agent mail, realtime provider lifecycle,
-and connection-owned external authentication. The upstream LICENSE and NOTICE
-remain unchanged. Non-comment formats carry the modification notice in a
-sibling `.license` file. The listed SQL migrations and generated protocol files
-carry their modification notice here to preserve deployed migration checksums
-and generator-owned output bytes.
+connection-owned external authentication, and captured viewed image snapshots. The
+upstream LICENSE and NOTICE remain unchanged. Non-comment formats carry the
+modification notice in a sibling `.license` file. The listed SQL migrations and
+generated protocol files carry their modification notice here to preserve
+deployed migration checksums and generator-owned output bytes.
+
+Viewed images are snapshots of the prepared model input, stored once by content
+hash under Codex home. The process serializes admissions and evicts by modification
+time to stay within 1 GiB and 4,096 snapshots, refreshing dedupe hits and removing
+temporary files older than one hour. Forks and copied histories share these paths;
+aggregate eviction owns retention, so thread deletion does not remove snapshots.
+Capture failures warn and omit the path without changing model-visible output.
 
 - `.gitignore`
+- `MODULE.bazel.lock`
 - `codex-rs/Cargo.lock`
 - `codex-rs/analytics/src/client.rs`
 - `codex-rs/analytics/src/client_product_tests.rs`
@@ -34,6 +42,7 @@ and generator-owned output bytes.
 - `codex-rs/app-server-protocol/schema/json/codex_app_server_protocol.v2.schemas.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ItemCompletedNotification.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ItemStartedNotification.json`
+- `codex-rs/app-server-protocol/schema/json/v2/ReviewStartResponse.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ThreadForkResponse.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ThreadItemsListResponse.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ThreadListResponse.json`
@@ -45,7 +54,11 @@ and generator-owned output bytes.
 - `codex-rs/app-server-protocol/schema/json/v2/ThreadRevertResponse.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ThreadStartResponse.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ThreadStartedNotification.json`
+- `codex-rs/app-server-protocol/schema/json/v2/ThreadTurnsListResponse.json`
 - `codex-rs/app-server-protocol/schema/json/v2/ThreadUnarchiveResponse.json`
+- `codex-rs/app-server-protocol/schema/json/v2/TurnCompletedNotification.json`
+- `codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json`
+- `codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json`
 - `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst`
 - `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ItemCompletedNotification.ts`
@@ -54,6 +67,7 @@ and generator-owned output bytes.
 - `codex-rs/app-server-protocol/schema/typescript/v2/ServerDiagnosticsProcess.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ServerDiagnosticsResourceLimit.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadExtra.ts`
+- `codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadItemEntry.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadListResponse.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadObservationCheckpoint.ts`
@@ -91,6 +105,7 @@ and generator-owned output bytes.
 - `codex-rs/app-server/src/message_processor.rs`
 - `codex-rs/app-server/src/message_processor_tracing_tests.rs`
 - `codex-rs/app-server/src/message_processor_workspace_routing_tests.rs`
+- `codex-rs/app-server/src/notification_media.rs`
 - `codex-rs/app-server/src/outgoing_message.rs`
 - `codex-rs/app-server/src/request_processors.rs`
 - `codex-rs/app-server/src/request_processors/account_processor.rs`
@@ -142,6 +157,7 @@ and generator-owned output bytes.
 - `codex-rs/app-server/tests/suite/v2/thread_start.rs`
 - `codex-rs/app-server/tests/suite/v2/thread_subscribe.rs`
 - `codex-rs/app-server/tests/suite/v2/turn_start.rs`
+- `codex-rs/app-server/tests/suite/v2/view_image.rs`
 - `codex-rs/cli/src/main.rs`
 - `codex-rs/cli/tests/app_server_daemon.rs`
 - `codex-rs/cli/tests/queue.rs`
@@ -154,6 +170,7 @@ and generator-owned output bytes.
 - `codex-rs/codex-mcp/src/connection_manager_tests.rs`
 - `codex-rs/codex-mcp/src/mcp/mod.rs`
 - `codex-rs/codex-mcp/src/mcp/mod_tests.rs`
+- `codex-rs/core/Cargo.toml`
 - `codex-rs/core/src/agent/control.rs`
 - `codex-rs/core/src/agent/control/api.rs`
 - `codex-rs/core/src/agent/control/legacy.rs`
@@ -175,6 +192,7 @@ and generator-owned output bytes.
 - `codex-rs/core/src/context/mod.rs`
 - `codex-rs/core/src/guardian/input_budget_tests.rs`
 - `codex-rs/core/src/guardian/review_session.rs`
+- `codex-rs/core/src/image_preparation.rs`
 - `codex-rs/core/src/lib.rs`
 - `codex-rs/core/src/realtime_conversation.rs`
 - `codex-rs/core/src/realtime_conversation/sideband.rs`
@@ -210,6 +228,9 @@ and generator-owned output bytes.
 - `codex-rs/core/src/thread_manager_tests.rs`
 - `codex-rs/core/src/thread_rollout_truncation_tests.rs`
 - `codex-rs/core/src/tools/handlers/multi_agents_tests.rs`
+- `codex-rs/core/src/tools/handlers/view_image.rs`
+- `codex-rs/core/src/tools/handlers/view_image_snapshot.rs`
+- `codex-rs/core/src/tools/handlers/view_image_snapshot_tests.rs`
 - `codex-rs/core/src/tools/network_approval_tests.rs`
 - `codex-rs/core/tests/suite/abort_tasks.rs`
 - `codex-rs/core/tests/suite/model_switching.rs`
@@ -220,6 +241,7 @@ and generator-owned output bytes.
 - `codex-rs/core/tests/suite/resume_warning.rs`
 - `codex-rs/core/tests/suite/sqlite_state.rs`
 - `codex-rs/core/tests/suite/turn_input_submission.rs`
+- `codex-rs/core/tests/suite/view_image.rs`
 - `codex-rs/diagnostics/src/lib.rs`
 - `codex-rs/diagnostics/src/tests.rs`
 - `codex-rs/exec-server/tests/exec_process/windows_sandbox.rs`
@@ -237,6 +259,7 @@ and generator-owned output bytes.
 - `codex-rs/mxc-sandbox/src/policy_tests.rs`
 - `codex-rs/mxc-sandbox/src/transport.rs`
 - `codex-rs/mxc-sandbox/src/transport_tests.rs`
+- `codex-rs/protocol/src/items.rs`
 - `codex-rs/protocol/src/legacy_events.rs`
 - `codex-rs/protocol/src/protocol.rs`
 - `codex-rs/protocol/src/turn_input.rs`
@@ -331,6 +354,7 @@ and generator-owned output bytes.
 - `codex-rs/tui/src/resume_picker_transcript_preview_tests.rs`
 - `codex-rs/tui/src/task_mentions.rs`
 - `codex-rs/tui/src/temporary_structured_request_tests.rs`
+- `codex-rs/tui/src/thread_transcript/other_items_tests.rs`
 - `codex-rs/utils/pty/src/tests.rs`
 - `scripts/codex_package/cli.py`
 - `scripts/codex_package/layout.py`

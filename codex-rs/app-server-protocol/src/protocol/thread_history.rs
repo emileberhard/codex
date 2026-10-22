@@ -961,6 +961,7 @@ impl ThreadHistoryBuilder {
         let item = ThreadItem::ImageView {
             id: payload.call_id.clone(),
             path: payload.path.clone().into(),
+            saved_path: payload.saved_path.clone(),
         };
         self.upsert_item_in_current_turn(item);
     }
@@ -2796,6 +2797,40 @@ mod tests {
                 delivery: Some(AgentMessageDelivery::Async),
                 questions: Some(questions),
             }
+        );
+    }
+
+    #[test]
+    fn replays_saved_view_image_from_legacy_rollout() {
+        let saved_path = test_path_buf("/tmp/viewed_images/snapshot.png").abs();
+        let items = vec![
+            RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                turn_attribution: None,
+                turn_id: "turn-image".to_string(),
+                root_turn_id: None,
+                trace_id: None,
+                started_at: None,
+                model_context_window: None,
+                collaboration_mode_kind: Default::default(),
+            })),
+            RolloutItem::EventMsg(EventMsg::ViewImageToolCall(ViewImageToolCallEvent {
+                call_id: "view-image".to_string(),
+                path: test_path_buf("/tmp/source.png").abs().into(),
+                saved_path: Some(saved_path.clone()),
+            })),
+        ];
+        let persisted = codex_rollout::persisted_rollout_items(
+            &items,
+            codex_protocol::protocol::ThreadHistoryMode::Legacy,
+        );
+        let turns = build_turns_from_rollout_items(&persisted);
+        assert_eq!(
+            turns[0].items,
+            vec![ThreadItem::ImageView {
+                id: "view-image".to_string(),
+                path: test_path_buf("/tmp/source.png").abs().into(),
+                saved_path: Some(saved_path),
+            }]
         );
     }
 

@@ -2304,6 +2304,16 @@
             "path": {
               "$ref": "#/definitions/LegacyAppPathString"
             },
+            "savedPath": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/AbsolutePathBuf"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "type": {
               "enum": [
                 "imageView"

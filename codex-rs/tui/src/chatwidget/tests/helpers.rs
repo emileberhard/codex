@@ -842,6 +842,7 @@ pub(super) fn handle_view_image_tool_call(
             item: AppServerThreadItem::ImageView {
                 id: call_id.into(),
                 path: path.into(),
+                saved_path: None,
             },
         }),
         /*replay_kind*/ None,

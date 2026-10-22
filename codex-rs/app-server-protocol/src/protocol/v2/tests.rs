@@ -3534,6 +3534,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
     let image_view_item = TurnItem::ImageView(ImageViewItem {
         id: "view-image-1".to_string(),
         path: PathUri::from_abs_path(&test_path_buf("/tmp/view-image.png").abs()),
+        saved_path: Some(test_path_buf("/tmp/viewed_images/snapshot.png").abs()),
     });
 
     assert_eq!(
@@ -3541,6 +3542,7 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
         ThreadItem::ImageView {
             id: "view-image-1".to_string(),
             path: LegacyAppPathString::from_abs_path(&test_path_buf("/tmp/view-image.png").abs()),
+            saved_path: Some(test_path_buf("/tmp/viewed_images/snapshot.png").abs()),
         }
     );
 

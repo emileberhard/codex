@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 #![cfg(not(target_os = "windows"))]
 
 use anyhow::Context;
@@ -505,18 +506,21 @@ async fn view_image_tool_attaches_local_image() -> anyhow::Result<()> {
 
     match item_started.expect("view image item started event emitted") {
         codex_protocol::items::TurnItem::ImageView(item) => {
-            assert_eq!(item.id, call_id);
-            assert_eq!(item.path, path_uri);
+            assert_eq!(
+                item,
+                codex_protocol::items::ImageViewItem {
+                    id: call_id.to_string(),
+                    path: path_uri.clone(),
+                    saved_path: None,
+                }
+            );
         }
         other => panic!("expected ImageView item, got {other:?}"),
     }
-    match item_completed.expect("view image item completed event emitted") {
-        codex_protocol::items::TurnItem::ImageView(item) => {
-            assert_eq!(item.id, call_id);
-            assert_eq!(item.path, path_uri);
-        }
+    let item_completed = match item_completed.expect("view image item completed event emitted") {
+        codex_protocol::items::TurnItem::ImageView(item) => item,
         other => panic!("expected ImageView item, got {other:?}"),
-    }
+    };
     let legacy_event = legacy_event.expect("legacy view image event emitted");
     assert_eq!(legacy_event.call_id, call_id);
     assert_eq!(legacy_event.path, path_uri);
@@ -566,6 +570,19 @@ async fn view_image_tool_attaches_local_image() -> anyhow::Result<()> {
         .get("image_url")
         .and_then(Value::as_str)
         .expect("image_url present");
+    let saved_path = item_completed
+        .saved_path
+        .clone()
+        .context("snapshot path present")?;
+    assert_eq!(
+        item_completed,
+        codex_protocol::items::ImageViewItem {
+            id: call_id.to_string(),
+            path: path_uri,
+            saved_path: Some(saved_path.clone()),
+        }
+    );
+    assert_eq!(legacy_event.saved_path, Some(saved_path.clone()));
 
     let (prefix, encoded) = image_url
         .split_once(',')
@@ -575,6 +592,7 @@ async fn view_image_tool_attaches_local_image() -> anyhow::Result<()> {
     let decoded = BASE64_STANDARD
         .decode(encoded)
         .expect("image data decodes from base64 for request");
+    assert_eq!(std::fs::read(saved_path.as_path())?, decoded);
     let resized = load_from_memory(&decoded).expect("load resized image");
     let (resized_width, resized_height) = resized.dimensions();
     assert_eq!((resized_width, resized_height), (2048, 768));
@@ -894,9 +912,19 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
         ))
         .await?;
 
+    let mut viewed_saved_path = None;
     wait_for_event_with_timeout(
         codex,
-        |event| matches!(event, EventMsg::TurnComplete(_)),
+        |event| match event {
+            EventMsg::ItemCompleted(event) => {
+                if let codex_protocol::items::TurnItem::ImageView(item) = &event.item {
+                    viewed_saved_path = item.saved_path.clone();
+                }
+                false
+            }
+            EventMsg::TurnComplete(_) => true,
+            _ => false,
+        },
         VIEW_IMAGE_TURN_COMPLETE_TIMEOUT,
     )
     .await;
@@ -923,6 +951,8 @@ async fn view_image_tool_can_preserve_original_resolution_when_requested_on_gpt5
     let decoded = BASE64_STANDARD
         .decode(encoded)
         .expect("image data decodes from base64 for request");
+    let saved_path = viewed_saved_path.context("completed view image snapshot path")?;
+    assert_eq!(std::fs::read(saved_path.as_path())?, decoded);
     let preserved = load_from_memory(&decoded).expect("load preserved image");
     let (width, height) = preserved.dimensions();
     assert_eq!(width, original_width);

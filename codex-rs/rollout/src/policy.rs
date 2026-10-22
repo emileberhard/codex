@@ -154,7 +154,8 @@ fn persisted_event_msg(
         | EventMsg::ContextCompacted(_)
         | EventMsg::McpToolCallEnd(_)
         | EventMsg::WebSearchEnd(_)
-        | EventMsg::ImageGenerationEnd(_) => {
+        | EventMsg::ImageGenerationEnd(_)
+        | EventMsg::ViewImageToolCall(_) => {
             matches!(history_mode, ThreadHistoryMode::Legacy).then_some(Cow::Borrowed(ev))
         }
         EventMsg::SubAgentActivity(event) => (matches!(history_mode, ThreadHistoryMode::Legacy)
@@ -166,7 +167,6 @@ fn persisted_event_msg(
         | EventMsg::ThreadQueueChanged(_)
         | EventMsg::GuardianAssessment(_)
         | EventMsg::ExecCommandEnd(_)
-        | EventMsg::ViewImageToolCall(_)
         | EventMsg::CollabAgentSpawnEnd(_)
         | EventMsg::CollabAgentInteractionEnd(_)
         | EventMsg::CollabWaitingEnd(_)

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::AgentPath;
 use crate::ResponseItemId;
 use crate::ThreadId;
@@ -392,6 +393,9 @@ pub struct ImageViewItem {
     /// This core protocol type is not exposed directly in the app-server API.
     /// App-server converts the path to `LegacyAppPathString` at its boundary.
     pub path: PathUri,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub saved_path: Option<AbsolutePathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS, JsonSchema, PartialEq)]

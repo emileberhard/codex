@@ -411,6 +411,9 @@ pub enum ThreadItem {
     ImageView {
         id: String,
         path: LegacyAppPathString,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        saved_path: Option<AbsolutePathBuf>,
     },
     Sleep(SleepItem),
     ImageGeneration(ImageGenerationItem),
@@ -999,6 +1002,7 @@ impl From<CoreTurnItem> for ThreadItem {
             CoreTurnItem::ImageView(image) => ThreadItem::ImageView {
                 id: image.id,
                 path: image.path.into(),
+                saved_path: image.saved_path,
             },
             CoreTurnItem::Extension(extension) => match extension {
                 ExtensionItem::ImageGeneration(item) => ThreadItem::ImageGeneration(item),

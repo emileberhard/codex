@@ -3912,6 +3912,9 @@ pub struct ViewImageToolCallEvent {
     /// This core event is not exposed directly in the app-server API. App-server
     /// converts the path to `LegacyAppPathString` when building its public item.
     pub path: PathUri,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub saved_path: Option<AbsolutePathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]

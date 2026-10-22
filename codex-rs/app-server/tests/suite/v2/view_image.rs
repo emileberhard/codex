@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::time::Duration;
 
 use anyhow::Result;
@@ -6,14 +7,21 @@ use app_test_support::TestAppServer;
 use app_test_support::create_fake_parented_rollout_with_source;
 use app_test_support::create_final_assistant_message_sse_response;
 use app_test_support::write_models_cache;
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ItemCompletedNotification;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemsListParams;
+use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::ThreadStartResponse;
+use codex_app_server_protocol::ThreadTurnsListParams;
+use codex_app_server_protocol::ThreadTurnsListResponse;
 use codex_app_server_protocol::TurnCompletedNotification;
+use codex_app_server_protocol::TurnItemsView;
 use codex_app_server_protocol::TurnStartParams;
 use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
@@ -21,6 +29,7 @@ use codex_protocol::ThreadId;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use core_test_support::responses;
+use pretty_assertions::assert_eq;
 use serde_json::json;
 use tempfile::TempDir;
 use tokio::time::timeout;
@@ -30,6 +39,151 @@ use super::mcp_tool::TEST_TOOL_NAME;
 use super::mcp_tool::start_mcp_server;
 
 const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[tokio::test]
+async fn viewed_image_survives_file_overwrite_and_paginated_history_reload() -> Result<()> {
+    let server = responses::start_mock_server().await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .with_model("gpt-5.4")
+        .with_provider_config("supports_websockets = false")
+        .write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let image_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+    let image_bytes = BASE64_STANDARD.decode(image_url.split_once(',').unwrap().1)?;
+    let image_path = mcp.auto_env()?.selection().cwd.join("view.png")?;
+    let fs = mcp.auto_env()?.environment().get_filesystem();
+    fs.write_file(
+        &image_path,
+        image_bytes.clone(),
+        Default::default(),
+        /*sandbox*/ None,
+    )
+    .await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("gpt-5.4".to_string()),
+            history_mode: Some(codex_app_server_protocol::ThreadHistoryMode::Paginated),
+            ..Default::default()
+        })
+        .await?;
+    responses::mount_sse_once(
+        &server,
+        responses::sse(vec![
+            responses::ev_function_call("view-image", "view_image", r#"{"path":"view.png"}"#),
+            responses::ev_completed("view-response"),
+        ]),
+    )
+    .await;
+    responses::mount_sse_once(
+        &server,
+        create_final_assistant_message_sse_response("done")?,
+    )
+    .await;
+    let _: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: TurnStartParams {
+                thread_id: thread.id.clone(),
+                input: vec![UserInput::Text {
+                    text: "view the image".to_string(),
+                    text_elements: Vec::new(),
+                }],
+                ..Default::default()
+            },
+        })
+        .await?;
+    let viewed = loop {
+        let completed: ItemCompletedNotification = timeout(
+            DEFAULT_READ_TIMEOUT,
+            mcp.read_notification("item/completed"),
+        )
+        .await??;
+        if matches!(completed.item, ThreadItem::ImageView { .. }) {
+            break completed.item;
+        }
+    };
+    let _: TurnCompletedNotification = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_notification("turn/completed"),
+    )
+    .await??;
+    let ThreadItem::ImageView {
+        saved_path: Some(saved_path),
+        ..
+    } = &viewed
+    else {
+        anyhow::bail!("completed image view should carry a savedPath");
+    };
+    let saved_path = saved_path.clone();
+    assert_eq!(
+        viewed,
+        ThreadItem::ImageView {
+            id: "view-image".to_string(),
+            path: image_path.clone().into(),
+            saved_path: Some(saved_path.clone()),
+        }
+    );
+    let snapshot_root = std::fs::canonicalize(codex_home.path())?.join("viewed_images");
+    assert_eq!(saved_path.as_path().parent(), Some(snapshot_root.as_path()));
+    assert_eq!(std::fs::read(saved_path.as_path())?, image_bytes);
+    fs.write_file(
+        &image_path,
+        b"replaced after viewing".to_vec(),
+        Default::default(),
+        /*sandbox*/ None,
+    )
+    .await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.shutdown_gracefully()).await??;
+    drop(mcp);
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let items_id = mcp
+        .send_thread_items_list_request(ThreadItemsListParams {
+            thread_id: thread.id.clone(),
+            turn_id: None,
+            cursor: None,
+            limit: Some(100),
+            sort_direction: None,
+        })
+        .await?;
+    let items: ThreadItemsListResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(items_id)).await??;
+    assert_eq!(
+        items
+            .data
+            .into_iter()
+            .find(|entry| entry.item.id() == "view-image")
+            .map(|entry| entry.item),
+        Some(viewed.clone())
+    );
+    let turns_id = mcp
+        .send_thread_turns_list_request(ThreadTurnsListParams {
+            thread_id: thread.id,
+            cursor: None,
+            limit: Some(1),
+            sort_direction: None,
+            items_view: Some(TurnItemsView::Full),
+        })
+        .await?;
+    let turns: ThreadTurnsListResponse =
+        timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(turns_id)).await??;
+    assert_eq!(
+        turns
+            .data
+            .into_iter()
+            .flat_map(|turn| turn.items)
+            .find(|item| item.id() == "view-image"),
+        Some(viewed)
+    );
+    assert_eq!(std::fs::read(saved_path.as_path())?, image_bytes);
+    Ok(())
+}
 
 /// Fresh-context children inherit disabled built-ins while configured MCP tools
 /// remain visible or searchable and executable.

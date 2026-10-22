@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::config::ManagedFeatures;
 use crate::context::ContextualUserFragment;
 use crate::context::ImageResizeNotice;
@@ -73,7 +74,7 @@ struct PreparedImageResize {
 }
 
 pub(crate) struct PreparedInlineImage {
-    encoded: EncodedImage,
+    pub(crate) encoded: EncodedImage,
     effective_detail: ImageDetailSetting,
     resize: Option<PreparedImageResize>,
 }

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Persisted tool projections retain rich detail, styles, and truthful outcomes.
 
 use super::cells;
@@ -148,6 +149,7 @@ fn tool_and_notice_projection_uses_normal_transcript_presentation() {
         ThreadItem::ImageView {
             id: "view-1".to_string(),
             path: LegacyAppPathString::from_string("diagram.png".to_string()),
+            saved_path: None,
         },
         ThreadItem::ImageGeneration(image.clone()),
         ThreadItem::ImageGeneration(ImageGenerationItem {

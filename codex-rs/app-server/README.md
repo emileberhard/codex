@@ -1,5 +1,18 @@
 > Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
+# Viewed image snapshots
+
+Completed `imageView` items can include `savedPath`, an absolute path on the
+app-server host containing the prepared image sent to the model. `path` still
+identifies the source in its execution environment. `savedPath` is omitted for
+older history and when snapshot capture fails; media-stripped notifications
+retain it.
+
+Snapshots share a content-addressed store at `CODEX_HOME/viewed_images`, bounded
+to 1 GiB and 4,096 files. Viewing the same image refreshes its retention time;
+new captures evict the oldest files as needed. Snapshot paths can therefore
+outlive their files. Thread deletion does not remove shared snapshots.
+
 # Thread list exclusions
 
 `thread/list` accepts `excludedThreadIds`, an optional array of up to 100

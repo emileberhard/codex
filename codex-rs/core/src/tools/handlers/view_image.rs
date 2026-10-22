@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_exec_server::GetMetadataOptions;
 use codex_exec_server::ReadFileOptions;
 use codex_protocol::items::ImageViewItem;
@@ -14,6 +15,8 @@ use codex_utils_image::data_url_from_bytes;
 use serde::Deserialize;
 
 use crate::function_tool::FunctionCallError;
+use crate::image_preparation::ImagePreparationMode;
+use crate::image_preparation::resize_image;
 use crate::original_image_detail::can_request_original_image_detail;
 use crate::tools::context::ToolInvocation;
 use crate::tools::context::ToolOutput;
@@ -27,6 +30,9 @@ use crate::tools::registry::CoreToolRuntime;
 use crate::tools::registry::ToolExecutor;
 use codex_tools::ToolName;
 use codex_tools::ToolSpec;
+
+#[path = "view_image_snapshot.rs"]
+mod snapshot;
 
 pub struct ViewImageHandler {
     options: ViewImageToolOptions,
@@ -198,12 +204,34 @@ impl ViewImageHandler {
         // The history insertion path owns image preparation and resizing.
         let image_url = data_url_from_bytes("application/octet-stream", &file_bytes);
 
-        let item = TurnItem::ImageView(ImageViewItem {
+        let mut item = ImageViewItem {
             id: call_id,
             path: path_uri,
-        });
-        session.emit_turn_item_started(turn.as_ref(), &item).await;
-        session.emit_turn_item_completed(turn.as_ref(), item).await;
+            saved_path: None,
+        };
+        session
+            .emit_turn_item_started(turn.as_ref(), &TurnItem::ImageView(item.clone()))
+            .await;
+        let preparation_mode = if self.options.unified_image_budget {
+            ImagePreparationMode::UnifiedBudget
+        } else {
+            ImagePreparationMode::DetailBased
+        };
+        let snapshot = async {
+            let prepared = resize_image(&image_url, &mut Some(image_detail), preparation_mode)?
+                .ok_or_else(|| anyhow::anyhow!("viewed image has no prepared bytes"))?;
+            snapshot::save(&turn.config.codex_home, prepared.encoded)
+                .await
+                .map_err(anyhow::Error::from)
+        }
+        .await;
+        match snapshot {
+            Ok(path) => item.saved_path = Some(path),
+            Err(error) => tracing::warn!(%error, "failed to save viewed image snapshot"),
+        }
+        session
+            .emit_turn_item_completed(turn.as_ref(), TurnItem::ImageView(item))
+            .await;
 
         Ok(boxed_tool_output(ViewImageOutput {
             image_url,
