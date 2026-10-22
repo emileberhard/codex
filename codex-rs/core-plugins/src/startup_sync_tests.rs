@@ -1404,8 +1404,8 @@ fn extract_zipball_preserves_executable_bits_without_special_permissions() {
             archive
                 .by_index(0)
                 .expect("read entry")
-                .unix_mode()
-                .expect("unix mode")
+                .external_attributes()
+                >> 16
                 & 0o7777,
             mode
         );
