@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 mod archive_thread;
 mod create_thread;
 mod delete_thread;

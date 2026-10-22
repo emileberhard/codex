@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Portable policy and launcher regressions, with Windows identity coverage.
 
 use std::collections::HashMap;

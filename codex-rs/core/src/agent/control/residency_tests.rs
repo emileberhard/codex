@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::StartThreadOptions;
 use crate::ThreadManager;
 use crate::agent::LocalAgentControl;

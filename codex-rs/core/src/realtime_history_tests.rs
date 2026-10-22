@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use codex_protocol::AgentPath;
 use codex_protocol::ThreadId;

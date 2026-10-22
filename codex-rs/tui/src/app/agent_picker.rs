@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Root-scoped background refresh for the agent picker.
 
 use super::agent_navigation::AgentPickerThreadVisibility;

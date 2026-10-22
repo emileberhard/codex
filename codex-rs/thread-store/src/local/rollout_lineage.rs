@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;

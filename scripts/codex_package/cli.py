@@ -1,3 +1,4 @@
+# Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 """Command-line interface for building Codex package directories."""
 
 import argparse

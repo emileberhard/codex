@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::residency::is_v2_resident_session_source;
 use super::spawn_guard::PendingSpawn;
 use super::spawn_telemetry::SpawnMeasurements;

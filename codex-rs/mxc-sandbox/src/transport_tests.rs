@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Verify bounded transport, Unicode roundtrips, and child-environment cleanup.
 
 use std::collections::HashMap;

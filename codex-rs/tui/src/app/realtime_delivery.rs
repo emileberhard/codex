@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Preserve voice answers and accepted transcripts across thread-widget replacement.
 //!
 //! A queued speech command can outlive its widget. Retain its bounded final

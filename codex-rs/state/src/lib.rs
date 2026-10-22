@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! SQLite-backed state for rollout metadata.
 //!
 //! This crate is intentionally small and focused: it extracts rollout metadata

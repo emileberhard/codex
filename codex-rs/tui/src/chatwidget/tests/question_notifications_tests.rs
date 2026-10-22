@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Async questions notify once on arrival and honor the terminal notification settings.
 
 use super::*;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Bounded launcher transport. Windows startup variables are host-owned;
 //! an original-empty marker preserves the SDK's user-profile defaults.
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 import hashlib
 import json
@@ -263,6 +264,10 @@ int main(void) {
             metadata = json.loads(
                 (package_dir / "codex-package.json").read_text(encoding="utf-8")
             )
+            repository = Path(__file__).resolve().parents[2]
+            for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"):
+                self.assertEqual((package_dir / name).read_bytes(), (repository / name).read_bytes())
+            self.assertTrue((package_dir / "LICENSES" / "ripgrep.txt").is_file())
             self.assertEqual(metadata["sourceCommit"], "abc123")
             self.assertEqual(
                 metadata["binaries"],

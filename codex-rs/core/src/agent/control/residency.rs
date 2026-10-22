@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Accounts for resident MAv2 children and unloads exact idle runtimes while preserving their state.
 
 use super::LocalAgentControl;

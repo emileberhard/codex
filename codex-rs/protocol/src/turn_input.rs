@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Turn-input request and result types shared by Core's submission APIs.
 
 use crate::AgentPath;

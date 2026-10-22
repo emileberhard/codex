@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::InputQueue;
 use crate::session::Session;
 use codex_protocol::protocol::InterAgentCommunication;

@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 use std::sync::Arc;
 

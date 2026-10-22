@@ -320,3 +320,7 @@ Tests and features must support Linux, macOS and Windows unless feature is expli
 
 Codex supports running connected app-server and exec-server on different operating systems. See the
 `$remote-tests` skill for details about integration testing these configurations.
+
+# RemoteCoder integration
+
+This public Apache-2.0 fork is `emileberhard/codex`; `origin/main` carries the reviewed RemoteCoder patch lineage, and `upstream` is `openai/codex`. RemoteCoder owns runtime packaging, installation and the exact deployed source pin in `docs/codex/compatibility.json`. Follow its shared-codex-upgrade skill before changing an installed runtime. Keep operator configuration and acceptance receipts outside public source. `REMOTECODER_MODIFICATIONS.md` records modified upstream files; keep per-file modification notices and runtime LICENSE/NOTICE packaging intact.

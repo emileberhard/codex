@@ -1,4 +1,5 @@
 #![cfg(not(target_os = "windows"))]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 use std::fs;
 use std::path::Path;

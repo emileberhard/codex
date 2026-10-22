@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Replays persisted token usage snapshots when a client attaches to an existing thread.
 //!
 //! The message processor decides when replay is allowed and preserves JSON-RPC response

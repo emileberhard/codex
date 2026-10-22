@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::session::step_context::StepContext;
 use crate::session::tests::build_world_state_from_turn_context;

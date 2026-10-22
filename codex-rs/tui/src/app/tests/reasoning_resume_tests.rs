@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Resume snapshots must accept an unfinished reasoning stream without an earlier item/started.
 
 use super::*;

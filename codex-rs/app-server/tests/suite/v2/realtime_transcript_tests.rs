@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Desktop-facing live notifications and reconciled voice handoff context.
 
 use super::*;

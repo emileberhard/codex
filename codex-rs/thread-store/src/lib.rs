@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Storage-neutral thread persistence interfaces.
 //!
 //! Application code should treat [`codex_protocol::ThreadId`] as the only durable thread handle.

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::restart_recovery_settings::latest_restart_recovery_settings;
 use super::*;
 use codex_core::RestartRecoveryThread;

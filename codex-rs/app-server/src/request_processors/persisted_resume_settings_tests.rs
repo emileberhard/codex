@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::PersistedResumeSettings;
 use super::latest_persisted_resume_settings;
 use super::latest_persisted_service_tier;

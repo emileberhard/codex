@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::THREAD_TITLE_MAX_CHARS;
 use super::THREAD_TITLE_PROMPT_MAX_BYTES;
 use super::THREAD_TITLE_RECENT_MESSAGES;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 #[cfg(any(unix, windows))]
 use std::process::Stdio;
 use std::time::Duration;

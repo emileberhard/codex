@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Blocked backends leave UI work and teardown independent of clipboard progress.
 
 use super::*;

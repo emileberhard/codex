@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 use super::REQUIRED_NOFILE_SOFT_LIMIT;
 use super::ensure_nofile_floor;

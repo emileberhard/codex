@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 // Release builds exceed rustc's default query depth when laying out the async
 // MessageProcessor::handle_initialized_client_request future.
 #![recursion_limit = "256"]

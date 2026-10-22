@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Shared SQLite connection configuration.
 //! Writable pools preserve existing vacuum modes and report initialization errors to callers.
 

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Core-owned queue metadata; forwarding transfers the residency guard with the operation.
 
 use codex_extension_api::ExtensionDataInit;

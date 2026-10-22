@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Real buffered notifications must use finalized rendering without losing live stream tails.
 
 use super::*;

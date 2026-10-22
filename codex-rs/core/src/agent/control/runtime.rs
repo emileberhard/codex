@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Shared state and startup bindings for one local agent tree.
 //! Registry identity is allocation identity; cloning this handle preserves ownership checks.
 

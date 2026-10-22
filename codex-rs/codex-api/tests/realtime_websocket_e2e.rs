@@ -1,4 +1,5 @@
 #![allow(clippy::expect_used)]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::collections::HashMap;
 use std::future::Future;
 use std::time::Duration;

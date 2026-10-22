@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 const FILE_REFERENCE_GUIDANCE: &str = "- Format local-file references as Markdown links with absolute `file:///` URLs, for example `[app.py](file:///abs/path/app.py)`.\n  * Encode spaces in URL targets as `%20`, for example `[My Report.md](file:///abs/path/My%20Project/My%20Report.md)`.\n  * Keep link labels readable and do not wrap Markdown links in backticks.\n";
 
 /// Replaces known vendor file-link rules in the request copy of model-owned instructions.

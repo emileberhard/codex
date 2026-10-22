@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! App-level orchestration tests for the TUI.
 
 #[path = "tests/copy_mode_tests.rs"]

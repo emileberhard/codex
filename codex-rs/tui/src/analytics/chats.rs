@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Discover recent local roots and load business chat credit estimates.
 
 use super::client::Live;

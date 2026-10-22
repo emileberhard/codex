@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Demand-driven history discovery. Each source retains its cursor and unshown rows.
 //! One activation requests at most one page per source, then publishes up to ten tasks.
 

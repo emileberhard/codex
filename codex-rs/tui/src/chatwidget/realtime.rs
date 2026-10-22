@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! TUI orchestration for an app-server-signaled, locally owned WebRTC voice session.
 //! Completed captions and both speakers' partials stay bounded across widget replacement.
 //! Interleaved speakers retain separate displays so settled caption text never reanimates.

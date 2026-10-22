@@ -1,3 +1,4 @@
+-- Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 ALTER TABLE thread_turn_versions ADD COLUMN root_turn_id TEXT;
 ALTER TABLE thread_item_versions ADD COLUMN started_at_ms INTEGER;
 

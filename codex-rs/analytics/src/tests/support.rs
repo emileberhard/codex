@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Shared analytics test facts, fixtures, and reducer setup.
 
 use crate::events::AppServerRpcTransport;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::ThreadHistoryBuilder;
 use super::ThreadHistoryChangeSet;
 use super::ThreadItem;

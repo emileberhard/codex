@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::TurnInputRequest;
 use crate::TurnInputSubmission;
 use crate::TurnStartOptions;

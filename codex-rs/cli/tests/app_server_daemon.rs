@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 use std::path::PathBuf;
 use std::process::Child;

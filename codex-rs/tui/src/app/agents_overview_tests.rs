@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 #[path = "agents_overview_discovery_tests.rs"]
 mod discovery;
 

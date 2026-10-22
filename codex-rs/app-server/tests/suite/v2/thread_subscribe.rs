@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::connection_handling_websocket::WsClient;
 use super::connection_handling_websocket::connect_websocket;
 use super::connection_handling_websocket::create_config_toml;

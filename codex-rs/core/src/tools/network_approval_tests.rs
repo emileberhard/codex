@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::sandboxing::SandboxPermissions;
 use codex_network_proxy::BlockedRequestArgs;

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 import argparse
 import os

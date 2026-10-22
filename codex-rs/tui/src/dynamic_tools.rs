@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Task-management tools hosted by a TUI connected to an external app server.
 
 use crate::app_event::AppEvent;

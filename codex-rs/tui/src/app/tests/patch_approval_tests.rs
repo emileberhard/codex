@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Regression coverage for the live and replayed patch-approval pager.
 
 use super::*;

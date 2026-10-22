@@ -1,3 +1,5 @@
+> Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
+
 # TUI bottom pane (state machines)
 
 When changing the paste-burst or chat-composer state machines in this folder, keep the docs in sync:

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_utils_absolute_path::test_support::PathExt;
 use std::time::Duration;
 

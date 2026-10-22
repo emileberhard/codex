@@ -1,3 +1,4 @@
+# Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 """Canonical Codex package directory layout."""
 
 import hashlib
@@ -76,6 +77,11 @@ def build_package_dir(
             is_windows=True,
         )
 
+    repository = Path(__file__).resolve().parents[2]
+    for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"):
+        shutil.copyfile(repository / name, package_dir / name)
+    shutil.copytree(repository / "LICENSES", package_dir / "LICENSES")
+
     metadata = {
         "layoutVersion": LAYOUT_VERSION,
         "version": version,
@@ -148,6 +154,9 @@ def validate_package_dir(
         Path("codex-path") / spec.rg_name,
     ]
     executable_files = list(required_files)
+    required_files.extend([Path("LICENSE"), Path("NOTICE"), Path("THIRD_PARTY_NOTICES.md")])
+    if not (package_dir / "LICENSES").is_dir():
+        raise RuntimeError("Missing package license directory: LICENSES")
 
     if spec.is_linux:
         required_files.append(Path("codex-resources") / "bwrap")

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Top-level TUI application state and runtime wiring.
 //!
 //! This module owns the `App` struct, shared imports, and the high-level run loop that coordinates

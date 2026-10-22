@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::Submission;
 use crate::WithTurnExtensionData;
 use crate::realtime_conversation::RealtimeHandoffOwner;

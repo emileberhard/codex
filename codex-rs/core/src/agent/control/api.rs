@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Implements shared controller operations using the existing local runtime helpers.
 //! Runtime loading, message delivery and shared state remain in their existing modules.
 

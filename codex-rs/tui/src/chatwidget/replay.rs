@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Thread replay rendering for `ChatWidget`.
 //!
 //! This module rehydrates turns and items into transcript state while avoiding

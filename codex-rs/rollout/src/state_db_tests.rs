@@ -1,4 +1,5 @@
 #![allow(warnings, clippy::all)]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 use super::*;
 use crate::RolloutLine;

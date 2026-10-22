@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Voice delegation routes completed answers without exposing private protocol text.
 
 use super::*;

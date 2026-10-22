@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 #[path = "daemon_continuation.rs"]
 mod daemon_continuation;
 

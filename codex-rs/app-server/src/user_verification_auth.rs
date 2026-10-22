@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Cancels device ceremonies when cached authentication changes.
 
 use codex_login::AuthManager;

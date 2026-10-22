@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Attach the persisted first position to canonical item lifecycle notifications.
 use codex_app_server_protocol::ServerNotification;
 use codex_protocol::ThreadId;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 mod app;
 mod cli;
 pub(crate) mod env_detect;

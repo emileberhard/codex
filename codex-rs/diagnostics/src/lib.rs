@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::sync::Mutex;
 use std::sync::Once;
 use std::sync::atomic::AtomicU64;

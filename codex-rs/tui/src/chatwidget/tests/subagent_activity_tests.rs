@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Subagent notifications must preserve one authoritative answer across streaming boundaries.
 
 use super::*;

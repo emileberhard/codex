@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Thread lifecycle, lineage, originator, and metadata event tests.
 
 use crate::events::AppServerRpcTransport;

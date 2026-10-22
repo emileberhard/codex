@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Resolve a displayed session label through the app server before acting on its thread ID.
 
 use std::path::Path;

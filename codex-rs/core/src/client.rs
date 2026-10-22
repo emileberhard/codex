@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Session- and turn-scoped helpers for talking to model provider APIs.
 //!
 //! `ModelClient` is intended to live for the lifetime of a Codex session and holds the stable

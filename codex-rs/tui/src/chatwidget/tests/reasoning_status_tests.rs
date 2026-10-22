@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Reasoning activity retains the latest usable line through empty items and status-row replacement.
 
 use super::*;

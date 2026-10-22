@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Turn lifecycle, prerequisites, counts, image preparation, and event payload tests.
 
 use crate::events::CodexTurnEventRequest;

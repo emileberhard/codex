@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_app_server_protocol::ThreadRestartRecoverParams;
 use codex_utils_redacted_string::RedactedString;
 

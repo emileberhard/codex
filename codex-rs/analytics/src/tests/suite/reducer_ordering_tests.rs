@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Coordinator routing and ordering guarantees across analytics event families.
 
 use crate::events::TrackEventRequest;

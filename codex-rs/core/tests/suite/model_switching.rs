@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use anyhow::Result;
 use codex_config::types::Personality;
 use codex_core::CodexThread;

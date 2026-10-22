@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::thread_input::ensure_direct_input_allowed;
 use super::*;
 use codex_agent_extension::AgentInvocation;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::model::ThreadMetadata;
 use codex_history::RolloutItem;
 use codex_protocol::items::TurnItem;

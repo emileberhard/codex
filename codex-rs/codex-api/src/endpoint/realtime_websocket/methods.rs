@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::endpoint::realtime_websocket::methods_common::conversation_function_call_output_message;
 use crate::endpoint::realtime_websocket::methods_common::conversation_handoff_append_message;
 use crate::endpoint::realtime_websocket::methods_common::conversation_item_create_message;

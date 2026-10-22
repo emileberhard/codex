@@ -1,4 +1,5 @@
 #![cfg(not(target_os = "windows"))]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use anyhow::Result;
 use codex_core::TurnInputRequest;
 use codex_core::context::with_file_url_references;

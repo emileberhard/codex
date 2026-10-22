@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Trusted reasoning-effort updates follow surviving history and the next turn's selected settings.
 
 use codex_config::test_support::CloudConfigBundleFixture;

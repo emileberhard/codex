@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Root of the `codex-core` library.
 
 // Prevent accidental direct writes to stdout/stderr in library code. All

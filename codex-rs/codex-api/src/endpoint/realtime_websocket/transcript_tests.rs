@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! V3 transcript reconciliation across interleaved speakers, reconnects, and turn boundaries.
 
 use super::*;

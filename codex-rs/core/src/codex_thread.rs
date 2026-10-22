@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::WithTurnExtensionData;
 use crate::agent::AgentStatus;
 use crate::agent::api::AgentControl;

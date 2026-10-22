@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::parse_frameless_bidi_event;
 use crate::endpoint::realtime_websocket::protocol_v1::parse_realtime_event_v1;
 use codex_protocol::protocol::RealtimeEvent;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Host adapter for synchronous Guardian sessions and the existing context builder.
 //! The extension owns review policy and pooling; this module binds runtime operations
 //! to the captured parent action, environments, authorization and context snapshots.

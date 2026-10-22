@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Verify question input delivery, retained drafts, and visible editor behavior.
 use super::*;
 use crate::bottom_pane::RestrictedInputMode;

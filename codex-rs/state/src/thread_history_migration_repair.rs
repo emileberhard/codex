@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use sqlx::Executor;
 use sqlx::Sqlite;
 use sqlx::SqlitePool;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::collections::HashSet;
 use std::io::ErrorKind;
 use std::io::Read;

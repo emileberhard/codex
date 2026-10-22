@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Same-host task discovery and bounded task-reference prompt context.
 
 use std::path::PathBuf;

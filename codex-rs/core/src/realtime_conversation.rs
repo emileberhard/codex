@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::client::ModelClient;
 use crate::client::X_CODEX_TURN_METADATA_HEADER;
 use crate::context::ContextualUserFragment;

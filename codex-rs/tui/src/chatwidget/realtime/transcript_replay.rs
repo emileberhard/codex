@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Keep retained voice captions before the subsequent agent turn during history replay.
 //!
 //! Anchors are assigned only to completed captions when a new live turn starts. Partial

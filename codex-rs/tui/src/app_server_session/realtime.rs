@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! App-server signaling for TUI-owned realtime WebRTC sessions.
 
 use super::AppServerSession;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Native Windows MXC helper. Policy conversion is portable; execution requires
 //! a usable process security environment and never enters MXC's ACL fallbacks.
 

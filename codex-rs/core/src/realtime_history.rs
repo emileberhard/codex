@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Records canonical Voice history for every Core host. Presentation rules share
 //! transcript boundaries and deduplication state with the history reducer.
 //! The reducer selects when its effects are persisted relative to their source event.

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Stateless projection from canonical paginated rollout records to thread-history changes.
 //!
 //! This module is only for the new paginated rollout format that persists canonical

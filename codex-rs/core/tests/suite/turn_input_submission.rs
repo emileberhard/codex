@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_core::NotSubmittedReason;
 use codex_core::RecoverTurnRequest;
 use codex_core::StartIfIdleSubmission;

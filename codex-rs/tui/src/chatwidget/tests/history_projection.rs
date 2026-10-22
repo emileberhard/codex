@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Persisted tool cells must match initial replay in compact and detailed presentations.
 
 use super::*;

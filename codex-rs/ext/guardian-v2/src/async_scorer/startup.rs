@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Resolves the classifier's own model budget and transport configuration.
 //! Parent-model context overrides do not change the classifier allowance.
 

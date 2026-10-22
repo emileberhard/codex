@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Task completion preserves a queued notification's budget alongside real user input.
 
 use super::*;

@@ -1,3 +1,5 @@
+> This is the Apache-2.0 Codex fork used by [RemoteCoder](https://github.com/emileberhard/RemoteCoder). It adds shared app-server recovery, passive history, realtime lifecycle and connection-owned authentication. OpenAI owns upstream Codex; see [RemoteCoder modifications](REMOTECODER_MODIFICATIONS.md) and [third-party notices](THIRD_PARTY_NOTICES.md).
+
 <p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
 <p align="center">
   <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />

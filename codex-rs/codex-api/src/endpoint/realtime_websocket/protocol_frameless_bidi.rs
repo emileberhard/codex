@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::endpoint::realtime_websocket::protocol_common::parse_realtime_payload;
 use crate::endpoint::realtime_websocket::protocol_common::parse_session_updated_event;
 use codex_protocol::protocol::RealtimeAudioFrame;

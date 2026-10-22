@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Regression coverage for app-server thread operations backed by a non-local
 //! `ThreadStore`.
 //!

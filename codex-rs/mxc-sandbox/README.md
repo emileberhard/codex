@@ -1,3 +1,5 @@
+> Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
+
 # Native Windows MXC sandbox
 
 This crate routes a command through the current Codex executable and directly

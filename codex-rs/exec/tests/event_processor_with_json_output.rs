@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_app_server_protocol::CollabAgentState as ApiCollabAgentState;
 use codex_app_server_protocol::CollabAgentStatus as ApiCollabAgentStatus;
 use codex_app_server_protocol::CollabAgentTool;

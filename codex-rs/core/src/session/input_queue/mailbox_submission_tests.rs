@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::session::tests::make_session_and_context;
 use codex_protocol::protocol::TurnAbortReason;

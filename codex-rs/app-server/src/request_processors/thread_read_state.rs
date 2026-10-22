@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Read state for durable local threads. Receipt changes use the thread's usual subscribers.
 
 use super::*;

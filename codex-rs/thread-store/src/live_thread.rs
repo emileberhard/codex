@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;

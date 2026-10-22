@@ -1,3 +1,5 @@
+> Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
+
 # Thread list exclusions
 
 `thread/list` accepts `excludedThreadIds`, an optional array of up to 100

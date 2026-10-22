@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Dispatcher harness with a controllable native provider for lifecycle tests.
 //! Public stdio and WebSocket framing are exercised in the integration suite.
 

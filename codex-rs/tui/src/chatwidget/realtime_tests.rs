@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Regression coverage for thread-owned voice sessions and transcript/handoff safety.
 //! Synthetic events preserve typed turns and reject stale session generations.
 

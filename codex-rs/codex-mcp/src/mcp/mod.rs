@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 pub use auth::McpAuthStatusEntry;
 pub use auth::McpOAuthLoginConfig;
 pub use auth::McpOAuthLoginSupport;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::test_support::boxed_future;
 use codex_app_server_protocol::ImageGenerationItem;

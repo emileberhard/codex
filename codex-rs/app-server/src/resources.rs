@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 #[cfg(unix)]
 use std::io::Error;
 #[cfg(unix)]

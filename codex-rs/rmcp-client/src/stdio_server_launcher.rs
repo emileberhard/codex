@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Launch MCP stdio servers and return the transport rmcp should use.
 //!
 //! This module owns the "where does the server process run?" decision:

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Handles reply-bearing turn-input operations.
 //!
 //! This is the one place Core decides whether submitted input starts a turn,

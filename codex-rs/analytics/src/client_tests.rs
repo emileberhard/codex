@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::AnalyticsEventsClient;
 use super::AnalyticsEventsDestination;
 use super::AnalyticsEventsQueue;

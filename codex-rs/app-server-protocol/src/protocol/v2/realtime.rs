@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::JsonSchema;
 use crate::TS;
 use codex_protocol::models::MessagePhase;

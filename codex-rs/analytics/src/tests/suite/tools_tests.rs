@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Tool item, Code Mode correlation, and artifact event tests.
 
 use crate::events::AppServerRpcTransport;

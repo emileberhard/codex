@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Managed app-server lifecycle, serialized across CLI invocations and the updater.
 
 mod backend;

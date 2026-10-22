@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Verifies startup recovery preserves corrupt databases and allows thread creation.
 
 use anyhow::Result;

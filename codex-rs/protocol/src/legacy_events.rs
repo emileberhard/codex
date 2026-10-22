@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::ThreadId;
 use crate::dynamic_tools::DynamicToolCallRequest;
 use crate::items::AgentMessageContent;

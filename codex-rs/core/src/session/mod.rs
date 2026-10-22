@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 pub(crate) mod startup;
 
 use crate::WithTurnExtensionData;

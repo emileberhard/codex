@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Verify product attribution remains per thread across shared queues and HTTP batches.
 //! Reconfiguration preserves buffered attribution; queue overflow falls back to unknown.
 

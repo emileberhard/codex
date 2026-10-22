@@ -1381,6 +1381,51 @@ fn read_extracted_backup_archive_git_sha_rejects_path_traversal_ref() {
     assert!(err.contains("invalid path components"));
 }
 
+#[cfg(unix)]
+#[test]
+fn extract_zipball_preserves_executable_bits_without_special_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    for mode in [0o644, 0o755, 0o6755] {
+        let root = tempdir().expect("tempdir");
+        let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "archive/run",
+                SimpleFileOptions::default().external_attributes((0o100000 | mode) << 16),
+            )
+            .expect("start archive entry");
+        writer
+            .write_all(b"executable content")
+            .expect("write archive entry");
+        let bytes = writer.finish().expect("finish archive").into_inner();
+        let mut archive = ZipArchive::new(std::io::Cursor::new(&bytes)).expect("open archive");
+        assert_eq!(
+            archive
+                .by_index(0)
+                .expect("read entry")
+                .unix_mode()
+                .expect("unix mode")
+                & 0o7777,
+            mode
+        );
+        extract_zipball_to_dir(&bytes, root.path()).expect("extract archive");
+        let path = root.path().join("run");
+        assert_eq!(
+            std::fs::read(&path).expect("read extracted content"),
+            b"executable content"
+        );
+        assert_eq!(
+            std::fs::metadata(path)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o7777,
+            mode & 0o777
+        );
+    }
+}
+
 fn curated_repo_zipball_bytes(sha: &str) -> Vec<u8> {
     let cursor = std::io::Cursor::new(Vec::new());
     let mut writer = ZipWriter::new(cursor);

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Voice startup, shutdown, and retry maintain one active owned session.
 
 use super::*;

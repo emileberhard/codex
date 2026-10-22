@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::config::Constrained;
 use crate::session::step_settings::StepSettingsUpdate;

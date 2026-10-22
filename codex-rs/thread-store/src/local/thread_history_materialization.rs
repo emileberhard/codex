@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;

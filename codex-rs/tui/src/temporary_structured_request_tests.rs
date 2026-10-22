@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::STRUCTURED_RESPONSE_MAX_BYTES;
 use super::TemporaryStructuredThreadOptions;
 use super::collect_structured_response;

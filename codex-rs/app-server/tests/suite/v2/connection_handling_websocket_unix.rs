@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Signal-driven shutdown tests for Unix websocket servers.
 
 use super::connection_handling_websocket::DEFAULT_READ_TIMEOUT;

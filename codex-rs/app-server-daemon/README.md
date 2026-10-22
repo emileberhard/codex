@@ -1,3 +1,5 @@
+> Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
+
 # codex-app-server-daemon
 
 > `codex-app-server-daemon` is experimental and its lifecycle contract may

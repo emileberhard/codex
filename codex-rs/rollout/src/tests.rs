@@ -1,4 +1,5 @@
 #![allow(warnings, clippy::all)]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use codex_utils_absolute_path::test_support::PathExt;

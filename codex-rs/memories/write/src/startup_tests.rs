@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::extensions::seed_extension_instructions;
 use crate::memory_root;
 use crate::phase1;

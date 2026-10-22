@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Composer input resumes after transcript selection without changing search or keymap ownership.
 
 use super::tests::attach_thread;

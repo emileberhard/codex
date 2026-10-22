@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Exercises reviewer history safety at cancellation and budget boundaries.
 
 use super::*;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::AGENT_FINAL_MESSAGE_PREFIX;
 use super::HANDOFF_STREAM_TRUNCATION_MARKER;
 use super::RealtimeHandoffState;

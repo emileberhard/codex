@@ -1,4 +1,5 @@
 #![cfg(unix)]
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 use pretty_assertions::assert_eq;
 use std::os::unix::fs::PermissionsExt;

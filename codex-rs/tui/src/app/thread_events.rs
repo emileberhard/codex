@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Thread event buffering and replay state for the TUI app.
 //!
 //! This module owns the per-thread event store used when the TUI switches between the main

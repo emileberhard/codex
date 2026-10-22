@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Handles persistent thread-settings updates and serializes their persistence
 //! with checkpoints written directly to storage.
 

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Partial and completed captions stay ordered and bounded through voice shutdown.
 
 use super::*;

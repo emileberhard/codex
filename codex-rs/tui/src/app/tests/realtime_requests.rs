@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! App-to-RPC coverage for a delegated voice answer without audio hardware.
 
 use super::*;

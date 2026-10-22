@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::input_queue::InputQueue;
 use super::mcp_refresh::McpRefresh;
 use super::retained_context::CodeModeMessageTasks;
