@@ -850,8 +850,12 @@ async fn recovery_preserves_durable_turn_attribution(
     }
 
     for attempt in 0..2 {
+        test.thread_manager.begin_new_work_fence();
+        assert!(test.thread_manager.poll_new_work_fence());
         assert_eq!(
-            test.codex.suspend_turn_and_shutdown().await?,
+            test.codex
+                .suspend_turn_and_shutdown(turn_id.clone())
+                .await?,
             codex_core::SuspendTurnOutcome::Suspended {
                 turn_id: turn_id.clone()
             },

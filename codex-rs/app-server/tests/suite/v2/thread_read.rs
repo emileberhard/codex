@@ -2273,6 +2273,8 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
         read.data,
         vec![
             ThreadItemEntry {
+                started_at_ordinal: Some(3),
+                is_complete: Some(true),
                 turn_id: "turn-1".to_string(),
                 item: ThreadItem::UserMessage {
                     id: "steer-1".to_string(),
@@ -2283,6 +2285,8 @@ async fn paginated_history_lists_and_legacy_reads_use_projected_turns_and_items(
                 completed_at_ms: Some(1),
             },
             ThreadItemEntry {
+                started_at_ordinal: Some(4),
+                is_complete: Some(true),
                 turn_id: "turn-1".to_string(),
                 item: ThreadItem::AgentMessage {
                     id: "agent-1".to_string(),

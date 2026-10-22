@@ -1308,6 +1308,7 @@ async fn thread_list_db_only_errors_distinguish_unavailable_database_from_empty_
                     assert_eq!(
                         page,
                         ThreadListResponse {
+                            completion_times: None,
                             data: vec![],
                             read_states: Some(HashMap::new()),
                             next_cursor: None,
