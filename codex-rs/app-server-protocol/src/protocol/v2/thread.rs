@@ -532,6 +532,8 @@ pub struct ThreadRestartRecoverParams {
     pub turn_id: String,
     #[ts(type = "string")]
     pub capability: RedactedString,
+    #[ts(optional = nullable)]
+    pub config: Option<HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

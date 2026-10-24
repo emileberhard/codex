@@ -23,6 +23,11 @@ through a session-owned static models manager from the provider's own factory;
 models that omit instructions use Codex's default instructions. A fork that
 omits its provider keeps the source thread's provider. A provider's
 `capabilities.web_search = false` withholds only the hosted web search tool.
+`thread/restart/recover` may carry `config` with only model provider definitions
+and `provider_model_catalog_json`, so a fenced replacement can recover a cold
+thread whose provider was defined for that thread. It applies only while loading
+the thread from storage; the persisted model, provider and permissions stay
+authoritative, and any other key is rejected.
 
 - `.gitignore`
 - `MODULE.bazel.lock`
@@ -154,6 +159,7 @@ omits its provider keeps the source thread's provider. A provider's
 - `codex-rs/app-server/tests/suite/v2/realtime_conversation.rs`
 - `codex-rs/app-server/tests/suite/v2/realtime_transcript_tests.rs`
 - `codex-rs/app-server/tests/suite/v2/remote_thread_store.rs`
+- `codex-rs/app-server/tests/suite/v2/restart_recovery_provider.rs`
 - `codex-rs/app-server/tests/suite/v2/server_diagnostics.rs`
 - `codex-rs/app-server/tests/suite/v2/sleep.rs`
 - `codex-rs/app-server/tests/suite/v2/sqlite_recovery.rs`

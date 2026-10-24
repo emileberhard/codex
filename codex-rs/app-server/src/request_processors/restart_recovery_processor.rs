@@ -102,6 +102,14 @@ impl ThreadRequestProcessor {
     ) -> Result<ThreadRestartRecoverResponse, JSONRPCErrorError> {
         let thread_id = ThreadId::from_string(&params.thread_id)
             .map_err(|error| invalid_request(format!("invalid thread id: {error}")))?;
+        if let Some(key) = params.config.iter().flat_map(HashMap::keys).find(|key| {
+            key.as_str() != "provider_model_catalog_json"
+                && key.split('.').next() != Some("model_providers")
+        }) {
+            return Err(invalid_request(format!(
+                "restart recovery config only supplies model provider definitions and provider_model_catalog_json, not {key}"
+            )));
+        }
         if let Some(turn) = self
             .thread_turns_list_response_inner(ThreadTurnsListParams {
                 thread_id: params.thread_id.clone(),
@@ -125,6 +133,7 @@ impl ThreadRequestProcessor {
             .load_restart_recovery_thread(
                 &request_id,
                 thread_id,
+                params.config.clone(),
                 app_server_client_name,
                 app_server_client_version,
                 client_mcp_extensions,
@@ -190,6 +199,7 @@ impl ThreadRequestProcessor {
         &self,
         request_id: &ConnectionRequestId,
         thread_id: ThreadId,
+        config: Option<HashMap<String, serde_json::Value>>,
         app_server_client_name: Option<String>,
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
@@ -232,7 +242,7 @@ impl ThreadRequestProcessor {
                     .as_ref()
                     .map(|settings| settings.cwd.clone().into_path_buf())
                     .or_else(|| thread_history.session_cwd());
-                let mut request_overrides = None;
+                let mut request_overrides = config;
                 let mut typesafe_overrides = self.build_thread_config_overrides(
                     thread_settings.model.clone(),
                     persisted_settings

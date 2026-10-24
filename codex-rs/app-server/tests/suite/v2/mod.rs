@@ -123,6 +123,8 @@ mod request_permissions;
 mod request_user_input;
 mod request_validation;
 mod residency;
+#[cfg(unix)]
+mod restart_recovery_provider;
 mod review;
 #[path = "rollout_compress_tests.rs"]
 mod rollout_compress;

@@ -488,6 +488,7 @@ mod shutdown_state_tests {
                     capability: codex_utils_redacted_string::RedactedString::from(
                         "0123456789abcdef0123456789abcdef",
                     ),
+                    config: None,
                 })
                 .expect("authorize grant"),
             "generation-1"

@@ -29,6 +29,7 @@ fn exact_generation_target_is_authorized() {
             thread_id: "018f0000-0000-7000-8000-000000000001".to_string(),
             turn_id: "turn-1".to_string(),
             capability: RedactedString::from("0123456789abcdef0123456789abcdef"),
+            config: None,
         })
         .expect("authorized target");
 
@@ -47,6 +48,7 @@ fn capability_and_exact_turn_are_both_required() {
                 thread_id: "018f0000-0000-7000-8000-000000000001".to_string(),
                 turn_id: turn_id.to_string(),
                 capability: RedactedString::from(capability),
+                config: None,
             })
             .expect_err("mismatched recovery request");
     }
@@ -62,6 +64,7 @@ fn clearing_authorization_is_fail_closed() {
             thread_id: "018f0000-0000-7000-8000-000000000001".to_string(),
             turn_id: "turn-1".to_string(),
             capability: RedactedString::from("0123456789abcdef0123456789abcdef"),
+            config: None,
         })
         .expect_err("cleared grant");
 }
