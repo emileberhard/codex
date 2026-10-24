@@ -1050,6 +1050,8 @@ pub struct Config {
     /// When set, this replaces the bundled catalog for the current process.
     pub model_catalog: Option<ModelsResponse>,
 
+    pub provider_model_catalog: Option<ModelsResponse>,
+
     /// Optional verbosity control for GPT-5 models (Responses API `text.verbosity`).
     pub model_verbosity: Option<Verbosity>,
 
@@ -2207,6 +2209,30 @@ fn load_catalog_json(path: &AbsolutePathBuf) -> std::io::Result<ModelsResponse> 
             ErrorKind::InvalidData,
             format!(
                 "model_catalog_json path `{}` must contain at least one model",
+                path.display()
+            ),
+        ));
+    }
+    Ok(catalog)
+}
+
+fn load_provider_catalog_json(path: &AbsolutePathBuf) -> std::io::Result<ModelsResponse> {
+    let file_contents = std::fs::read_to_string(path)?;
+    let catalog = codex_models_manager::model_info::provider_models_response(&file_contents)
+        .map_err(|err| {
+            std::io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "failed to parse provider_model_catalog_json path `{}` as JSON: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+    if catalog.models.is_empty() {
+        return Err(std::io::Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "provider_model_catalog_json path `{}` must contain at least one model",
                 path.display()
             ),
         ));
@@ -4195,6 +4221,11 @@ impl Config {
 
         let check_for_update_on_startup = cfg.check_for_update_on_startup.unwrap_or(true);
         let model_catalog = load_model_catalog(cfg.model_catalog_json.clone())?;
+        let provider_model_catalog = cfg
+            .provider_model_catalog_json
+            .as_ref()
+            .map(load_provider_catalog_json)
+            .transpose()?;
 
         let log_dir = cfg
             .log_dir
@@ -4546,6 +4577,7 @@ impl Config {
             plan_mode_reasoning_effort: cfg.plan_mode_reasoning_effort,
             model_reasoning_summary: cfg.model_reasoning_summary,
             model_catalog,
+            provider_model_catalog,
             model_verbosity: cfg.model_verbosity,
             chatgpt_base_url: cfg
                 .chatgpt_base_url

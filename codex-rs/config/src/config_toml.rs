@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Schema-heavy configuration TOML types used by Codex.
 
 use std::collections::BTreeMap;
@@ -404,6 +405,11 @@ pub struct ConfigToml {
     /// Optional path to a JSON model catalog (applied on startup only).
     /// Per-thread `config` overrides are accepted but do not reapply this (no-ops).
     pub model_catalog_json: Option<AbsolutePathBuf>,
+
+    /// Optional path to a JSON model catalog for the selected model provider. Unlike
+    /// `model_catalog_json`, it applies per thread: the thread resolves model metadata only
+    /// from this catalog, and models that omit instructions use Codex's default instructions.
+    pub provider_model_catalog_json: Option<AbsolutePathBuf>,
 
     /// Deprecated: `friendly` and `pragmatic` no longer select a style.
     pub personality: Option<Personality>,

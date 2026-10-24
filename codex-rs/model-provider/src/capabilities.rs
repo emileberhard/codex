@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Provider capability defaults and resolution of custom provider overrides.
 
 use codex_api::is_azure_responses_provider;
@@ -41,6 +42,7 @@ impl ProviderCapabilities {
         };
         let overrides = info.capabilities.unwrap_or_default();
         Self {
+            web_search: overrides.web_search.unwrap_or(defaults.web_search),
             external_web_access: overrides
                 .external_web_access
                 .unwrap_or(defaults.external_web_access),

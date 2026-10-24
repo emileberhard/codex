@@ -3007,3 +3007,130 @@ async fn inheriting_fork_rejects_configuration_overrides() -> Result<()> {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn thread_provider_catalog_applies_per_thread_and_fork_keeps_provider() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .with_extra_config(&format!(
+            r#"[model_providers.catalog_provider]
+name = "Catalog provider"
+base_url = "{}/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+supports_websockets = false"#,
+            server.uri()
+        ))
+        .write(codex_home.path())?;
+    let catalog_path = codex_home.path().join("provider-catalog.json");
+    std::fs::write(
+        &catalog_path,
+        json!({
+            "models": [{
+                "slug": "catalog-model",
+                "display_name": "Catalog Model",
+                "supported_reasoning_levels": [
+                    {"effort": "low", "description": "low"},
+                    {"effort": "medium", "description": "medium"}
+                ],
+                "default_reasoning_level": "low",
+                "shell_type": "shell_command",
+                "visibility": "list",
+                "supported_in_api": true,
+                "priority": 1,
+                "support_verbosity": false,
+                "truncation_policy": {"mode": "tokens", "limit": 10000},
+                "experimental_supported_tools": []
+            }]
+        })
+        .to_string(),
+    )?;
+
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let start_id = mcp
+        .send_thread_start_request_with_auto_env(ThreadStartParams {
+            model: Some("catalog-model".to_string()),
+            model_provider: Some("catalog_provider".to_string()),
+            config: Some(
+                [(
+                    "provider_model_catalog_json".to_string(),
+                    json!(catalog_path),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            ..Default::default()
+        })
+        .await?;
+    let start_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(start_id)),
+    )
+    .await??;
+    let ThreadStartResponse {
+        thread,
+        model,
+        model_provider,
+        ..
+    } = to_response(start_resp)?;
+    assert_eq!(model, "catalog-model");
+    assert_eq!(model_provider, "catalog_provider");
+
+    let turn_id = mcp
+        .send_turn_start_request(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![UserInput::Text {
+                text: "materialize this thread".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(turn_id)),
+    )
+    .await??;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+
+    let requests = server.received_requests().await.expect("received requests");
+    let body = requests
+        .iter()
+        .rev()
+        .find(|request| request.url.path().ends_with("/responses"))
+        .expect("responses request")
+        .body_json::<Value>()?;
+    assert_eq!(body["model"], json!("catalog-model"));
+    assert_eq!(body["reasoning"]["effort"], json!("low"));
+
+    let fork_id = mcp
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: thread.id.clone(),
+            thread_source: Some(ThreadSource::User),
+            ..Default::default()
+        })
+        .await?;
+    let fork_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(fork_id)),
+    )
+    .await??;
+    let ThreadForkResponse {
+        thread: fork,
+        model_provider: fork_provider,
+        ..
+    } = to_response(fork_resp)?;
+    assert_eq!(fork_provider, "catalog_provider");
+    assert_eq!(fork.model_provider, "catalog_provider");
+
+    Ok(())
+}

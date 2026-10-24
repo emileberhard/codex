@@ -2800,6 +2800,10 @@
             }
           ],
           "description": "Remote context-compaction protocol; omission preserves provider defaults."
+        },
+        "web_search": {
+          "description": "Whether the provider serves the hosted web search tool.",
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -7992,6 +7996,14 @@
         "$ref": "#/definitions/ProjectConfig"
       },
       "type": "object"
+    },
+    "provider_model_catalog_json": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/AbsolutePathBuf"
+        }
+      ],
+      "description": "Optional path to a JSON model catalog for the selected model provider. Unlike `model_catalog_json`, it applies per thread: the thread resolves model metadata only from this catalog, and models that omit instructions use Codex's default instructions."
     },
     "realtime": {
       "allOf": [

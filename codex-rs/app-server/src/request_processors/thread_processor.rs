@@ -5378,6 +5378,14 @@ impl ThreadRequestProcessor {
             /*personality*/ None,
         );
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
+        if typesafe_overrides.model_provider.is_none()
+            && !request_overrides
+                .as_ref()
+                .is_some_and(|overrides| overrides.contains_key("model_provider"))
+            && !source_thread.model_provider.is_empty()
+        {
+            typesafe_overrides.model_provider = Some(source_thread.model_provider.clone());
+        }
         let restore_approval_policy = typesafe_overrides.approval_policy.is_none();
         let restore_approvals_reviewer = typesafe_overrides.approvals_reviewer.is_none()
             && !request_overrides

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::ModelsManagerConfig;
 use codex_prompts::render_model_instructions;
@@ -263,4 +264,51 @@ fn model_context_window_uses_model_value_without_override() {
     let updated = with_config_overrides(model.clone(), &config);
 
     assert_eq!(updated, model);
+}
+
+#[test]
+fn provider_models_response_uses_default_instructions_only_when_omitted() {
+    let row = |extra: &str| {
+        format!(
+            r#"{{"slug":"m","display_name":"M","supported_reasoning_levels":[],"shell_type":"shell_command","visibility":"list","supported_in_api":true,"priority":1,"support_verbosity":false,"truncation_policy":{{"mode":"tokens","limit":10000}},"experimental_supported_tools":[]{extra}}}"#
+        )
+    };
+    let catalog = provider_models_response(&format!(
+        r#"{{"models":[{},{},{},{}]}}"#,
+        row(""),
+        row(r#","model_messages":{"persistent_instructions":"keep"}"#),
+        row(r#","model_messages":{"instructions_template":"own"}"#),
+        row(r#","base_instructions":"legacy""#),
+    ))
+    .expect("catalog");
+    let templates = catalog
+        .models
+        .iter()
+        .map(|model| {
+            model
+                .model_messages
+                .as_ref()
+                .and_then(|messages| messages.instructions_template.clone())
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        templates,
+        vec![
+            Some(BASE_INSTRUCTIONS.to_string()),
+            Some(BASE_INSTRUCTIONS.to_string()),
+            Some("own".to_string()),
+            Some("legacy".to_string()),
+        ]
+    );
+    assert_eq!(
+        catalog.models[0].model_messages,
+        Some(local_model_messages())
+    );
+    assert_eq!(
+        catalog.models[1]
+            .model_messages
+            .as_ref()
+            .and_then(|messages| messages.persistent_instructions.as_deref()),
+        Some("keep")
+    );
 }

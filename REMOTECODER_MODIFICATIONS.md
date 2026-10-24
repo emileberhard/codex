@@ -3,10 +3,11 @@
 Copyright 2026 Emil Eberhard. These modifications remain under Apache-2.0.
 The following upstream files contain changes for shared app-server lifecycle,
 exact recovery, passive history, native agent mail, realtime provider lifecycle,
-connection-owned external authentication, and captured viewed image snapshots. The
-upstream LICENSE and NOTICE remain unchanged. Non-comment formats carry the
-modification notice in a sibling `.license` file. The listed SQL migrations and
-generated protocol files carry their modification notice here to preserve
+connection-owned external authentication, captured viewed image snapshots, and
+per-thread provider model catalogs. The upstream LICENSE and NOTICE remain
+unchanged. Non-comment formats carry the modification notice in a sibling
+`.license` file. The listed SQL migrations and generated protocol and config
+schema files carry their modification notice here to preserve
 deployed migration checksums and generator-owned output bytes.
 
 Viewed images are snapshots of the prepared model input, stored once by content
@@ -15,6 +16,13 @@ time to stay within 1 GiB and 4,096 snapshots, refreshing dedupe hits and removi
 temporary files older than one hour. Forks and copied histories share these paths;
 aggregate eviction owns retention, so thread deletion does not remove snapshots.
 Capture failures warn and omit the path without changing model-visible output.
+
+A thread may set `provider_model_catalog_json` to a model catalog for its
+selected provider. That thread resolves model metadata only from the catalog,
+through a session-owned static models manager from the provider's own factory;
+models that omit instructions use Codex's default instructions. A fork that
+omits its provider keeps the source thread's provider. A provider's
+`capabilities.web_search = false` withholds only the hosted web search tool.
 
 - `.gitignore`
 - `MODULE.bazel.lock`
@@ -170,7 +178,9 @@ Capture failures warn and omit the path without changing model-visible output.
 - `codex-rs/codex-mcp/src/connection_manager_tests.rs`
 - `codex-rs/codex-mcp/src/mcp/mod.rs`
 - `codex-rs/codex-mcp/src/mcp/mod_tests.rs`
+- `codex-rs/config/src/config_toml.rs`
 - `codex-rs/core/Cargo.toml`
+- `codex-rs/core/config.schema.json`
 - `codex-rs/core/src/agent/control.rs`
 - `codex-rs/core/src/agent/control/api.rs`
 - `codex-rs/core/src/agent/control/legacy.rs`
@@ -254,6 +264,11 @@ Capture failures warn and omit the path without changing model-visible output.
 - `codex-rs/login/tests/suite/auth_refresh.rs`
 - `codex-rs/memories/write/src/runtime.rs`
 - `codex-rs/memories/write/src/startup_tests.rs`
+- `codex-rs/model-provider-info/src/capabilities.rs`
+- `codex-rs/model-provider/src/capabilities.rs`
+- `codex-rs/model-provider/src/capabilities_tests.rs`
+- `codex-rs/models-manager/src/model_info.rs`
+- `codex-rs/models-manager/src/model_info_tests.rs`
 - `codex-rs/mxc-sandbox/README.md`
 - `codex-rs/mxc-sandbox/src/lib.rs`
 - `codex-rs/mxc-sandbox/src/policy_tests.rs`
@@ -280,6 +295,7 @@ Capture failures warn and omit the path without changing model-visible output.
 - `codex-rs/state/thread_history_migrations/1000002_thread_observation_versions.sql`
 - `codex-rs/state/thread_history_migrations/1000003_legacy_projection_state.sql`
 - `codex-rs/state/thread_history_migrations/1000004_observation_lineage.sql`
+- `codex-rs/thread-manager-sample/src/main.rs`
 - `codex-rs/thread-store/BUILD.bazel`
 - `codex-rs/thread-store/src/lib.rs`
 - `codex-rs/thread-store/src/live_thread.rs`

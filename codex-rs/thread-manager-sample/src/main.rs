@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io::IsTerminal;
@@ -351,6 +352,7 @@ async fn new_config(
         plan_mode_reasoning_effort: None,
         model_reasoning_summary: None,
         model_catalog: None,
+        provider_model_catalog: None,
         model_verbosity: None,
         chatgpt_base_url: auth_config
             .chatgpt_base_url

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_protocol::config_types::Personality;
 use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::openai_models::ConfigShellToolType;
@@ -146,6 +147,46 @@ pub fn model_info_from_slug(slug: &str) -> ModelInfo {
         multi_agent_version: None,
         multi_agent_reasoning_effort: None,
     }
+}
+
+pub fn provider_models_response(
+    contents: &str,
+) -> Result<codex_protocol::openai_models::ModelsResponse, serde_json::Error> {
+    let mut catalog: serde_json::Value = serde_json::from_str(contents)?;
+    let models = catalog
+        .get_mut("models")
+        .and_then(serde_json::Value::as_array_mut)
+        .into_iter()
+        .flatten();
+    for model in models {
+        let Some(model) = model.as_object_mut() else {
+            continue;
+        };
+        if model.contains_key("base_instructions") {
+            continue;
+        }
+        match model.get_mut("model_messages") {
+            Some(serde_json::Value::Object(messages)) => {
+                if messages
+                    .get("instructions_template")
+                    .is_none_or(serde_json::Value::is_null)
+                {
+                    messages.insert(
+                        "instructions_template".to_string(),
+                        serde_json::Value::String(BASE_INSTRUCTIONS.to_string()),
+                    );
+                }
+            }
+            None | Some(serde_json::Value::Null) => {
+                model.insert(
+                    "model_messages".to_string(),
+                    serde_json::to_value(local_model_messages())?,
+                );
+            }
+            Some(_) => {}
+        }
+    }
+    serde_json::from_value(catalog)
 }
 
 fn local_model_messages() -> ModelMessages {

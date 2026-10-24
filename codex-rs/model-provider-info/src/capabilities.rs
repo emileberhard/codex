@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Serializable capability overrides for custom Responses-compatible providers.
 //!
 //! Unspecified capabilities inherit the provider's existing defaults. Model and
@@ -11,6 +12,8 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ModelProviderCapabilities {
+    /// Whether the provider serves the hosted web search tool.
+    pub web_search: Option<bool>,
     /// Whether hosted web search may access the live web.
     pub external_web_access: Option<bool>,
     /// Remote context-compaction protocol; omission preserves provider defaults.
