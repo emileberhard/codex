@@ -822,7 +822,8 @@ mod tests {
     fn restored_settings_reject_multiple_nested_optional_values() {
         for field in ["effort", "serviceTier"] {
             let mut settings =
-                settings_fingerprint(&ThreadSettingsOverrides::default()).unwrap();
+                settings_fingerprint(&codex_protocol::protocol::ThreadSettingsOverrides::default())
+                    .unwrap();
             settings[field] = json!([null, null]);
             assert!(matches!(restore_settings(&settings), Err(CodexErr::Fatal(_))));
         }
