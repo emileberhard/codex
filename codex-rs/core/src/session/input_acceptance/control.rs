@@ -1,6 +1,26 @@
 // Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 
+#[derive(Debug, PartialEq)]
+enum InputStopAction {
+    Interrupt(String),
+    Fence,
+    Unavailable,
+}
+
+impl InputAcceptances {
+    fn stop_action(&self, client_id: &str) -> InputStopAction {
+        match self.entries.get(client_id) {
+            Some(entry) => match entry.turn_id() {
+                Some(turn_id) => InputStopAction::Interrupt(turn_id.to_owned()),
+                None => InputStopAction::Unavailable,
+            },
+            None if self.entries.len() < MAX_ACCEPTED_INPUTS => InputStopAction::Fence,
+            None => InputStopAction::Unavailable,
+        }
+    }
+}
+
 impl crate::CodexThread {
     pub async fn stop_identified_input(
         &self,
@@ -25,36 +45,34 @@ impl crate::CodexThread {
                     "thread store does not support identified input fences".to_string(),
                 ));
             }
-            let (turn_id, needs_fence) = {
-                let acceptances = session.input_queue.acceptances.lock().await;
-                let entry = acceptances.entries.get(client_id);
-                if entry.is_none() && acceptances.entries.len() >= MAX_ACCEPTED_INPUTS {
-                    return Err(CodexErr::InvalidRequest(
-                        "identified input storage is full; another durable input fence cannot be committed".to_string(),
-                    ));
-                }
-                (
-                    entry.and_then(AcceptedInput::turn_id).map(str::to_owned),
-                    entry.is_none(),
-                )
-            };
-            if needs_fence {
-                live.append_items(&[RolloutItem::InputAcceptance(
-                    InputAcceptanceEvent::Rejected {
-                        thread_id: session.thread_id,
-                        client_id: client_id.to_owned(),
-                    },
-                )])
+            let action = session
+                .input_queue
+                .acceptances
+                .lock()
                 .await
-                .map_err(|error| CodexErr::Fatal(error.to_string()))?;
-                session
-                    .input_queue
-                    .acceptances
-                    .lock()
+                .stop_action(client_id);
+            let turn_id = match action {
+                InputStopAction::Interrupt(turn_id) => Some(turn_id),
+                InputStopAction::Fence => {
+                    live.append_items(&[RolloutItem::InputAcceptance(
+                        InputAcceptanceEvent::Rejected {
+                            thread_id: session.thread_id,
+                            client_id: client_id.to_owned(),
+                        },
+                    )])
                     .await
-                    .entries
-                    .insert(client_id.to_owned(), AcceptedInput::Rejected);
-            }
+                    .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+                    session
+                        .input_queue
+                        .acceptances
+                        .lock()
+                        .await
+                        .entries
+                        .insert(client_id.to_owned(), AcceptedInput::Rejected);
+                    None
+                }
+                InputStopAction::Unavailable => None,
+            };
             if turn_id.is_none() {
                 live.persist_durable()
                     .await
@@ -182,3 +200,7 @@ impl crate::CodexThread {
         Ok(true)
     }
 }
+
+#[cfg(test)]
+#[path = "control_tests.rs"]
+mod tests;

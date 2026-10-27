@@ -834,7 +834,7 @@ terminal and overrides that suspended custody.
 Acceptance metadata is invisible to the model, retained through compaction and
 rollback canonicalization, and cannot authorize input in a copied or forked
 thread. IDs are limited to 512 bytes, accepted request plus captured context to
-32 MiB, and distinct accepted IDs to 65,536 per thread.
+32 MiB, and distinct accepted or rejected IDs to 65,536 per thread.
 
 Environment requests reference the receiving thread's configuration. An identified
 internal request carrying a compiled `Ready` environment must apply that
@@ -856,14 +856,15 @@ before publishing a durable external binding to a newly created thread; ordinary
 `thread/start` remains lazy when this explicit operation is not requested.
 
 Experimental `thread/input/stop` takes the same exact thread and input ID. A
-successful response acknowledges a durable fence before cancellation: existing
-acceptance returns its terminal evidence, while an unaccepted ID is permanently
-rejected and returns `acceptance: null`. This null is meaningful only as the
+successful response acknowledges a durable Stop decision before cancellation:
+existing acceptance returns its terminal evidence, while an unaccepted ID
+returns `acceptance: null` after a durable rejection fence or proof
+that the durable ledger is permanently full. This null is meaningful only as the
 successful Stop acknowledgement, not as evidence from an acceptance read.
-The fence survives unloaded-thread checkpoints, queue retries and same-thread
-history replacement. Persistence failures fail Stop instead of claiming success.
-Stopped IDs count toward the same 65,536-ID bound; a full thread cannot reserve
-a new ID, but existing accepted IDs remain stoppable.
+The fence and full ledger survive unloaded-thread checkpoints, queue retries and
+same-thread history replacement. Persistence failures fail Stop instead of
+claiming success. Stopped IDs count toward the same 65,536-ID bound; Stop at
+capacity writes no additional ID, and existing accepted IDs remain stoppable.
 
 Experimental `daemon/toolContext` takes an actual local `pid` and
 `startedAtUnixMicros`. On macOS it verifies a bounded live ancestry against

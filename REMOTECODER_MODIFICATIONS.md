@@ -35,8 +35,10 @@ bindings before execution. The experimental `thread/input/acceptance/read`
 reports positive custody and lifecycle evidence; absence is not proof of failed
 submission. `thread/input/stop` commits an input-ID fence before acknowledging,
 including when the input has not yet been accepted or the thread is unloaded.
-Queue replay and history replacement retain those fences. Planned suspension
-preserves exact restart authority instead of turning interruption into user Stop.
+A successful null response can also prove that the durable identified-input
+ledger is permanently full, so the absent ID can never be accepted. Queue replay
+and history replacement retain those fences and the full ledger. Planned
+suspension preserves exact restart authority instead of turning interruption into user Stop.
 `daemon/toolContext` resolves current local tool descendants from PID and process
 birth identity, without treating provider environment variables as authority.
 
@@ -443,5 +445,6 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server/src/request_processors/thread_persist_processor.rs`
 - `codex-rs/thread-store/Cargo.toml`
 - `codex-rs/core/src/session/input_acceptance/control.rs`
+- `codex-rs/core/src/session/input_acceptance/control_tests.rs`
 - `codex-rs/core/src/session/input_acceptance/request.rs`
 - `codex-rs/core/src/session/input_acceptance/request_tests.rs`

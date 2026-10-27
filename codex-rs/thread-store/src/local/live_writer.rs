@@ -304,12 +304,8 @@ async fn stop_input_to_recorder(
                     _ => {}
                 }
             }
-            if ids.contains(client_id) {
+            if ids.contains(client_id) || ids.len() >= codex_history::MAX_IDENTIFIED_INPUTS {
                 None
-            } else if ids.len() >= codex_history::MAX_IDENTIFIED_INPUTS {
-                return Err(ThreadStoreError::InvalidRequest {
-                    message: "identified input storage is full; another durable input fence cannot be committed".to_string(),
-                });
             } else {
                 Some(codex_history::InputAcceptanceEvent::Rejected {
                     thread_id,
