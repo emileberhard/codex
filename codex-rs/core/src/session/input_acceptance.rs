@@ -446,7 +446,9 @@ impl Session {
             }) = item
                 && *thread_id == self.thread_id
             {
-                entries.entry(client_id.clone()).or_insert(AcceptedInput::Rejected);
+                entries
+                    .entry(client_id.clone())
+                    .or_insert(AcceptedInput::Rejected);
             }
         }
         if entries.len() > MAX_ACCEPTED_INPUTS {
