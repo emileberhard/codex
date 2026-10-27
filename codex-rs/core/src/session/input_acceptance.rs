@@ -705,23 +705,30 @@ impl crate::CodexThread {
         let live = session
             .live_thread_for_persistence("read input acceptance")
             .map_err(|error| CodexErr::Fatal(error.to_string()))?;
-        live.persist_durable()
+        live.flush()
             .await
             .map_err(|error| CodexErr::Fatal(error.to_string()))?;
-        let history = live
-            .load_input_acceptance_history()
-            .await
-            .map_err(|error| CodexErr::Fatal(error.to_string()))?
-            .ok_or_else(|| {
-                CodexErr::InvalidRequest(
+        let history = match live.load_input_acceptance_history().await {
+            Ok(Some(history)) => history,
+            Err(codex_thread_store::ThreadStoreError::ThreadNotFound { .. }) => return Ok(None),
+            Ok(None) => {
+                return Err(CodexErr::InvalidRequest(
                     "thread store does not support input acceptance reads".to_string(),
-                )
-            })?;
-        Ok(input_acceptance_states(&history.items, session.thread_id)
+                ));
+            }
+            Err(error) => return Err(CodexErr::Fatal(error.to_string())),
+        };
+        let evidence = input_acceptance_states(&history.items, session.thread_id)
             .map_err(CodexErr::Fatal)?
             .into_iter()
             .find(|state| state.acceptance.client_id == client_id)
-            .map(|state| state.evidence()))
+            .map(|state| state.evidence());
+        if evidence.is_some() {
+            live.persist_durable()
+                .await
+                .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        }
+        Ok(evidence)
     }
 
     pub async fn prepare_accepted_input_restart(&self, turn_id: &str) -> CodexResult<()> {
