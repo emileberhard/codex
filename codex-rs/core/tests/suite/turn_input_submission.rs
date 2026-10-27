@@ -825,6 +825,7 @@ async fn recovery_preserves_durable_turn_attribution(
     {
         *client_id = Some("accepted-before-planned-suspension".to_string());
     }
+    let identified_retry = request.clone();
     let turn_id = if matches!(pause, RecoveryPause::AfterLateCompletion) {
         let TurnInputSubmission::Started { turn_id, .. } =
             test.codex.start_or_steer_turn(request).await?
@@ -915,6 +916,23 @@ async fn recovery_preserves_durable_turn_attribution(
         test = builder
             .resume(&server, Arc::clone(&test.home), rollout_path)
             .await?;
+        if matches!(pause, RecoveryPause::IdentifiedBeforeContext) {
+            assert_eq!(
+                test.codex
+                    .start_or_steer_turn(identified_retry.clone())
+                    .await?,
+                TurnInputSubmission::Started {
+                    turn_id: turn_id.clone(),
+                    root_turn_id: root.to_string(),
+                }
+            );
+            let accepted = test
+                .codex
+                .read_input_acceptance("accepted-before-planned-suspension")
+                .await?
+                .expect("durable suspended input");
+            assert!(accepted.suspended);
+        }
         assert_eq!(
             test.codex
                 .recover_turn_if_idle(RecoverTurnRequest {

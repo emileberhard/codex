@@ -149,6 +149,11 @@ fn restore_settings(
     let effort: Vec<Option<codex_protocol::openai_models::ReasoningEffort>> =
         read(value, "effort")?;
     let service_tier: Vec<Option<String>> = read(value, "serviceTier")?;
+    if effort.len() > 1 || service_tier.len() > 1 {
+        return Err(CodexErr::Fatal(
+            "accepted input has multiple effort or service tier values".to_string(),
+        ));
+    }
     let profile_roots: Option<Vec<codex_utils_path_uri::PathUri>> =
         read(value, "profileWorkspaceRoots")?;
     Ok(ThreadSettingsOverrides {
@@ -628,7 +633,7 @@ impl Session {
             .into_iter()
             .find(|state| state.acceptance.client_id == client_id)
             .ok_or_else(|| CodexErr::Fatal("accepted input has no persisted record".to_string()))?;
-        if state.terminal || state.rejected {
+        if state.terminal || state.rejected || state.recorded || state.suspended {
             return Ok(None);
         }
         let accepted = state.acceptance;
@@ -806,5 +811,20 @@ impl crate::CodexThread {
             }
         }
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn restored_settings_reject_multiple_nested_optional_values() {
+        for field in ["effort", "serviceTier"] {
+            let mut settings =
+                settings_fingerprint(&ThreadSettingsOverrides::default()).unwrap();
+            settings[field] = json!([null, null]);
+            assert!(matches!(restore_settings(&settings), Err(CodexErr::Fatal(_))));
+        }
     }
 }
