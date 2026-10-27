@@ -169,6 +169,8 @@ mod thread_timeline;
 mod thread_unarchive;
 mod thread_unload;
 mod thread_unsubscribe;
+#[cfg(target_os = "macos")]
+mod tool_context;
 mod turn_cost_otel;
 mod turn_interrupt;
 mod turn_settings_update;

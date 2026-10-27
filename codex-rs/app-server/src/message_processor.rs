@@ -1373,6 +1373,16 @@ impl MessageProcessor {
                     .await
                     .map(|response| Some(response.into()))
             }
+            ClientRequest::ThreadInputAcceptanceRead { params, .. } => self
+                .thread_processor
+                .thread_input_acceptance_read(params)
+                .await
+                .map(|response| Some(response.into())),
+            ClientRequest::DaemonToolContext { params, .. } => self
+                .thread_processor
+                .daemon_tool_context(params)
+                .await
+                .map(|response| Some(response.into())),
             ClientRequest::ThreadRestartRecover { params, .. } => {
                 self.require_settled_restart_fence()?;
                 let generation_id = self.restart_recovery_authorizer.authorize(&params)?;

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::VecDeque;
@@ -174,6 +175,7 @@ pub(crate) struct LocalProcess {
 
 struct LocalExecProcess {
     process_id: ProcessId,
+    local_process_identity: Option<codex_utils_pty::LocalProcessIdentity>,
     backend: LocalProcess,
     wake_tx: watch::Sender<u64>,
     events: ExecProcessEventLog,
@@ -804,9 +806,17 @@ impl LocalProcess {
             .await
             .map_err(map_handler_error)?;
         let sandbox_type = sandbox_type_from_protocol(response.sandbox_type);
+        let local_process_identity = {
+            let processes = self.inner.processes.lock().await;
+            match processes.get(&response.process_id) {
+                Some(ProcessEntry::Running(process)) => process.session.local_process_identity(),
+                _ => None,
+            }
+        };
         Ok(StartedExecProcess {
             process: Arc::new(LocalExecProcess {
                 process_id: response.process_id,
+                local_process_identity,
                 backend: self.clone(),
                 wake_tx,
                 events,
@@ -885,6 +895,10 @@ impl LocalExecProcess {
 impl ExecProcess for LocalExecProcess {
     fn process_id(&self) -> &ProcessId {
         &self.process_id
+    }
+
+    fn local_process_identity(&self) -> Option<codex_utils_pty::LocalProcessIdentity> {
+        self.local_process_identity
     }
 
     fn subscribe_wake(&self) -> watch::Receiver<u64> {

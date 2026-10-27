@@ -985,6 +985,42 @@ async fn turn_start_identified_input_retries_keep_the_original_turn(
         })
         .await?;
     assert_eq!(retried.turn.id, accepted.turn.id);
+    let evidence: codex_app_server_protocol::ThreadInputAcceptanceReadResponse = mcp
+        .request(|request_id| ClientRequest::ThreadInputAcceptanceRead {
+            request_id,
+            params: codex_app_server_protocol::ThreadInputAcceptanceReadParams {
+                thread_id: params.thread_id.clone(),
+                client_user_message_id: "identified-input-retry".to_string(),
+            },
+        })
+        .await?;
+    let evidence = evidence.acceptance.context("durable input acceptance")?;
+    assert_eq!(evidence.turn_id, accepted.turn.id);
+    assert!(
+        evidence
+            .facts
+            .contains(&codex_app_server_protocol::InputAcceptanceFact::Recorded)
+    );
+    assert!(
+        evidence
+            .facts
+            .contains(&codex_app_server_protocol::InputAcceptanceFact::Terminal)
+    );
+    assert!(
+        !evidence
+            .facts
+            .contains(&codex_app_server_protocol::InputAcceptanceFact::Suspended)
+    );
+    let absent: codex_app_server_protocol::ThreadInputAcceptanceReadResponse = mcp
+        .request(|request_id| ClientRequest::ThreadInputAcceptanceRead {
+            request_id,
+            params: codex_app_server_protocol::ThreadInputAcceptanceReadParams {
+                thread_id: params.thread_id.clone(),
+                client_user_message_id: "unknown-input".to_string(),
+            },
+        })
+        .await?;
+    assert!(absent.acceptance.is_none());
     let _: codex_app_server_protocol::ThreadRevertResponse = mcp
         .request(|request_id| ClientRequest::ThreadRevert {
             request_id,

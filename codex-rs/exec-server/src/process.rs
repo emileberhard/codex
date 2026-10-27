@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
@@ -198,6 +199,10 @@ impl ExecProcessEventReceiver {
 /// that want output and lifecycle changes delivered as they happen.
 pub trait ExecProcess: Send + Sync {
     fn process_id(&self) -> &ProcessId;
+
+    fn local_process_identity(&self) -> Option<codex_utils_pty::LocalProcessIdentity> {
+        None
+    }
 
     fn subscribe_wake(&self) -> watch::Receiver<u64>;
 

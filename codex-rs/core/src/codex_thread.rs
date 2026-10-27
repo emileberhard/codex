@@ -83,6 +83,14 @@ use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LocalToolContext {
+    pub thread_id: ThreadId,
+    pub turn_id: String,
+    pub tool_call_id: String,
+    pub root_process_identity: codex_utils_pty::LocalProcessIdentity,
+}
+
 use codex_rollout::state_db::StateDbHandle;
 
 static LIVE_THREADS: Gauge = Gauge::new("core.threads.live");
@@ -273,6 +281,17 @@ pub struct BackgroundTerminalInfo {
 /// Conduit for the bidirectional stream of messages that compose a thread
 /// (formerly called a conversation) in Codex.
 impl CodexThread {
+    pub(crate) async fn local_tool_contexts(
+        &self,
+        ancestry: &[codex_utils_pty::LocalProcessIdentity],
+    ) -> Vec<LocalToolContext> {
+        self.session
+            .services
+            .unified_exec_manager
+            .local_tool_contexts(ancestry)
+            .await
+    }
+
     pub(crate) fn new(
         session: Arc<Session>,
         io: SessionIo,

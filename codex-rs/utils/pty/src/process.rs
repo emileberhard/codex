@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use core::fmt;
 use std::io;
 #[cfg(unix)]
@@ -109,6 +110,7 @@ type ResizeFn = Box<dyn FnMut(TerminalSize) -> anyhow::Result<()> + Send>;
 
 /// Handle for driving an interactive process (PTY or pipe).
 pub struct ProcessHandle {
+    local_process_identity: Option<crate::LocalProcessIdentity>,
     writer_tx: StdMutex<Option<mpsc::Sender<Vec<u8>>>>,
     killer: StdMutex<Option<Box<dyn ChildTerminator>>>,
     reader_handle: StdMutex<Option<JoinHandle<()>>>,
@@ -144,8 +146,10 @@ impl ProcessHandle {
         exit_code: Arc<StdMutex<Option<i32>>>,
         pty_handles: Option<PtyHandles>,
         resizer: Option<ResizeFn>,
+        local_process_identity: Option<crate::LocalProcessIdentity>,
     ) -> Self {
         Self {
+            local_process_identity,
             writer_tx: StdMutex::new(Some(writer_tx)),
             killer: StdMutex::new(Some(killer)),
             reader_handle: StdMutex::new(Some(reader_handle)),
@@ -175,6 +179,12 @@ impl ProcessHandle {
     /// True if the child process has exited.
     pub fn has_exited(&self) -> bool {
         self.exit_status.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub fn local_process_identity(&self) -> Option<crate::LocalProcessIdentity> {
+        (!self.has_exited())
+            .then_some(self.local_process_identity)
+            .flatten()
     }
 
     /// Returns the exit code if known.
@@ -470,6 +480,7 @@ pub fn spawn_from_driver(driver: ProcessDriver) -> SpawnedProcess {
         exit_code,
         /*pty_handles*/ None,
         resizer,
+        None,
     );
 
     SpawnedProcess {

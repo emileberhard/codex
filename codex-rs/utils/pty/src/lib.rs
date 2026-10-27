@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 mod child;
 pub use child::Child;
 mod child_command;
@@ -10,6 +11,10 @@ pub use child_command::SpawnFallback;
 mod linux_fds;
 pub mod pipe;
 mod process;
+mod process_identity;
+pub use process_identity::LocalProcessIdentity;
+pub use process_identity::local_process_identity;
+pub use process_identity::verified_process_ancestry;
 pub mod process_group;
 pub mod pty;
 pub use pty::ChildFds;

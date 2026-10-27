@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 mod shared;
 
 mod account;
@@ -36,6 +37,7 @@ mod thread_attachment;
 mod thread_data;
 mod thread_prediction;
 mod thread_usage;
+mod tool_context;
 mod turn;
 mod user_verification;
 mod windows_sandbox;
@@ -77,6 +79,7 @@ pub use thread_attachment::*;
 pub use thread_data::*;
 pub use thread_prediction::*;
 pub use thread_usage::*;
+pub use tool_context::*;
 pub use turn::*;
 pub use user_verification::*;
 pub use windows_sandbox::*;

@@ -840,3 +840,21 @@ Environment requests reference the receiving thread's configuration. An identifi
 internal request carrying a compiled `Ready` environment must apply that
 configuration separately before submitting input; it is rejected before execution.
 Public environment, cwd and workspace-root overrides use thread-derived authority.
+
+Experimental `thread/input/acceptance/read` takes `threadId` and
+`clientUserMessageId`. Its optional `acceptance` returns the original `turnId`,
+`rootTurnId`, payload `fingerprint`, and positive durable `facts`: `recorded`,
+`rejected`, `stopped`, `finished`, `terminal`, or `suspended`. These describe
+native custody and subsequent lifecycle evidence, never current execution or
+model consumption. A null acceptance is no evidence and never proves an input
+was not submitted. Unsupported or unread persistence fails the read.
+
+Experimental `daemon/toolContext` takes an actual local `pid` and
+`startedAtUnixMicros`. On macOS it verifies a bounded live ancestry against
+birth identities captured by the existing local tool-process owner at spawn.
+Its optional `context` contains `threadId`, launch `turnId`, `toolCallId`, and
+`rootProcessIdentity` with the same process identity fields. Unrelated,
+terminated, ambiguous, remote, legacy or unsupported process ownership returns
+null. Environment IDs, shared daemon ancestry and socket paths confer no
+authority. Callers must bind the requested identity to their actual process;
+detached processes require an explicitly captured context validated by its owner.

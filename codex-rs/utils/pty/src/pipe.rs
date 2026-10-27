@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Pipe I/O and process-tree ownership on top of the shared local child launcher.
 
 use std::collections::HashMap;
@@ -180,6 +181,7 @@ async fn spawn_process_with_stdin_mode(
         };
     #[cfg(not(target_os = "linux"))]
     let mut child = command.spawn()?;
+    let local_process_identity = child.id().and_then(crate::local_process_identity);
     #[cfg(windows)]
     let windows_terminator = {
         // Accept the small race: a descendant created between spawn and
@@ -306,6 +308,7 @@ async fn spawn_process_with_stdin_mode(
         exit_code,
         /*pty_handles*/ None,
         /*resizer*/ None,
+        local_process_identity,
     );
 
     Ok(SpawnedProcess {

@@ -2081,6 +2081,7 @@ dependencies = [
  "codex-guardian-v2",
  "codex-history-notes-extension",
  "codex-home",
+ "codex-history",
  "codex-hooks",
  "codex-http-client",
  "codex-image-generation-extension",

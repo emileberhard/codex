@@ -570,6 +570,7 @@ mod feedback_thread_index;
 mod fs_processor;
 mod git_processor;
 mod initialize_processor;
+mod input_acceptance_processor;
 mod marketplace_processor;
 mod mcp_event_stream;
 mod mcp_processor;
@@ -593,6 +594,7 @@ mod thread_queue_processor;
 mod thread_read_state;
 mod thread_sections;
 mod token_usage_replay;
+mod tool_context_processor;
 mod turn_processor;
 mod windows_sandbox_processor;
 

@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use rand::Rng;
 use std::cmp::Reverse;
 use std::collections::HashMap;
@@ -449,6 +450,32 @@ fn terminate_process_on_network_denial(
 }
 
 impl UnifiedExecProcessManager {
+    pub(crate) async fn local_tool_contexts(
+        &self,
+        ancestry: &[codex_utils_pty::LocalProcessIdentity],
+    ) -> Vec<crate::LocalToolContext> {
+        let store = self.process_store.lock().await;
+        let mut result = Vec::new();
+        for entry in store.processes.values() {
+            let Some(root) = entry.process.local_process_identity() else {
+                continue;
+            };
+            if !ancestry.contains(&root) {
+                continue;
+            }
+            let Some(session) = entry.session.upgrade() else {
+                continue;
+            };
+            result.push(crate::LocalToolContext {
+                thread_id: session.thread_id,
+                turn_id: entry.turn_id.clone(),
+                tool_call_id: entry.call_id.clone(),
+                root_process_identity: root,
+            });
+        }
+        result
+    }
+
     pub(crate) async fn allocate_process_id(&self) -> i32 {
         loop {
             let mut store = self.process_store.lock().await;
@@ -1244,6 +1271,7 @@ impl UnifiedExecProcessManager {
             process: Arc::clone(&process),
             plugin_metrics_sidecar: plugin_metrics_sidecar.clone(),
             call_id: context.call_id.clone(),
+            turn_id: context.step_context.turn.sub_id.clone(),
             process_id,
             cwd: cwd.clone(),
             initial_exec_command_active,

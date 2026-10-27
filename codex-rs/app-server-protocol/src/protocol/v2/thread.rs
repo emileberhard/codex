@@ -544,6 +544,43 @@ pub struct ThreadRestartRecoverResponse {
     pub turn: Turn,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadInputAcceptanceReadParams {
+    pub thread_id: String,
+    pub client_user_message_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub enum InputAcceptanceFact {
+    Recorded,
+    Rejected,
+    Stopped,
+    Finished,
+    Terminal,
+    Suspended,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadInputAcceptance {
+    pub turn_id: String,
+    pub root_turn_id: String,
+    pub fingerprint: String,
+    pub facts: Vec<InputAcceptanceFact>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadInputAcceptanceReadResponse {
+    pub acceptance: Option<ThreadInputAcceptance>,
+}
+
 impl ThreadResumeResponse {
     /// Parses valid absolute instruction source paths and omits malformed legacy values.
     pub fn instruction_source_path_uris(&self) -> Vec<PathUri> {

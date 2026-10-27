@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::shell::Shell;
 use crate::shell::ShellInvocation;
@@ -647,6 +648,7 @@ async fn pruning_does_not_evict_live_process_while_exited_process_is_finalizing(
                 },
                 plugin_metrics_sidecar: None,
                 call_id: format!("call-{process_id}"),
+                turn_id: turn.sub_id.clone(),
                 process_id,
                 cwd: cwd.clone(),
                 initial_exec_command_active: Arc::new(AtomicBool::new(false)),

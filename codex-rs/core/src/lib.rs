@@ -55,6 +55,7 @@ pub use codex_thread::ConfigRefreshOutcome;
 pub use codex_thread::GuardianAuthorizationVersion;
 pub use codex_thread::GuardianRootMessage;
 pub use codex_thread::GuardianRootSnapshot;
+pub use codex_thread::LocalToolContext;
 pub use codex_thread::RestartRecoveryThread;
 pub use codex_thread::ThreadConfigSnapshot;
 pub use session::turn_context::TurnContext;

@@ -574,6 +574,18 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadRestartRecoverResponse,
     },
+    #[experimental("thread/input/acceptance/read")]
+    ThreadInputAcceptanceRead => "thread/input/acceptance/read" {
+        params: v2::ThreadInputAcceptanceReadParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadInputAcceptanceReadResponse,
+    },
+    #[experimental("daemon/toolContext")]
+    DaemonToolContext => "daemon/toolContext" {
+        params: v2::DaemonToolContextParams,
+        serialization: None,
+        response: v2::DaemonToolContextResponse,
+    },
     ThreadFork => "thread/fork" {
         params: v2::ThreadForkParams,
         inspect_params: true,

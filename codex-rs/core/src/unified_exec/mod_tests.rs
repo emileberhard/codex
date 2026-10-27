@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::process::OutputDrainPolicy;
 use super::*;
 use crate::codex_thread::BackgroundTerminalInfo;
@@ -139,6 +140,7 @@ async fn exec_command_with_tty(
             process: Arc::clone(&process),
             plugin_metrics_sidecar: None,
             call_id: context.call_id.clone(),
+            turn_id: context.step_context.turn.sub_id.clone(),
             process_id,
             cwd: cwd.clone().into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -607,6 +609,7 @@ async fn terminating_initial_exec_command_rechecks_initial_response_state() -> a
             process,
             plugin_metrics_sidecar: None,
             call_id: "call".to_string(),
+            turn_id: turn.sub_id.clone(),
             process_id,
             cwd: cwd.into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(true)),
@@ -693,6 +696,7 @@ async fn terminating_during_stdin_poll_returns_exited_response() -> anyhow::Resu
             process: Arc::clone(&process),
             plugin_metrics_sidecar: None,
             call_id: "call".to_string(),
+            turn_id: turn.sub_id.clone(),
             process_id,
             cwd: cwd.into(),
             initial_exec_command_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),

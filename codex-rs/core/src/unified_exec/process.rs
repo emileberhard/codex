@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 #![allow(clippy::module_inception)]
 
 use std::sync::Arc;
@@ -124,6 +125,16 @@ impl std::fmt::Debug for UnifiedExecProcess {
 }
 
 impl UnifiedExecProcess {
+    pub(super) fn local_process_identity(&self) -> Option<codex_utils_pty::LocalProcessIdentity> {
+        if self.has_exited() {
+            return None;
+        }
+        match &self.process_handle {
+            ProcessHandle::Local(process) => process.local_process_identity(),
+            ProcessHandle::ExecServer(process) => process.local_process_identity(),
+        }
+    }
+
     fn new(
         process_handle: ProcessHandle,
         sandbox_type: Option<SandboxType>,

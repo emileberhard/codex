@@ -1057,6 +1057,28 @@ impl ThreadManager {
         self.state.list_thread_ids().await
     }
 
+    pub async fn local_tool_context(
+        &self,
+        caller: codex_utils_pty::LocalProcessIdentity,
+    ) -> Option<crate::LocalToolContext> {
+        let ancestry = codex_utils_pty::verified_process_ancestry(caller)?;
+        let mut context = None;
+        for thread_id in self.list_thread_ids().await {
+            let Ok(thread) = self.get_thread(thread_id).await else {
+                continue;
+            };
+            for candidate in thread.local_tool_contexts(&ancestry).await {
+                if context.is_some() {
+                    return None;
+                }
+                context = Some(candidate);
+            }
+        }
+        (codex_utils_pty::verified_process_ancestry(caller).as_ref() == Some(&ancestry))
+            .then_some(context)
+            .flatten()
+    }
+
     pub fn subscribe_thread_created(&self) -> broadcast::Receiver<ThreadId> {
         self.state.thread_created_tx.subscribe()
     }
