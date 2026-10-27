@@ -849,6 +849,12 @@ native custody and subsequent lifecycle evidence, never current execution or
 model consumption. A null acceptance is no evidence and never proves an input
 was not submitted. Unsupported or unread persistence fails the read.
 
+Experimental `thread/persist` takes `threadId` for a loaded non-ephemeral thread
+and returns `{}` only after initialization settings and the empty thread identity
+pass the durable persistence barrier. It starts no input or model work. Call it
+before publishing a durable external binding to a newly created thread; ordinary
+`thread/start` remains lazy when this explicit operation is not requested.
+
 Experimental `thread/input/stop` takes the same exact thread and input ID. A
 successful response acknowledges a durable fence before cancellation: existing
 acceptance returns its terminal evidence, while an unaccepted ID is permanently
