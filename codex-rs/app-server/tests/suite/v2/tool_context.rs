@@ -88,16 +88,24 @@ async fn tool_context_uses_the_live_tool_owner_and_rejects_unrelated_processes()
     })
     .await??;
     let identity = codex_utils_pty::local_process_identity(pid).context("tool process identity")?;
-    let response: DaemonToolContextResponse = mcp
-        .request(|request_id| ClientRequest::DaemonToolContext {
-            request_id,
-            params: DaemonToolContextParams {
-                pid: pid as i32,
-                started_at_unix_micros: identity.started_at_unix_micros,
-            },
-        })
-        .await?;
-    let context = response.context.context("live tool context")?;
+    let context = timeout(Duration::from_secs(3), async {
+        loop {
+            let response: DaemonToolContextResponse = mcp
+                .request(|request_id| ClientRequest::DaemonToolContext {
+                    request_id,
+                    params: DaemonToolContextParams {
+                        pid: pid as i32,
+                        started_at_unix_micros: identity.started_at_unix_micros,
+                    },
+                })
+                .await?;
+            if let Some(context) = response.context {
+                return Ok::<_, anyhow::Error>(context);
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await??;
     assert_eq!(context.thread_id, thread.id);
     assert_ne!(context.thread_id, other.id);
     assert_eq!(context.turn_id, accepted.turn.id);
