@@ -736,6 +736,7 @@ impl codex_extension_api::TurnLifecycleContributor for RecoveryLifecycleBarrier 
 enum RecoveryPause {
     AfterContext,
     BeforeContext,
+    IdentifiedBeforeContext,
     AfterLateCompletion,
     LegacyRollout,
 }
@@ -746,6 +747,7 @@ enum RecoveryPause {
 #[test_case(None, RecoveryPause::AfterContext; "unknown_trigger")]
 #[test_case(None, RecoveryPause::LegacyRollout; "legacy_root")]
 #[test_case(Some("automation"), RecoveryPause::BeforeContext; "before_context_is_written")]
+#[test_case(Some("composer"), RecoveryPause::IdentifiedBeforeContext; "identified_before_user_item_is_recorded")]
 #[test_case(Some("composer"), RecoveryPause::AfterLateCompletion; "after_previous_turn_completes_late")]
 #[tokio::test]
 async fn recovery_preserves_durable_turn_attribution(
@@ -783,7 +785,10 @@ async fn recovery_preserves_durable_turn_attribution(
         .await;
     }
     let request_received = Arc::new(tokio::sync::Notify::new());
-    if matches!(pause, RecoveryPause::BeforeContext) {
+    if matches!(
+        pause,
+        RecoveryPause::BeforeContext | RecoveryPause::IdentifiedBeforeContext
+    ) {
         barrier.block_next.store(true, Ordering::SeqCst);
     } else {
         let notify = Arc::clone(&request_received);
@@ -814,6 +819,12 @@ async fn recovery_preserves_durable_turn_attribution(
         initiating_agent_path: initiating_agent_path.clone(),
         ..Default::default()
     });
+    let mut request = request;
+    if matches!(pause, RecoveryPause::IdentifiedBeforeContext)
+        && let TurnInput::UserInput { client_id, .. } = &mut request.input
+    {
+        *client_id = Some("accepted-before-planned-suspension".to_string());
+    }
     let turn_id = if matches!(pause, RecoveryPause::AfterLateCompletion) {
         let TurnInputSubmission::Started { turn_id, .. } =
             test.codex.start_or_steer_turn(request).await?
@@ -830,7 +841,10 @@ async fn recovery_preserves_durable_turn_attribution(
         turn_id
     };
     timeout(Duration::from_secs(/*secs*/ 10), async {
-        if matches!(pause, RecoveryPause::BeforeContext) {
+        if matches!(
+            pause,
+            RecoveryPause::BeforeContext | RecoveryPause::IdentifiedBeforeContext
+        ) {
             barrier.entered.notified().await;
         } else {
             request_received.notified().await;
@@ -843,6 +857,15 @@ async fn recovery_preserves_durable_turn_attribution(
             matches!(event, EventMsg::TurnComplete(event) if event.turn_id == previous_turn_id)
         })
         .await;
+    }
+    if matches!(pause, RecoveryPause::IdentifiedBeforeContext) {
+        let (items, _, errors) = codex_rollout::RolloutRecorder::load_rollout_items(
+            &test.codex.rollout_path().expect("durable accepted input"),
+        )
+        .await?;
+        assert_eq!(errors, 0);
+        assert!(items.iter().any(|item| matches!(item, codex_rollout::RolloutItem::InputAcceptance(codex_rollout::InputAcceptanceEvent::Accepted(accepted)) if accepted.client_id == "accepted-before-planned-suspension")));
+        assert!(!items.iter().any(|item| matches!(item, codex_rollout::RolloutItem::EventMsg(EventMsg::UserMessage(message)) if message.client_id.as_deref() == Some("accepted-before-planned-suspension"))));
     }
     let thread_settings = test.codex.restorable_thread_settings().await;
     if let Some(url) = test.executor_environment().exec_server_url() {
@@ -932,6 +955,17 @@ async fn recovery_preserves_durable_turn_attribution(
         )
         .await?;
         let request = response.single_request();
+        if matches!(pause, RecoveryPause::IdentifiedBeforeContext) {
+            assert_eq!(
+                request
+                    .message_input_texts("user")
+                    .iter()
+                    .filter(|text| text.as_str() == "recover this work")
+                    .count(),
+                1,
+                "recovery attempt {attempt}"
+            );
+        }
         let metadata: Value = serde_json::from_str(
             &request
                 .header("x-codex-turn-metadata")

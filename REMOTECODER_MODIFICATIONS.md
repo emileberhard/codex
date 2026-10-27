@@ -412,3 +412,4 @@ authoritative, and any other key is rejected.
 - `scripts/codex_package/test_cli.py`
 - `scripts/codex_package/test_layout.py`
 - `sdk/python/src/openai_codex/generated/v2_all.py`
+- `codex-rs/app-server/src/request_processors/daemon_snapshot.rs`

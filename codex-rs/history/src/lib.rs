@@ -21,7 +21,10 @@ pub use initialization::HistoryInitialization;
 mod input_acceptance;
 pub use input_acceptance::InputAcceptance;
 pub use input_acceptance::InputAcceptanceEvent;
+pub use input_acceptance::InputAcceptanceEvidence;
 pub use input_acceptance::InputAcceptanceKind;
+pub use input_acceptance::InputAcceptanceState;
+pub use input_acceptance::input_acceptance_states;
 
 use std::borrow::Borrow;
 use std::ops::Deref;

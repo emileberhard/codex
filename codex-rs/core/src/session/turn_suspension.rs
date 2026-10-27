@@ -54,6 +54,10 @@ pub(super) async fn suspend_turn_and_shutdown(
         CodexErr::Fatal(format!("flush before turn suspension failed: {error}"))
     })?;
 
+    session
+        .prepare_accepted_input_restart(expected_turn_id)
+        .await?;
+
     // The flush can yield while the active turn completes or changes. Recheck its
     // kind under the same lock used to remove it.
     let mut turn = {

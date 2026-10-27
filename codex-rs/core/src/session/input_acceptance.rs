@@ -5,9 +5,9 @@ use codex_history::InputAcceptance;
 use codex_history::InputAcceptanceEvent;
 use codex_history::InputAcceptanceKind;
 use codex_history::RolloutItem;
+use codex_history::input_acceptance_states;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::items::TurnItem;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::turn_input::TurnInput;
 use codex_protocol::turn_input::TurnInputRequest;
@@ -34,6 +34,7 @@ enum AcceptanceHistoryState {
 #[derive(Default)]
 pub(super) struct InputAcceptances {
     history_state: AcceptanceHistoryState,
+    suspending_turns: std::collections::HashSet<String>,
     live_inputs: std::collections::HashSet<String>,
     entries: HashMap<String, (String, TurnInputSubmission)>,
 }
@@ -376,6 +377,90 @@ impl Session {
         Ok(true)
     }
 
+    pub(super) async fn accepted_turn_allows_recovery(&self, turn_id: &str) -> CodexResult<bool> {
+        if !self.load_input_acceptances().await? {
+            return Ok(true);
+        }
+        let live = self
+            .live_thread_for_persistence("check accepted turn recovery")
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        live.flush()
+            .await
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        let history = live
+            .load_input_acceptance_history()
+            .await
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?
+            .ok_or_else(|| {
+                CodexErr::Fatal("identified input history became unsupported".to_string())
+            })?;
+        Ok(!input_acceptance_states(&history.items, self.thread_id)
+            .map_err(CodexErr::Fatal)?
+            .iter()
+            .any(|state| state.acceptance.turn_id == turn_id && state.terminal))
+    }
+
+    pub(super) async fn prepare_accepted_input_restart(&self, turn_id: &str) -> CodexResult<()> {
+        let _admission = self.input_queue.acceptance_submission.lock().await;
+        if !self.load_input_acceptances().await? {
+            return Ok(());
+        }
+        if !self.input_queue.acceptances.lock().await.entries.values().any(|(_, submission)| matches!(submission,
+            TurnInputSubmission::Started {turn_id: id, ..} | TurnInputSubmission::Steered {turn_id: id, ..} if id == turn_id
+        )) { return Ok(()); }
+        {
+            let active = self.active_turn.lock().await;
+            if !active
+                .as_ref()
+                .and_then(|turn| turn.task.as_ref())
+                .is_some_and(|task| task.turn_context.sub_id == turn_id)
+            {
+                return Ok(());
+            }
+        }
+        let live = self
+            .live_thread_for_persistence("checkpoint accepted input for restart")
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        self.input_queue
+            .acceptances
+            .lock()
+            .await
+            .suspending_turns
+            .insert(turn_id.to_string());
+        let result = async {
+            live.append_items(&[RolloutItem::InputAcceptance(
+                InputAcceptanceEvent::Suspended {
+                    thread_id: self.thread_id,
+                    turn_id: turn_id.to_string(),
+                },
+            )])
+            .await
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+            live.persist_durable()
+                .await
+                .map_err(|error| CodexErr::Fatal(error.to_string()))
+        }
+        .await;
+        if result.is_err() {
+            self.input_queue
+                .acceptances
+                .lock()
+                .await
+                .suspending_turns
+                .remove(turn_id);
+        }
+        result
+    }
+
+    pub(super) async fn mark_acceptance_turn_resumed(&self, turn_id: &str) {
+        self.input_queue
+            .acceptances
+            .lock()
+            .await
+            .suspending_turns
+            .remove(turn_id);
+    }
+
     pub(super) async fn fence_accepted_inputs(&self) -> CodexResult<()> {
         let _admission = self.input_queue.acceptance_submission.lock().await;
         self.load_input_acceptances().await?;
@@ -400,7 +485,22 @@ impl Session {
     ) -> Vec<RolloutItem> {
         let turn_id = match event {
             EventMsg::TurnComplete(event) => Some(event.turn_id.as_str()),
-            EventMsg::TurnAborted(event) => event.turn_id.as_deref(),
+            EventMsg::TurnAborted(event) => {
+                if event.reason == codex_protocol::protocol::TurnAbortReason::Interrupted
+                    && event.error.is_none()
+                    && self
+                        .input_queue
+                        .acceptances
+                        .lock()
+                        .await
+                        .suspending_turns
+                        .iter()
+                        .any(|id| event.turn_id.as_ref() == Some(id))
+                {
+                    return Vec::new();
+                }
+                event.turn_id.as_deref()
+            }
             EventMsg::ThreadRolledBack(_) => None,
             _ => return Vec::new(),
         };
@@ -465,90 +565,22 @@ impl Session {
                     "thread store does not support identified input acceptance".to_string(),
                 )
             })?;
-        let mut pending: Vec<&InputAcceptance> = Vec::new();
-        let mut seen = false;
-        let mut terminal = false;
-        for item in &history.items {
-            match item {
-                RolloutItem::InputAcceptance(InputAcceptanceEvent::Accepted(accepted))
-                    if accepted.thread_id == self.thread_id && accepted.turn_id == turn_id =>
-                {
-                    seen = true;
-                    if !terminal {
-                        pending.push(accepted);
-                    }
-                }
-                RolloutItem::InputAcceptance(
-                    InputAcceptanceEvent::Recorded {
-                        thread_id,
-                        client_id,
-                    }
-                    | InputAcceptanceEvent::Rejected {
-                        thread_id,
-                        client_id,
-                    },
-                ) if *thread_id == self.thread_id => {
-                    pending.retain(|accepted| &accepted.client_id != client_id)
-                }
-                RolloutItem::EventMsg(EventMsg::UserMessage(item)) => {
-                    pending.retain(|accepted| item.client_id.as_ref() != Some(&accepted.client_id))
-                }
-                RolloutItem::EventMsg(EventMsg::ItemCompleted(event)) => {
-                    if let TurnItem::UserMessage(item) = &event.item {
-                        pending.retain(|accepted| {
-                            item.client_id.as_ref() != Some(&accepted.client_id)
-                        });
-                    }
-                }
-                RolloutItem::InputAcceptance(
-                    InputAcceptanceEvent::Finished {
-                        thread_id,
-                        turn_id: id,
-                    }
-                    | InputAcceptanceEvent::Stopped {
-                        thread_id,
-                        turn_id: id,
-                    },
-                ) if *thread_id == self.thread_id && id == turn_id => {
-                    terminal = true;
-                    pending.clear();
-                }
-                RolloutItem::EventMsg(EventMsg::TurnComplete(event))
-                    if event.turn_id == turn_id =>
-                {
-                    terminal = true;
-                    pending.clear();
-                }
-                RolloutItem::EventMsg(EventMsg::TurnAborted(event))
-                    if event.turn_id.as_deref().is_none_or(|id| id == turn_id) && seen =>
-                {
-                    terminal = true;
-                    pending.clear();
-                }
-                RolloutItem::InputAcceptance(InputAcceptanceEvent::Fenced { thread_id })
-                    if *thread_id == self.thread_id && seen =>
-                {
-                    terminal = true;
-                    pending.clear();
-                }
-                RolloutItem::EventMsg(EventMsg::ThreadRolledBack(_)) if seen => {
-                    terminal = true;
-                    pending.clear();
-                }
-                RolloutItem::EventMsg(EventMsg::TurnStarted(event))
-                    if seen && event.turn_id != turn_id =>
-                {
-                    terminal = true;
-                    pending.clear();
-                }
-                _ => {}
-            }
-        }
+        let pending =
+            input_acceptance_states(&history.items, self.thread_id).map_err(CodexErr::Fatal)?;
         let acceptances = self.input_queue.acceptances.lock().await;
         pending
             .into_iter()
-            .filter(|accepted| !acceptances.live_inputs.contains(&accepted.client_id))
-            .map(|accepted| {
+            .filter(|state| {
+                state.acceptance.turn_id == turn_id
+                    && !state.recorded
+                    && !state.rejected
+                    && !state.terminal
+                    && !acceptances
+                        .live_inputs
+                        .contains(&state.acceptance.client_id)
+            })
+            .map(|state| {
+                let accepted = state.acceptance;
                 let request: DurableInputRequest = serde_json::from_value(accepted.request.clone())
                     .map_err(|error| CodexErr::Fatal(error.to_string()))?;
                 Ok(TurnInputRequest::new(request.input)
@@ -590,65 +622,17 @@ impl Session {
                     "thread store does not support identified input acceptance".to_string(),
                 )
             })?;
-        let Some((acceptance_index, accepted)) =
-            history
-                .items
-                .iter()
-                .enumerate()
-                .find_map(|(index, item)| match item {
-                    RolloutItem::InputAcceptance(InputAcceptanceEvent::Accepted(accepted))
-                        if accepted.thread_id == self.thread_id
-                            && accepted.client_id == client_id =>
-                    {
-                        Some((index, accepted))
-                    }
-                    _ => None,
-                })
-        else {
-            return Err(CodexErr::Fatal(
-                "accepted input has no persisted record".to_string(),
-            ));
-        };
-        let turn_id = &accepted.turn_id;
-
-        for item in &history.items[acceptance_index + 1..] {
-            match item {
-                RolloutItem::EventMsg(EventMsg::TurnComplete(event))
-                    if &event.turn_id == turn_id =>
-                {
-                    return Ok(None);
-                }
-                RolloutItem::EventMsg(EventMsg::TurnAborted(event))
-                    if event.turn_id.as_ref().is_none_or(|id| id == turn_id) =>
-                {
-                    return Ok(None);
-                }
-                RolloutItem::InputAcceptance(InputAcceptanceEvent::Fenced { thread_id })
-                    if *thread_id == self.thread_id =>
-                {
-                    return Ok(None);
-                }
-                RolloutItem::EventMsg(EventMsg::ThreadRolledBack(_)) => return Ok(None),
-                RolloutItem::EventMsg(EventMsg::TurnStarted(event))
-                    if &event.turn_id != turn_id =>
-                {
-                    return Ok(None);
-                }
-                RolloutItem::InputAcceptance(InputAcceptanceEvent::Rejected {
-                    thread_id,
-                    client_id: id,
-                }) if *thread_id == self.thread_id && id == client_id => return Ok(None),
-                RolloutItem::InputAcceptance(InputAcceptanceEvent::Finished {
-                    thread_id,
-                    turn_id: id,
-                })
-                | RolloutItem::InputAcceptance(InputAcceptanceEvent::Stopped {
-                    thread_id,
-                    turn_id: id,
-                }) if *thread_id == self.thread_id && id == turn_id => return Ok(None),
-                _ => {}
-            }
+        let states =
+            input_acceptance_states(&history.items, self.thread_id).map_err(CodexErr::Fatal)?;
+        let state = states
+            .into_iter()
+            .find(|state| state.acceptance.client_id == client_id)
+            .ok_or_else(|| CodexErr::Fatal("accepted input has no persisted record".to_string()))?;
+        if state.terminal || state.rejected {
+            return Ok(None);
         }
+        let accepted = state.acceptance;
+        let turn_id = &accepted.turn_id;
         let request: DurableInputRequest = serde_json::from_value(accepted.request.clone())
             .map_err(|error| CodexErr::Fatal(error.to_string()))?;
         let mut request = TurnInputRequest::new(request.input)
@@ -712,6 +696,38 @@ impl Session {
 }
 
 impl crate::CodexThread {
+    pub async fn read_input_acceptance(
+        &self,
+        client_id: &str,
+    ) -> CodexResult<Option<codex_history::InputAcceptanceEvidence>> {
+        let session = &self.session;
+        let _admission = session.input_queue.acceptance_submission.lock().await;
+        let live = session
+            .live_thread_for_persistence("read input acceptance")
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        live.persist_durable()
+            .await
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+        let history = live
+            .load_input_acceptance_history()
+            .await
+            .map_err(|error| CodexErr::Fatal(error.to_string()))?
+            .ok_or_else(|| {
+                CodexErr::InvalidRequest(
+                    "thread store does not support input acceptance reads".to_string(),
+                )
+            })?;
+        Ok(input_acceptance_states(&history.items, session.thread_id)
+            .map_err(CodexErr::Fatal)?
+            .into_iter()
+            .find(|state| state.acceptance.client_id == client_id)
+            .map(|state| state.evidence()))
+    }
+
+    pub async fn prepare_accepted_input_restart(&self, turn_id: &str) -> CodexResult<()> {
+        self.session.prepare_accepted_input_restart(turn_id).await
+    }
+
     pub async fn interrupt_accepted_turn(&self, turn_id: &str) -> CodexResult<bool> {
         let session = &self.session;
         let _admission = session.input_queue.acceptance_submission.lock().await;
@@ -735,14 +751,13 @@ impl crate::CodexThread {
         }) {
             return Ok(false);
         }
-        if history.items.iter().any(|item| matches!(item,
-            RolloutItem::EventMsg(EventMsg::TurnComplete(event)) if event.turn_id == turn_id
-        ) || matches!(item,
-            RolloutItem::EventMsg(EventMsg::TurnAborted(event)) if event.turn_id.as_deref() == Some(turn_id)
-        ) || matches!(item,
-            RolloutItem::InputAcceptance(InputAcceptanceEvent::Finished {thread_id, turn_id: id})
-                if *thread_id == session.thread_id && id == turn_id
-        )) { return Ok(true); }
+        if input_acceptance_states(&history.items, session.thread_id)
+            .map_err(CodexErr::Fatal)?
+            .iter()
+            .any(|state| state.acceptance.turn_id == turn_id && state.terminal)
+        {
+            return Ok(true);
+        }
         live.append_items(&[RolloutItem::InputAcceptance(
             InputAcceptanceEvent::Stopped {
                 thread_id: session.thread_id,

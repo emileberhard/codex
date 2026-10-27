@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Selects persistent root threads for managed daemon recovery using normal resume semantics.
 //! Only threads successfully persisted through the existing thread store become candidates.
 
@@ -28,6 +29,12 @@ impl ThreadRequestProcessor {
                 && !config.session_source.is_non_root_agent()
             {
                 let interrupted = thread.interrupted_turn().await;
+                if let Some((turn_id, _, _)) = &interrupted
+                    && let Err(err) = thread.prepare_accepted_input_restart(turn_id).await
+                {
+                    warn!(%thread_id, %err, "skipping daemon restore for input that could not be checkpointed");
+                    continue;
+                }
                 if let Err(err) = self
                     .thread_store
                     .persist_thread(thread_id, PersistContext::Standard)

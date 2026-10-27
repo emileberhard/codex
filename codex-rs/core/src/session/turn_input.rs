@@ -348,6 +348,15 @@ pub(super) async fn handle_recovery(
     start_options: TurnStartOptions,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
+    let _acceptance_guard = session.input_queue.acceptance_submission.lock().await;
+    if !session
+        .accepted_turn_allows_recovery(&submission_id)
+        .await?
+    {
+        return Ok(TurnInputSubmission::NotSubmitted {
+            reason: NotSubmittedReason::Superseded,
+        });
+    }
     let WithTurnExtensionData {
         request: thread_settings,
         turn_extension_init,
@@ -766,6 +775,7 @@ async fn start_if_idle(
             _ => None,
         })
         .collect();
+    session.mark_acceptance_turn_resumed(&submission_id).await;
     if let Err(error) = session
         .start_task(Arc::clone(&turn_context), task_input, RegularTask::new())
         .await

@@ -828,6 +828,9 @@ Core accepts the identified payload.
 Recovery restores all accepted, unrecorded inputs for the reserved turn in their
 original order. Canonical user-item recording is evidence of recording, not model
 consumption. Terminal, Stop, rollback and later-turn evidence prevent replay.
+Planned restart records suspension before cancellation and preserves accepted
+input even when the user item has not yet been recorded. Explicit Stop remains
+terminal and overrides that suspended custody.
 Acceptance metadata is invisible to the model, retained through compaction and
 rollback canonicalization, and cannot authorize input in a copied or forked
 thread. IDs are limited to 512 bytes, accepted request plus captured context to
