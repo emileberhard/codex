@@ -849,6 +849,16 @@ native custody and subsequent lifecycle evidence, never current execution or
 model consumption. A null acceptance is no evidence and never proves an input
 was not submitted. Unsupported or unread persistence fails the read.
 
+Experimental `thread/input/stop` takes the same exact thread and input ID. A
+successful response acknowledges a durable fence before cancellation: existing
+acceptance returns its terminal evidence, while an unaccepted ID is permanently
+rejected and returns `acceptance: null`. This null is meaningful only as the
+successful Stop acknowledgement, not as evidence from an acceptance read.
+The fence survives unloaded-thread checkpoints, queue retries and same-thread
+history replacement. Persistence failures fail Stop instead of claiming success.
+Stopped IDs count toward the same 65,536-ID bound; a full thread cannot reserve
+a new ID, but existing accepted IDs remain stoppable.
+
 Experimental `daemon/toolContext` takes an actual local `pid` and
 `startedAtUnixMicros`. On macOS it verifies a bounded live ancestry against
 birth identities captured by the existing local tool-process owner at spawn.
