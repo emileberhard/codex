@@ -78,7 +78,7 @@ pub(super) async fn revert(
         .await?;
     let mut accepted_inputs = std::collections::BTreeMap::new();
     let mut rejected_inputs = std::collections::BTreeSet::new();
-    for item in acceptance_history.items {
+    for item in &acceptance_history.items {
         if let codex_rollout::RolloutItem::InputAcceptance(
             codex_rollout::InputAcceptanceEvent::Accepted(accepted),
         ) = item
@@ -99,9 +99,9 @@ pub(super) async fn revert(
                 client_id,
             },
         ) = item
-            && owner == thread_id
+            && *owner == thread_id
         {
-            rejected_inputs.insert(client_id);
+            rejected_inputs.insert(client_id.clone());
         }
     }
 

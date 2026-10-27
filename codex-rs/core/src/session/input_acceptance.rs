@@ -410,7 +410,7 @@ impl Session {
             Err(error) => return Err(CodexErr::Fatal(error.to_string())),
         };
         let mut entries = HashMap::new();
-        for item in history {
+        for item in &history {
             if let RolloutItem::InputAcceptance(InputAcceptanceEvent::Accepted(accepted)) = item
                 && accepted.thread_id == self.thread_id
             {
@@ -434,9 +434,9 @@ impl Session {
                     ));
                 }
                 entries.insert(
-                    accepted.client_id,
+                    accepted.client_id.clone(),
                     AcceptedInput::Accepted {
-                        fingerprint: accepted.fingerprint,
+                        fingerprint: accepted.fingerprint.clone(),
                         submission,
                     },
                 );
@@ -444,9 +444,9 @@ impl Session {
                 thread_id,
                 client_id,
             }) = item
-                && thread_id == self.thread_id
+                && *thread_id == self.thread_id
             {
-                entries.entry(client_id).or_insert(AcceptedInput::Rejected);
+                entries.entry(client_id.clone()).or_insert(AcceptedInput::Rejected);
             }
         }
         if entries.len() > MAX_ACCEPTED_INPUTS {
