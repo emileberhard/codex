@@ -23,6 +23,50 @@ fn request(text: &str) -> TurnInputRequest {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stopping_unaccepted_input_fences_live_and_cold_dispatch() -> anyhow::Result<()> {
+    let server = responses::start_mock_server().await;
+    let response = responses::mount_sse_once(&server, responses::sse_completed("unexpected")).await;
+    let test = test_codex().build_with_auto_env(&server).await?;
+    assert!(
+        test.codex
+            .stop_identified_input("durable-input")
+            .await?
+            .is_none()
+    );
+    assert!(
+        test.codex
+            .start_or_steer_turn(request("never run"))
+            .await
+            .is_err()
+    );
+    let path = test.codex.rollout_path().expect("durable input fence");
+    test.codex.submit(Op::Shutdown).await?;
+    wait_for_event(&test.codex, |event| {
+        matches!(event, EventMsg::ShutdownComplete)
+    })
+    .await;
+    let recovered = test_codex()
+        .resume(&server, test.home.clone(), path)
+        .await?;
+    assert!(
+        recovered
+            .codex
+            .start_or_steer_turn(request("never run"))
+            .await
+            .is_err()
+    );
+    assert!(
+        recovered
+            .codex
+            .stop_identified_input("durable-input")
+            .await?
+            .is_none()
+    );
+    assert!(response.requests().is_empty());
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn identified_input_returns_the_original_acceptance_and_rejects_conflicts_after_completion()
 -> anyhow::Result<()> {
     let server = responses::start_mock_server().await;

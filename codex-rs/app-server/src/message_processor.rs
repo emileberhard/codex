@@ -1378,6 +1378,11 @@ impl MessageProcessor {
                 .thread_input_acceptance_read(params)
                 .await
                 .map(|response| Some(response.into())),
+            ClientRequest::ThreadInputStop { params, .. } => self
+                .thread_processor
+                .thread_input_stop(params)
+                .await
+                .map(|response| Some(response.into())),
             ClientRequest::DaemonToolContext { params, .. } => self
                 .thread_processor
                 .daemon_tool_context(params)

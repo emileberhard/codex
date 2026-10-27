@@ -4,6 +4,9 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 
+pub const MAX_IDENTIFIED_INPUTS: usize = 65_536;
+pub const MAX_INPUT_ID_BYTES: usize = 512;
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InputAcceptance {
     pub thread_id: ThreadId,
@@ -146,6 +149,10 @@ pub fn input_acceptance_states(
                         return Err("conflicting persisted input acceptance".to_string());
                     }
                 } else {
+                    if rejected.contains_key(accepted.client_id.as_str()) {
+                        return Err("identified input was accepted after its durable Stop fence"
+                            .to_string());
+                    }
                     client_indices.insert(accepted.client_id.as_str(), accepted_inputs.len());
                     accepted_inputs.push((accepted, index));
                 }

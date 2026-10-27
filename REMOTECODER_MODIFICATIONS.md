@@ -30,6 +30,15 @@ the thread from storage; the persisted model, provider and permissions stay
 authoritative, and any other key is rejected.
 
 
+Identified inputs use thread-local durable acceptance and exact reserved turn
+bindings before execution. The experimental `thread/input/acceptance/read`
+reports positive custody and lifecycle evidence; absence is not proof of failed
+submission. `thread/input/stop` commits an input-ID fence before acknowledging,
+including when the input has not yet been accepted or the thread is unloaded.
+Queue replay and history replacement retain those fences. Planned suspension
+preserves exact restart authority instead of turning interruption into user Stop.
+`daemon/toolContext` resolves current local tool descendants from PID and process
+birth identity, without treating provider environment variables as authority.
 
 - `.gitignore`
 - `MODULE.bazel.lock`
@@ -430,3 +439,4 @@ authoritative, and any other key is rejected.
 - `codex-rs/utils/pty/src/process.rs`
 - `codex-rs/utils/pty/src/process_identity.rs`
 - `codex-rs/utils/pty/src/pty.rs`
+- `codex-rs/app-server/tests/suite/v2/input_acceptance_stop.rs`

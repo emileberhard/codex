@@ -174,6 +174,18 @@ pub trait ThreadStore: Any + Send + Sync {
         })
     }
 
+    fn stop_unloaded_identified_input(
+        &self,
+        _thread_id: ThreadId,
+        _client_id: String,
+    ) -> ThreadStoreFuture<'_, Option<codex_history::InputAcceptanceEvidence>> {
+        Box::pin(async {
+            Err(ThreadStoreError::Unsupported {
+                operation: "stop_unloaded_identified_input",
+            })
+        })
+    }
+
     fn checkpoint_live_agent_mail(
         &self,
         _thread_id: ThreadId,

@@ -19,9 +19,9 @@ use sha2::Digest;
 use sha2::Sha256;
 use std::collections::HashMap;
 
-const MAX_ACCEPTED_INPUTS: usize = 65_536;
+const MAX_ACCEPTED_INPUTS: usize = codex_history::MAX_IDENTIFIED_INPUTS;
 const MAX_ACCEPTANCE_BYTES: usize = 32 * 1024 * 1024;
-const MAX_CLIENT_ID_BYTES: usize = 512;
+const MAX_CLIENT_ID_BYTES: usize = codex_history::MAX_INPUT_ID_BYTES;
 
 #[derive(Default)]
 enum AcceptanceHistoryState {
@@ -36,7 +36,28 @@ pub(super) struct InputAcceptances {
     history_state: AcceptanceHistoryState,
     suspending_turns: std::collections::HashSet<String>,
     live_inputs: std::collections::HashSet<String>,
-    entries: HashMap<String, (String, TurnInputSubmission)>,
+    entries: HashMap<String, AcceptedInput>,
+}
+
+enum AcceptedInput {
+    Accepted {
+        fingerprint: String,
+        submission: TurnInputSubmission,
+    },
+    Rejected,
+}
+
+impl AcceptedInput {
+    fn turn_id(&self) -> Option<&str> {
+        match self {
+            Self::Accepted { submission, .. } => match submission {
+                TurnInputSubmission::Started { turn_id, .. }
+                | TurnInputSubmission::Steered { turn_id, .. } => Some(turn_id),
+                TurnInputSubmission::NotSubmitted { .. } => None,
+            },
+            Self::Rejected => None,
+        }
+    }
 }
 
 pub(super) struct PreparedInputAcceptance {
@@ -236,7 +257,11 @@ impl PreparedInputAcceptance {
             ));
         }
         let acceptances = session.input_queue.acceptances.lock().await;
-        if let Some((fingerprint, submission)) = acceptances.entries.get(&self.client_id) {
+        if let Some(AcceptedInput::Accepted {
+            fingerprint,
+            submission,
+        }) = acceptances.entries.get(&self.client_id)
+        {
             if fingerprint != &self.fingerprint {
                 return Err(CodexErr::InvalidRequest(format!(
                     "client user message id {} already identifies different input",
@@ -244,6 +269,14 @@ impl PreparedInputAcceptance {
                 )));
             }
             return Ok(Some(submission.clone()));
+        }
+        if matches!(
+            acceptances.entries.get(&self.client_id),
+            Some(AcceptedInput::Rejected)
+        ) {
+            return Err(CodexErr::InvalidRequest(
+                "this identified input was durably stopped before acceptance".to_string(),
+            ));
         }
         if acceptances.entries.len() >= MAX_ACCEPTED_INPUTS {
             return Err(CodexErr::InvalidRequest(format!(
@@ -312,7 +345,10 @@ impl PreparedInputAcceptance {
         .map_err(|error| CodexErr::Fatal(error.to_string()))?;
         session.input_queue.acceptances.lock().await.entries.insert(
             self.client_id.clone(),
-            (self.fingerprint.clone(), submission),
+            AcceptedInput::Accepted {
+                fingerprint: self.fingerprint.clone(),
+                submission,
+            },
         );
         live.persist_durable()
             .await
@@ -330,7 +366,20 @@ impl Session {
                 acceptances
                     .entries
                     .entry(accepted.client_id.clone())
-                    .or_insert_with(|| (accepted.fingerprint.clone(), accepted.submission()));
+                    .or_insert_with(|| AcceptedInput::Accepted {
+                        fingerprint: accepted.fingerprint.clone(),
+                        submission: accepted.submission(),
+                    });
+            } else if let RolloutItem::InputAcceptance(InputAcceptanceEvent::Rejected {
+                thread_id,
+                client_id,
+            }) = item
+                && *thread_id == self.thread_id
+            {
+                acceptances
+                    .entries
+                    .entry(client_id.clone())
+                    .or_insert(AcceptedInput::Rejected);
             }
         }
     }
@@ -360,24 +409,53 @@ impl Session {
             Err(codex_thread_store::ThreadStoreError::ThreadNotFound { .. }) => Vec::new(),
             Err(error) => return Err(CodexErr::Fatal(error.to_string())),
         };
-        let mut acceptances = self.input_queue.acceptances.lock().await;
+        let mut entries = HashMap::new();
         for item in history {
             if let RolloutItem::InputAcceptance(InputAcceptanceEvent::Accepted(accepted)) = item
                 && accepted.thread_id == self.thread_id
             {
                 let submission = accepted.submission();
-                if let Some((fingerprint, previous)) = acceptances.entries.get(&accepted.client_id)
+                if let Some(AcceptedInput::Accepted {
+                    fingerprint,
+                    submission: previous,
+                }) = entries.get(&accepted.client_id)
                     && (fingerprint != &accepted.fingerprint || previous != &submission)
                 {
                     return Err(CodexErr::Fatal(
                         "conflicting persisted input acceptance".to_string(),
                     ));
                 }
-                acceptances
-                    .entries
-                    .insert(accepted.client_id, (accepted.fingerprint, submission));
+                if matches!(
+                    entries.get(&accepted.client_id),
+                    Some(AcceptedInput::Rejected)
+                ) {
+                    return Err(CodexErr::Fatal(
+                        "identified input was accepted after its durable Stop fence".to_string(),
+                    ));
+                }
+                entries.insert(
+                    accepted.client_id,
+                    AcceptedInput::Accepted {
+                        fingerprint: accepted.fingerprint,
+                        submission,
+                    },
+                );
+            } else if let RolloutItem::InputAcceptance(InputAcceptanceEvent::Rejected {
+                thread_id,
+                client_id,
+            }) = item
+                && thread_id == self.thread_id
+            {
+                entries.entry(client_id).or_insert(AcceptedInput::Rejected);
             }
         }
+        if entries.len() > MAX_ACCEPTED_INPUTS {
+            return Err(CodexErr::Fatal(
+                "identified input history exceeds its bound".to_string(),
+            ));
+        }
+        let mut acceptances = self.input_queue.acceptances.lock().await;
+        acceptances.entries = entries;
         acceptances.history_state = AcceptanceHistoryState::Loaded;
         Ok(true)
     }
@@ -410,9 +488,17 @@ impl Session {
         if !self.load_input_acceptances().await? {
             return Ok(());
         }
-        if !self.input_queue.acceptances.lock().await.entries.values().any(|(_, submission)| matches!(submission,
-            TurnInputSubmission::Started {turn_id: id, ..} | TurnInputSubmission::Steered {turn_id: id, ..} if id == turn_id
-        )) { return Ok(()); }
+        if !self
+            .input_queue
+            .acceptances
+            .lock()
+            .await
+            .entries
+            .values()
+            .any(|entry| entry.turn_id() == Some(turn_id))
+        {
+            return Ok(());
+        }
         {
             let active = self.active_turn.lock().await;
             if !active
@@ -552,9 +638,17 @@ impl Session {
         if !self.load_input_acceptances().await? {
             return Ok(Vec::new());
         }
-        if !self.input_queue.acceptances.lock().await.entries.values().any(|(_, submission)| matches!(submission,
-            TurnInputSubmission::Started {turn_id: id, ..} | TurnInputSubmission::Steered {turn_id: id, ..} if id == turn_id
-        )) { return Ok(Vec::new()); }
+        if !self
+            .input_queue
+            .acceptances
+            .lock()
+            .await
+            .entries
+            .values()
+            .any(|entry| entry.turn_id() == Some(turn_id))
+        {
+            return Ok(Vec::new());
+        }
         let live = self
             .live_thread_for_persistence("recover pending accepted inputs")
             .map_err(|error| CodexErr::Fatal(error.to_string()))?;
@@ -701,6 +795,74 @@ impl Session {
 }
 
 impl crate::CodexThread {
+    pub async fn stop_identified_input(
+        &self,
+        client_id: &str,
+    ) -> CodexResult<Option<codex_history::InputAcceptanceEvidence>> {
+        if client_id.is_empty() || client_id.len() > MAX_CLIENT_ID_BYTES {
+            return Err(CodexErr::InvalidRequest(format!(
+                "client user message id must contain 1 to {MAX_CLIENT_ID_BYTES} bytes"
+            )));
+        }
+        let session = &self.session;
+        let turn_id = {
+            let _admission = session.input_queue.acceptance_submission.lock().await;
+            let live = session
+                .live_thread_for_persistence("stop identified input")
+                .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+            live.persist_durable()
+                .await
+                .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+            if !session.load_input_acceptances().await? {
+                return Err(CodexErr::InvalidRequest(
+                    "thread store does not support identified input fences".to_string(),
+                ));
+            }
+            let (turn_id, needs_fence) = {
+                let acceptances = session.input_queue.acceptances.lock().await;
+                let entry = acceptances.entries.get(client_id);
+                if entry.is_none() && acceptances.entries.len() >= MAX_ACCEPTED_INPUTS {
+                    return Err(CodexErr::InvalidRequest(
+                        "identified input storage is full; another durable input fence cannot be committed".to_string(),
+                    ));
+                }
+                (
+                    entry.and_then(AcceptedInput::turn_id).map(str::to_owned),
+                    entry.is_none(),
+                )
+            };
+            if needs_fence {
+                live.append_items(&[RolloutItem::InputAcceptance(
+                    InputAcceptanceEvent::Rejected {
+                        thread_id: session.thread_id,
+                        client_id: client_id.to_owned(),
+                    },
+                )])
+                .await
+                .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+                session
+                    .input_queue
+                    .acceptances
+                    .lock()
+                    .await
+                    .entries
+                    .insert(client_id.to_owned(), AcceptedInput::Rejected);
+            }
+            if turn_id.is_none() {
+                live.persist_durable()
+                    .await
+                    .map_err(|error| CodexErr::Fatal(error.to_string()))?;
+            }
+            turn_id
+        };
+        if let Some(turn_id) = turn_id {
+            self.interrupt_accepted_turn(&turn_id).await?;
+            self.read_input_acceptance(client_id).await
+        } else {
+            Ok(None)
+        }
+    }
+
     pub async fn read_input_acceptance(
         &self,
         client_id: &str,
@@ -825,7 +987,12 @@ mod tests {
                 settings_fingerprint(&codex_protocol::protocol::ThreadSettingsOverrides::default())
                     .unwrap();
             settings[field] = json!([null, null]);
-            assert!(matches!(restore_settings(&settings), Err(CodexErr::Fatal(_))));
+            assert!(
+                restore_settings(&settings)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("multiple effort or service tier values")
+            );
         }
     }
 }

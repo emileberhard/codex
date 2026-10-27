@@ -165,6 +165,34 @@ pub(super) async fn checkpoint_unloaded_agent_mail(
             message: "unloaded agent checkpoints require queue-only mail".into(),
         });
     }
+    checkpoint_unloaded(store, thread_id, UnloadedCheckpoint::Mail(mail))
+        .await
+        .map(|_| ())
+}
+
+pub(super) async fn stop_unloaded_identified_input(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    client_id: String,
+) -> ThreadStoreResult<Option<codex_history::InputAcceptanceEvidence>> {
+    if client_id.is_empty() || client_id.len() > codex_history::MAX_INPUT_ID_BYTES {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: "client user message id must contain 1 to 512 bytes".to_string(),
+        });
+    }
+    checkpoint_unloaded(store, thread_id, UnloadedCheckpoint::StopInput(client_id)).await
+}
+
+enum UnloadedCheckpoint {
+    Mail(Vec<InterAgentCommunication>),
+    StopInput(String),
+}
+
+async fn checkpoint_unloaded(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    checkpoint: UnloadedCheckpoint,
+) -> ThreadStoreResult<Option<codex_history::InputAcceptanceEvidence>> {
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
     store.ensure_live_recorder_absent(thread_id).await?;
     let writer_lock = store.acquire_writer_lock(thread_id)?;
@@ -207,9 +235,18 @@ pub(super) async fn checkpoint_unloaded_agent_mail(
     )
     .await
     .map_err(thread_store_io_error)?;
-    let written = checkpoint_mail_to_recorder(store, thread_id, &recorder, mail).await;
+    let written = match checkpoint {
+        UnloadedCheckpoint::Mail(mail) => {
+            checkpoint_mail_to_recorder(store, thread_id, &recorder, mail)
+                .await
+                .map(|_| None)
+        }
+        UnloadedCheckpoint::StopInput(client_id) => {
+            stop_input_to_recorder(store, thread_id, &recorder, &client_id).await
+        }
+    };
     let closed = recorder.shutdown().await.map_err(thread_store_io_error);
-    written?;
+    let evidence = written?;
     closed?;
     if history_mode == ThreadHistoryMode::Paginated
         && let Err(err) = super::thread_history_materialization::materialize_to_sqlite(
@@ -219,9 +256,87 @@ pub(super) async fn checkpoint_unloaded_agent_mail(
         )
         .await
     {
-        warn!("failed to project durable unloaded agent mail for {thread_id}: {err}");
+        warn!("failed to project durable unloaded thread checkpoint for {thread_id}: {err}");
     }
-    Ok(())
+    Ok(evidence)
+}
+
+async fn stop_input_to_recorder(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+    recorder: &RolloutRecorder,
+    client_id: &str,
+) -> ThreadStoreResult<Option<codex_history::InputAcceptanceEvidence>> {
+    recorder.flush().await.map_err(thread_store_io_error)?;
+    let mut history = store
+        .input_acceptance_history(crate::LoadThreadHistoryParams {
+            thread_id,
+            include_archived: false,
+        })
+        .await?;
+    let existing = codex_history::input_acceptance_states(&history.items, thread_id)
+        .map_err(|message| ThreadStoreError::InvalidRequest { message })?
+        .into_iter()
+        .find(|state| state.acceptance.client_id == client_id)
+        .map(|state| (state.acceptance.turn_id.clone(), state.terminal));
+    let event = match existing {
+        Some((turn_id, false)) => {
+            Some(codex_history::InputAcceptanceEvent::Stopped { thread_id, turn_id })
+        }
+        Some((_, true)) => None,
+        None => {
+            let mut ids = std::collections::HashSet::new();
+            for item in &history.items {
+                match item {
+                    RolloutItem::InputAcceptance(
+                        codex_history::InputAcceptanceEvent::Accepted(input),
+                    ) if input.thread_id == thread_id => {
+                        ids.insert(input.client_id.as_str());
+                    }
+                    RolloutItem::InputAcceptance(
+                        codex_history::InputAcceptanceEvent::Rejected {
+                            thread_id: owner,
+                            client_id,
+                        },
+                    ) if *owner == thread_id => {
+                        ids.insert(client_id.as_str());
+                    }
+                    _ => {}
+                }
+            }
+            if ids.contains(client_id) {
+                None
+            } else if ids.len() >= codex_history::MAX_IDENTIFIED_INPUTS {
+                return Err(ThreadStoreError::InvalidRequest {
+                    message: "identified input storage is full; another durable input fence cannot be committed".to_string(),
+                });
+            } else {
+                Some(codex_history::InputAcceptanceEvent::Rejected {
+                    thread_id,
+                    client_id: client_id.to_string(),
+                })
+            }
+        }
+    };
+    if let Some(event) = event {
+        let item = RolloutItem::InputAcceptance(event);
+        recorder
+            .record_canonical_items(std::slice::from_ref(&item))
+            .await
+            .map_err(thread_store_io_error)?;
+        history.items.push(item);
+    }
+    recorder
+        .persist_durable()
+        .await
+        .map_err(thread_store_io_error)?;
+    Ok(
+        codex_history::input_acceptance_states(&history.items, thread_id)
+            .map_err(|message| ThreadStoreError::InvalidRequest { message })?
+            .into_iter()
+            .find(|state| state.acceptance.client_id == client_id)
+            .map(|state| state.evidence()),
+    )
 }
 
 pub(super) async fn checkpoint_live_agent_mail(

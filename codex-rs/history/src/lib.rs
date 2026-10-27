@@ -24,6 +24,8 @@ pub use input_acceptance::InputAcceptanceEvent;
 pub use input_acceptance::InputAcceptanceEvidence;
 pub use input_acceptance::InputAcceptanceKind;
 pub use input_acceptance::InputAcceptanceState;
+pub use input_acceptance::MAX_IDENTIFIED_INPUTS;
+pub use input_acceptance::MAX_INPUT_ID_BYTES;
 pub use input_acceptance::input_acceptance_states;
 
 use std::borrow::Borrow;

@@ -599,6 +599,16 @@ impl ThreadStore for LocalThreadStore {
         )
     }
 
+    fn stop_unloaded_identified_input(
+        &self,
+        thread_id: ThreadId,
+        client_id: String,
+    ) -> ThreadStoreFuture<'_, Option<codex_history::InputAcceptanceEvidence>> {
+        Box::pin(async move {
+            live_writer::stop_unloaded_identified_input(self, thread_id, client_id).await
+        })
+    }
+
     fn persist_thread(
         &self,
         thread_id: ThreadId,

@@ -1021,6 +1021,16 @@ async fn turn_start_identified_input_retries_keep_the_original_turn(
         })
         .await?;
     assert!(absent.acceptance.is_none());
+    let stopped_id = "stopped-before-revert";
+    let _: codex_app_server_protocol::ThreadInputStopResponse = mcp
+        .request(|request_id| ClientRequest::ThreadInputStop {
+            request_id,
+            params: codex_app_server_protocol::ThreadInputStopParams {
+                thread_id: params.thread_id.clone(),
+                client_user_message_id: stopped_id.to_string(),
+            },
+        })
+        .await?;
     let _: codex_app_server_protocol::ThreadRevertResponse = mcp
         .request(|request_id| ClientRequest::ThreadRevert {
             request_id,
@@ -1030,6 +1040,20 @@ async fn turn_start_identified_input_retries_keep_the_original_turn(
             },
         })
         .await?;
+    let mut stopped_params = params.clone();
+    stopped_params.client_user_message_id = Some(stopped_id.to_string());
+    let stopped: Result<TurnStartResponse> = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: stopped_params,
+        })
+        .await;
+    assert!(
+        stopped
+            .unwrap_err()
+            .to_string()
+            .contains("durably stopped before acceptance")
+    );
     let after_revert: TurnStartResponse = mcp
         .request(|request_id| ClientRequest::TurnStart { request_id, params })
         .await?;

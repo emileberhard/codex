@@ -77,6 +77,7 @@ pub(super) async fn revert(
         })
         .await?;
     let mut accepted_inputs = std::collections::BTreeMap::new();
+    let mut rejected_inputs = std::collections::BTreeSet::new();
     for item in acceptance_history.items {
         if let codex_rollout::RolloutItem::InputAcceptance(
             codex_rollout::InputAcceptanceEvent::Accepted(accepted),
@@ -92,6 +93,15 @@ pub(super) async fn revert(
                     message: "conflicting input acceptance while reverting thread".to_string(),
                 });
             }
+        } else if let codex_rollout::RolloutItem::InputAcceptance(
+            codex_rollout::InputAcceptanceEvent::Rejected {
+                thread_id: owner,
+                client_id,
+            },
+        ) = item
+            && owner == thread_id
+        {
+            rejected_inputs.insert(client_id);
         }
     }
 
@@ -155,7 +165,7 @@ pub(super) async fn revert(
     )
     .await?;
     let replacement_path = recorder.rollout_path().to_path_buf();
-    if accepted_inputs.is_empty() {
+    if accepted_inputs.is_empty() && rejected_inputs.is_empty() {
         recorder.persist().await.map_err(thread_store_io_error)?;
     } else {
         let mut records = accepted_inputs
@@ -166,6 +176,14 @@ pub(super) async fn revert(
                 )
             })
             .collect::<Vec<_>>();
+        records.extend(rejected_inputs.into_iter().map(|client_id| {
+            codex_rollout::RolloutItem::InputAcceptance(
+                codex_rollout::InputAcceptanceEvent::Rejected {
+                    thread_id,
+                    client_id,
+                },
+            )
+        }));
         records.push(codex_rollout::RolloutItem::InputAcceptance(
             codex_rollout::InputAcceptanceEvent::Fenced { thread_id },
         ));

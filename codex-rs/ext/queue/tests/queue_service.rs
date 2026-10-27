@@ -450,6 +450,39 @@ async fn replaying_a_surviving_queue_row_returns_the_original_turn_without_execu
     Ok(())
 }
 
+#[tokio::test]
+async fn a_durable_input_stop_prevents_queued_dispatch_and_row_replay() -> anyhow::Result<()> {
+    let server = start_mock_server().await;
+    let response = responses::mount_sse_once(&server, responses::sse_completed("unexpected")).await;
+    let test = test_codex().build_with_auto_env(&server).await?;
+    let thread_id = test.session_configured.thread_id;
+    let queue = loaded_thread_queue(&test)?;
+    let input = structured_user_input("never execute this queued input");
+    let TurnInput::UserInput {
+        client_id: Some(client_id),
+        ..
+    } = &input
+    else {
+        anyhow::bail!("queue test input requires an exact client identity");
+    };
+    let row = queue
+        .enqueue(thread_id, serde_json::to_string(&input)?)
+        .await?;
+    test.codex.stop_identified_input(client_id).await?;
+    let service = QueuedItemService::new(queue, Weak::new(), Arc::new(NoopExtensionEventSink));
+    for _ in 0..2 {
+        assert!(
+            service
+                .start(test.codex.as_ref(), Some(row.id.clone()), None)
+                .await
+                .is_err()
+        );
+    }
+    assert_eq!(service.list(thread_id).await?, vec![row]);
+    assert!(response.requests().is_empty());
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn starting_a_selected_item_while_active_leaves_it_queued() -> anyhow::Result<()> {
     let (release_response, response_gate) = oneshot::channel();

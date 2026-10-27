@@ -741,6 +741,37 @@ enum RecoveryPause {
     LegacyRollout,
 }
 
+#[tokio::test]
+async fn stopping_identified_input_before_user_recording_aborts_pending_dispatch()
+-> anyhow::Result<()> {
+    let server = responses::start_mock_server().await;
+    let response = responses::mount_sse_once(&server, responses::sse_completed("unexpected")).await;
+    let barrier = Arc::new(RecoveryLifecycleBarrier::default());
+    barrier.block_next.store(true, Ordering::SeqCst);
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.turn_lifecycle_contributor(barrier.clone());
+    let test = test_codex()
+        .with_extensions(Arc::new(extensions.build()))
+        .build_with_auto_env(&server)
+        .await?;
+    let mut request = user_message_request("stop pending input");
+    if let TurnInput::UserInput { client_id, .. } = &mut request.input {
+        *client_id = Some("pending-stopped-input".to_owned());
+    }
+    let accepted = test.codex.start_or_steer_turn(request.clone()).await?;
+    timeout(Duration::from_secs(10), barrier.entered.notified()).await?;
+    let fenced = test
+        .codex
+        .stop_identified_input("pending-stopped-input")
+        .await?
+        .expect("accepted input");
+    assert!(fenced.stopped && fenced.terminal);
+    assert!(!fenced.recorded);
+    assert_eq!(test.codex.start_or_steer_turn(request).await?, accepted);
+    assert!(response.requests().is_empty());
+    Ok(())
+}
+
 /// Cold recovery preserves attribution across repeated restarts, leaves unknown
 /// triggers absent, and starts new turns with fresh attribution.
 #[test_case(Some("automation"), RecoveryPause::AfterContext; "automation")]

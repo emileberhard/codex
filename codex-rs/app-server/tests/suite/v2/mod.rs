@@ -75,6 +75,8 @@ mod hooks_list;
 mod host_skills;
 mod imagegen_extension;
 mod initialize;
+#[cfg(target_os = "macos")]
+mod input_acceptance_stop;
 mod luna_reserve;
 mod marketplace_add;
 mod marketplace_remove;
@@ -169,7 +171,6 @@ mod thread_timeline;
 mod thread_unarchive;
 mod thread_unload;
 mod thread_unsubscribe;
-#[cfg(target_os = "macos")]
 mod tool_context;
 mod turn_cost_otel;
 mod turn_interrupt;

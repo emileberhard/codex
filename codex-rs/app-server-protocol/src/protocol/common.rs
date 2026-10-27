@@ -580,6 +580,12 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadInputAcceptanceReadResponse,
     },
+    #[experimental("thread/input/stop")]
+    ThreadInputStop => "thread/input/stop" {
+        params: v2::ThreadInputStopParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadInputStopResponse,
+    },
     #[experimental("daemon/toolContext")]
     DaemonToolContext => "daemon/toolContext" {
         params: v2::DaemonToolContextParams,

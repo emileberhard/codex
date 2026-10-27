@@ -581,6 +581,21 @@ pub struct ThreadInputAcceptanceReadResponse {
     pub acceptance: Option<ThreadInputAcceptance>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadInputStopParams {
+    pub thread_id: String,
+    pub client_user_message_id: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadInputStopResponse {
+    pub acceptance: Option<ThreadInputAcceptance>,
+}
+
 impl ThreadResumeResponse {
     /// Parses valid absolute instruction source paths and omits malformed legacy values.
     pub fn instruction_source_path_uris(&self) -> Vec<PathUri> {
