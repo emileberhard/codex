@@ -603,14 +603,13 @@ impl Session {
     async fn finished_input_acceptances(&self, turn_id: Option<&str>) -> Vec<RolloutItem> {
         let acceptances = self.input_queue.acceptances.lock().await;
         let mut turn_ids = std::collections::HashSet::new();
-        for (_, submission) in acceptances.entries.values() {
-            let id = match submission {
-                TurnInputSubmission::Started { turn_id, .. }
-                | TurnInputSubmission::Steered { turn_id, .. } => turn_id,
-                TurnInputSubmission::NotSubmitted { .. } => continue,
-            };
+        for id in acceptances
+            .entries
+            .values()
+            .filter_map(AcceptedInput::turn_id)
+        {
             if turn_id.is_none_or(|turn_id| turn_id == id) {
-                turn_ids.insert(id.clone());
+                turn_ids.insert(id.to_owned());
             }
         }
         turn_ids
