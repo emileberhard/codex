@@ -444,6 +444,9 @@ impl Session {
         &self,
         turn_id: &str,
     ) -> CodexResult<Vec<TurnInputRequest>> {
+        if !self.load_input_acceptances().await? {
+            return Ok(Vec::new());
+        }
         if !self.input_queue.acceptances.lock().await.entries.values().any(|(_, submission)| matches!(submission,
             TurnInputSubmission::Started {turn_id: id, ..} | TurnInputSubmission::Steered {turn_id: id, ..} if id == turn_id
         )) { return Ok(Vec::new()); }
@@ -675,10 +678,27 @@ impl Session {
         client_id: &str,
         rejected: bool,
     ) -> CodexResult<()> {
-        self.load_input_acceptances().await?;
-        if !self.input_queue.acceptances.lock().await.entries.values().any(|(_, submission)| matches!(submission,
-            TurnInputSubmission::Started {turn_id: id, ..} | TurnInputSubmission::Steered {turn_id: id, ..} if id == turn_id
-        )) { return Ok(Vec::new()); }
+        if !self
+            .input_queue
+            .acceptances
+            .lock()
+            .await
+            .entries
+            .contains_key(client_id)
+        {
+            return Ok(());
+        }
+        let event = if rejected {
+            InputAcceptanceEvent::Rejected {
+                thread_id: self.thread_id,
+                client_id: client_id.to_string(),
+            }
+        } else {
+            InputAcceptanceEvent::Recorded {
+                thread_id: self.thread_id,
+                client_id: client_id.to_string(),
+            }
+        };
         let live = self
             .live_thread_for_persistence("record identified input disposition")
             .map_err(|error| CodexErr::Fatal(error.to_string()))?;
