@@ -75,12 +75,18 @@ async fn tool_context_uses_the_live_tool_owner_and_rejects_unrelated_processes()
             },
         })
         .await?;
-    timeout(
-        Duration::from_secs(10),
-        mcp.read_stream_until_notification_message("item/commandExecution/outputDelta"),
-    )
+    let pid: u32 = timeout(Duration::from_secs(10), async {
+        loop {
+            match tokio::fs::read_to_string(&pid_path).await {
+                Ok(value) => return Ok::<_, anyhow::Error>(value.trim().parse::<u32>()?),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+    })
     .await??;
-    let pid: u32 = tokio::fs::read_to_string(pid_path).await?.trim().parse()?;
     let identity = codex_utils_pty::local_process_identity(pid).context("tool process identity")?;
     let response: DaemonToolContextResponse = mcp
         .request(|request_id| ClientRequest::DaemonToolContext {
