@@ -478,7 +478,10 @@ async fn a_durable_input_stop_prevents_queued_dispatch_and_row_replay() -> anyho
                 .is_err()
         );
     }
-    assert_eq!(service.list(thread_id).await?, vec![row]);
+    assert_eq!(
+        service.list(thread_id).await?,
+        vec![codex_queue_extension::QueuedItem { id: row.id, input }]
+    );
     assert!(response.requests().is_empty());
     Ok(())
 }
