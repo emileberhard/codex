@@ -287,6 +287,7 @@ authoritative, and any other key is rejected.
 - `codex-rs/rmcp-client/src/stdio_server_launcher.rs`
 - `codex-rs/rollout/src/compression_tests.rs`
 - `codex-rs/rollout/src/policy.rs`
+- `codex-rs/rollout/src/recorder.rs`
 - `codex-rs/rollout/src/recorder_tests.rs`
 - `codex-rs/rollout/src/state_db_tests.rs`
 - `codex-rs/rollout/src/tests.rs`

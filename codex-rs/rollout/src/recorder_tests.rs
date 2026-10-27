@@ -995,6 +995,75 @@ async fn persist_reports_filesystem_error_and_retries_buffered_items() -> std::i
 }
 
 #[tokio::test]
+async fn durable_persist_materializes_and_preserves_buffered_items() -> std::io::Result<()> {
+    let home = TempDir::new()?;
+    let config = test_config(home.path());
+    let thread_id = ThreadId::new();
+    let recorder = RolloutRecorder::new(
+        &config,
+        RolloutRecorderParams::new(
+            thread_id,
+            /*forked_from_id*/ None,
+            /*parent_thread_id*/ None,
+            SessionSource::Exec,
+            /*thread_source*/ None,
+            "test_originator".to_string(),
+            BaseInstructions::default(),
+            Vec::new(),
+        ),
+    )
+    .await?;
+    let path = recorder.rollout_path().to_path_buf();
+    let item = agent_message_item("durable-input");
+    recorder.record_canonical_items(&[item]).await?;
+    recorder.persist_durable().await?;
+    recorder.persist_durable().await?;
+    recorder.discard().await?;
+
+    let (items, actual_thread_id, _) = RolloutRecorder::load_rollout_items(&path).await?;
+    assert_eq!(actual_thread_id, Some(thread_id));
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        serde_json::to_value(&items[1])?,
+        serde_json::to_value(agent_message_item("durable-input"))?
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn durable_persist_propagates_directory_sync_failure_and_can_retry() -> std::io::Result<()> {
+    let home = TempDir::new()?;
+    let directory = home.path().join("active");
+    let moved = home.path().join("moved");
+    fs::create_dir(&directory)?;
+    let path = directory.join("rollout.jsonl");
+    File::create(&path)?;
+    let recorder = RolloutRecorder::new(
+        &test_config(home.path()),
+        RolloutRecorderParams::resume(path.clone()),
+    )
+    .await?;
+    recorder
+        .record_canonical_items(&[agent_message_item("durable-input")])
+        .await?;
+    recorder.persist().await?;
+    fs::rename(&directory, &moved)?;
+
+    let error = recorder
+        .persist_durable()
+        .await
+        .expect_err("missing parent must prevent durable acknowledgement");
+    assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+    fs::rename(&moved, &directory)?;
+    recorder.persist_durable().await?;
+    recorder.shutdown().await?;
+    let (items, _, _) = RolloutRecorder::load_rollout_items(&path).await?;
+    assert_eq!(items.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
 async fn writer_state_retries_write_error_before_reporting_flush_success() -> std::io::Result<()> {
     let home = TempDir::new().expect("temp dir");
     let rollout_path = home.path().join("rollout.jsonl");

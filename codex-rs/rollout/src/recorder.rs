@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Persist Codex session rollouts (.jsonl) so sessions can be replayed or inspected later.
 
 use std::collections::HashSet;
@@ -128,6 +129,9 @@ pub enum RolloutRecorderParams {
 enum RolloutCmd {
     AddItems(Vec<RolloutItem>),
     Persist {
+        ack: oneshot::Sender<std::io::Result<()>>,
+    },
+    PersistDurable {
         ack: oneshot::Sender<std::io::Result<()>>,
     },
     /// Ensure all prior writes are processed; respond when flushed.
@@ -1080,6 +1084,25 @@ impl RolloutRecorder {
         })?
     }
 
+    pub async fn persist_durable(&self) -> std::io::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(RolloutCmd::PersistDurable { ack: tx })
+            .await
+            .map_err(|error| {
+                self.writer_task.terminal_failure().unwrap_or_else(|| {
+                    IoError::other(format!("failed to queue durable rollout persist: {error}"))
+                })
+            })?;
+        rx.await.map_err(|error| {
+            self.writer_task.terminal_failure().unwrap_or_else(|| {
+                IoError::other(format!(
+                    "failed waiting for durable rollout persist: {error}"
+                ))
+            })
+        })?
+    }
+
     /// Flush all queued writes and wait until they are committed by the writer task.
     ///
     /// If the first writer attempt fails, the writer drops and reopens the file handle before
@@ -1817,6 +1840,31 @@ impl RolloutWriterState {
         self.write_pending_with_recovery("persist").await
     }
 
+    async fn persist_durable(&mut self) -> std::io::Result<()> {
+        self.persist().await?;
+        let writer = self
+            .writer
+            .as_mut()
+            .ok_or_else(|| IoError::other("durable rollout persist has no writer"))?;
+        writer.file.sync_all().await?;
+        #[cfg(unix)]
+        {
+            let path = self.rollout_path.clone();
+            tokio::task::spawn_blocking(move || {
+                let parent = path
+                    .parent()
+                    .ok_or_else(|| IoError::other("rollout path has no parent"))?;
+                for directory in parent.ancestors() {
+                    std::fs::File::open(directory)?.sync_all()?;
+                }
+                Ok::<(), IoError>(())
+            })
+            .await
+            .map_err(IoError::other)??;
+        }
+        Ok(())
+    }
+
     async fn flush(&mut self) -> std::io::Result<()> {
         if self.is_deferred() && self.pending_items.is_empty() {
             return Ok(());
@@ -1962,6 +2010,9 @@ async fn rollout_writer(
             }
             RolloutCmd::Persist { ack } => {
                 let _ = ack.send(state.persist().await);
+            }
+            RolloutCmd::PersistDurable { ack } => {
+                let _ = ack.send(state.persist_durable().await);
             }
             RolloutCmd::Flush { ack } => {
                 let _ = ack.send(state.flush().await);
