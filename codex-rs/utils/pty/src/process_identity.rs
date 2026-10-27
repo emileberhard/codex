@@ -15,7 +15,9 @@ pub fn verified_process_ancestry(
     let mut processes = Vec::new();
     let mut pid = identity.pid;
     for _ in 0..128 {
-        let current = process_parent(pid)?;
+        let Some(current) = process_parent(pid) else {
+            break;
+        };
         if processes.iter().any(|(previous, _)| *previous == current.0) {
             return None;
         }
@@ -26,7 +28,6 @@ pub fn verified_process_ancestry(
         }
     }
     if processes.first().map(|(process, _)| *process) != Some(identity)
-        || (pid > 1)
         || processes
             .iter()
             .any(|(process, parent)| process_parent(process.pid) != Some((*process, *parent)))

@@ -11,7 +11,6 @@ use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadStartParams;
 use codex_app_server_protocol::TurnStartParams;
-use codex_app_server_protocol::TurnStartResponse;
 use codex_app_server_protocol::UserInput;
 use tempfile::TempDir;
 
@@ -69,10 +68,10 @@ async fn stopped_input_ids_survive_unloaded_checkpoint_without_starting_a_turn()
         })
         .await?;
     for client_id in ["stopped-while-loaded", "stopped-while-unloaded"] {
-        let rejected: Result<TurnStartResponse> = app
-            .request(|request_id| ClientRequest::TurnStart {
-                request_id,
-                params: TurnStartParams {
+        let request = app
+            .send_request(
+                "turn/start",
+                Some(serde_json::to_value(TurnStartParams {
                     thread_id: thread.id.clone(),
                     client_user_message_id: Some(client_id.to_owned()),
                     input: vec![UserInput::Text {
@@ -80,13 +79,16 @@ async fn stopped_input_ids_survive_unloaded_checkpoint_without_starting_a_turn()
                         text_elements: Vec::new(),
                     }],
                     ..Default::default()
-                },
-            })
-            .await;
+                })?),
+            )
+            .await?;
+        let rejected = app
+            .read_stream_until_error_message(codex_app_server_protocol::RequestId::Integer(request))
+            .await?;
         assert!(
             rejected
-                .unwrap_err()
-                .to_string()
+                .error
+                .message
                 .contains("durably stopped before acceptance")
         );
     }

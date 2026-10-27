@@ -441,3 +441,4 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/utils/pty/src/pty.rs`
 - `codex-rs/app-server/tests/suite/v2/input_acceptance_stop.rs`
 - `codex-rs/app-server/src/request_processors/thread_persist_processor.rs`
+- `codex-rs/thread-store/Cargo.toml`

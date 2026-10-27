@@ -760,13 +760,18 @@ async fn stopping_identified_input_before_user_recording_aborts_pending_dispatch
     }
     let accepted = test.codex.start_or_steer_turn(request.clone()).await?;
     timeout(Duration::from_secs(10), barrier.entered.notified()).await?;
+    let before_stop = test
+        .codex
+        .read_input_acceptance("pending-stopped-input")
+        .await?
+        .expect("accepted input before Stop");
+    assert!(!before_stop.recorded);
     let fenced = test
         .codex
         .stop_identified_input("pending-stopped-input")
         .await?
         .expect("accepted input");
     assert!(fenced.stopped && fenced.terminal);
-    assert!(!fenced.recorded);
     assert_eq!(test.codex.start_or_steer_turn(request).await?, accepted);
     assert!(response.requests().is_empty());
     Ok(())

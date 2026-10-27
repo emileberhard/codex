@@ -1042,16 +1042,16 @@ async fn turn_start_identified_input_retries_keep_the_original_turn(
         .await?;
     let mut stopped_params = params.clone();
     stopped_params.client_user_message_id = Some(stopped_id.to_string());
-    let stopped: Result<TurnStartResponse> = mcp
-        .request(|request_id| ClientRequest::TurnStart {
-            request_id,
-            params: stopped_params,
-        })
-        .await;
+    let stopped_request = mcp
+        .send_request("turn/start", Some(serde_json::to_value(stopped_params)?))
+        .await?;
+    let stopped = mcp
+        .read_stream_until_error_message(RequestId::Integer(stopped_request))
+        .await?;
     assert!(
         stopped
-            .unwrap_err()
-            .to_string()
+            .error
+            .message
             .contains("durably stopped before acceptance")
     );
     let after_revert: TurnStartResponse = mcp
