@@ -303,6 +303,12 @@ impl LiveThread {
             .await
     }
 
+    pub async fn persist_durable(&self) -> ThreadStoreResult<()> {
+        self.thread_store
+            .persist_thread_durable(self.thread_id)
+            .await
+    }
+
     pub async fn shutdown(&self) -> ThreadStoreResult<()> {
         let metadata_result = self
             .flush_pending_metadata_update_for_existing_history()
@@ -331,6 +337,17 @@ impl LiveThread {
             .load_history(LoadThreadHistoryParams {
                 thread_id: self.thread_id,
                 include_archived,
+            })
+            .await
+    }
+
+    pub async fn load_input_acceptance_history(
+        &self,
+    ) -> ThreadStoreResult<Option<StoredThreadHistory>> {
+        self.thread_store
+            .load_input_acceptance_history(LoadThreadHistoryParams {
+                thread_id: self.thread_id,
+                include_archived: true,
             })
             .await
     }

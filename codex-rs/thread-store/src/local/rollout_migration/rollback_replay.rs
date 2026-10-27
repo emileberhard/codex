@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Mirrors the part of legacy cold resume that chooses the model-history checkpoint.
 //!
 //! Legacy rollback has two jobs. The forward history reducer decides which turns remain visible,
@@ -75,6 +76,7 @@ impl ModelReplayPlanner {
             | RolloutItem::ResponseItem(_)
             | RolloutItem::EventMsg(_)
             | RolloutItem::InterAgentCommunicationMetadata { .. }
+            | RolloutItem::InputAcceptance(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::RetainedContext(_)

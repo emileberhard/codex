@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::borrow::Cow;
 
 use super::CodexHarnessMetadata;
@@ -31,6 +32,9 @@ const CODE_MODE_DELIVERY_UNAVAILABLE: &str = "The content of a confirmed assista
 #[derive(Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(super) enum RolloutItemWire<'a> {
+    InputAcceptance {
+        payload: Cow<'a, crate::InputAcceptanceEvent>,
+    },
     SessionMeta {
         payload: Cow<'a, SessionMetaLine>,
     },
@@ -74,6 +78,9 @@ pub(super) enum RolloutItemWire<'a> {
 impl<'a> From<&'a RolloutItem> for RolloutItemWire<'a> {
     fn from(item: &'a RolloutItem) -> Self {
         match item {
+            RolloutItem::InputAcceptance(payload) => Self::InputAcceptance {
+                payload: Cow::Borrowed(payload),
+            },
             RolloutItem::SessionMeta(payload) => Self::SessionMeta {
                 payload: Cow::Borrowed(payload),
             },
@@ -166,6 +173,9 @@ impl<'a> From<&'a RolloutItem> for RolloutItemWire<'a> {
 impl From<RolloutItemWire<'_>> for RolloutItem {
     fn from(item: RolloutItemWire<'_>) -> Self {
         match item {
+            RolloutItemWire::InputAcceptance { payload } => {
+                Self::InputAcceptance(payload.into_owned())
+            }
             RolloutItemWire::SessionMeta { payload } => Self::SessionMeta(payload.into_owned()),
             RolloutItemWire::ResponseItem { payload, metadata } => {
                 if let (

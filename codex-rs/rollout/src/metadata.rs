@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use crate::ARCHIVED_SESSIONS_SUBDIR;
 use crate::RolloutItem;
 use crate::SESSIONS_SUBDIR;
@@ -80,6 +81,7 @@ pub fn builder_from_items(
         | RolloutItem::Compacted(_)
         | RolloutItem::TurnContext(_)
         | RolloutItem::WorldState(_)
+        | RolloutItem::InputAcceptance(_)
         | RolloutItem::RealtimeItem(_)
         | RolloutItem::TokenUsageRecord(_)
         | RolloutItem::RetainedContext(_)
@@ -172,6 +174,7 @@ pub async fn extract_metadata_from_rollout(
             | RolloutItem::Compacted(_)
             | RolloutItem::TurnContext(_)
             | RolloutItem::WorldState(_)
+            | RolloutItem::InputAcceptance(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::RetainedContext(_)

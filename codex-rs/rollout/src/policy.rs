@@ -40,7 +40,8 @@ pub fn persisted_rollout_item(
             matches!(history_mode, ThreadHistoryMode::Paginated).then_some(Cow::Borrowed(item))
         }
         // Persist Codex executive markers so we can analyze flows (e.g., compaction, API turns).
-        RolloutItem::Compacted(_)
+        RolloutItem::InputAcceptance(_)
+        | RolloutItem::Compacted(_)
         | RolloutItem::TurnContext(_)
         | RolloutItem::TokenUsageRecord(_)
         | RolloutItem::WorldState(_)

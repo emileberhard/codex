@@ -439,6 +439,42 @@ impl LocalThreadStore {
         })
     }
 
+    async fn input_acceptance_history(
+        &self,
+        params: LoadThreadHistoryParams,
+    ) -> ThreadStoreResult<StoredThreadHistory> {
+        let resolved = if params.include_archived {
+            thread_rollout_resolver::resolve_current_including_archived(self, params.thread_id)
+                .await?
+        } else {
+            thread_rollout_resolver::resolve_current(self, params.thread_id).await?
+        };
+        let path = resolved
+            .ok_or(ThreadStoreError::ThreadNotFound {
+                thread_id: params.thread_id,
+            })?
+            .path;
+        let (items, loaded_id, parse_errors) =
+            codex_rollout::RolloutRecorder::load_rollout_items(&path)
+                .await
+                .map_err(|error| ThreadStoreError::Internal {
+                    message: format!("failed to read input acceptance history: {error}"),
+                })?;
+        if parse_errors != 0 || loaded_id != Some(params.thread_id) {
+            return Err(ThreadStoreError::InvalidRequest {
+                message: format!(
+                    "input acceptance history for {} contains {parse_errors} unread records or a different thread identity",
+                    params.thread_id
+                ),
+            });
+        }
+        Ok(StoredThreadHistory {
+            thread_id: params.thread_id,
+            items,
+            revision: None,
+        })
+    }
+
     async fn read_thread_by_rollout_path_params(
         &self,
         params: ReadThreadByRolloutPathParams,
@@ -584,6 +620,10 @@ impl ThreadStore for LocalThreadStore {
         Box::pin(async move { live_writer::flush_thread(self, thread_id).await })
     }
 
+    fn persist_thread_durable(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(async move { live_writer::persist_thread_durable(self, thread_id).await })
+    }
+
     fn shutdown_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move { live_writer::shutdown_thread(self, thread_id).await })
     }
@@ -597,6 +637,13 @@ impl ThreadStore for LocalThreadStore {
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
         Box::pin(LocalThreadStore::load_history(self, params))
+    }
+
+    fn load_input_acceptance_history(
+        &self,
+        params: LoadThreadHistoryParams,
+    ) -> ThreadStoreFuture<'_, Option<StoredThreadHistory>> {
+        Box::pin(async move { self.input_acceptance_history(params).await.map(Some) })
     }
 
     fn load_latest_model_context(

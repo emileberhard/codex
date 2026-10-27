@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::borrow::Cow;
 use std::io::Write;
 use std::sync::Arc;
@@ -265,6 +266,7 @@ fn rollout_item_type(item: &RolloutItem) -> String {
         RolloutItem::WorldState(_) => "world_state".to_string(),
         RolloutItem::RetainedContext(_) => "retained_context".to_string(),
         RolloutItem::SecurityRiskScore(_) => "security_risk_score".to_string(),
+        RolloutItem::InputAcceptance(_) => "input_acceptance".to_string(),
         RolloutItem::RealtimeItem(item) => match &item.content {
             codex_protocol::realtime::RealtimeItemContent::RealtimeSessionStarted => {
                 "realtime.session_started".to_string()

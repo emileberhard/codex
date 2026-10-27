@@ -309,6 +309,13 @@ pub(super) async fn flush_thread(
     write_and_project(store, thread_id, RolloutWriteOp::Flush).await
 }
 
+pub(super) async fn persist_thread_durable(
+    store: &LocalThreadStore,
+    thread_id: ThreadId,
+) -> ThreadStoreResult<()> {
+    write_and_project(store, thread_id, RolloutWriteOp::PersistDurable).await
+}
+
 pub(super) async fn shutdown_thread(
     store: &LocalThreadStore,
     thread_id: ThreadId,
@@ -453,6 +460,7 @@ fn thread_store_io_error(err: std::io::Error) -> ThreadStoreError {
 enum RolloutWriteOp {
     AppendItems(Vec<RolloutItem>),
     Persist,
+    PersistDurable,
     Flush,
 }
 
@@ -477,7 +485,10 @@ async fn write_and_project(
     // teardown.
     let _live_writer_guard = store.live_writer_locks.lock(thread_id).await;
     let (recorder, rollout_id, history_mode) = live_writer_parts(store, thread_id).await?;
-    let sync_rollout_path = matches!(&write_op, RolloutWriteOp::Persist | RolloutWriteOp::Flush);
+    let sync_rollout_path = matches!(
+        &write_op,
+        RolloutWriteOp::Persist | RolloutWriteOp::PersistDurable | RolloutWriteOp::Flush
+    );
     let write_op = match write_op {
         RolloutWriteOp::AppendItems(items) => {
             let items = into_persisted_rollout_items(items, history_mode);
@@ -487,6 +498,7 @@ async fn write_and_project(
             RolloutWriteOp::AppendItems(items)
         }
         RolloutWriteOp::Persist => RolloutWriteOp::Persist,
+        RolloutWriteOp::PersistDurable => RolloutWriteOp::PersistDurable,
         RolloutWriteOp::Flush => RolloutWriteOp::Flush,
     };
     if matches!(history_mode, ThreadHistoryMode::Legacy) {
@@ -522,6 +534,10 @@ async fn durable_write(recorder: &RolloutRecorder, write: RolloutWriteOp) -> Thr
             recorder.flush().await.map_err(thread_store_io_error)
         }
         RolloutWriteOp::Persist => recorder.persist().await.map_err(thread_store_io_error),
+        RolloutWriteOp::PersistDurable => recorder
+            .persist_durable()
+            .await
+            .map_err(thread_store_io_error),
         RolloutWriteOp::Flush => recorder.flush().await.map_err(thread_store_io_error),
     }
 }

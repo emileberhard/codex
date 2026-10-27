@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::MAX_QUEUE_ITEMS;
 use crate::QueuedUserSubmissionRecord;
@@ -79,6 +80,11 @@ impl SqliteQueueStore {
         thread_id: ThreadId,
         payload_json: &str,
     ) -> anyhow::Result<QueuedUserSubmissionRecord> {
+        let payload = serde_json::from_str::<serde_json::Value>(payload_json).ok();
+        let client_id = payload
+            .as_ref()
+            .and_then(|payload| payload.pointer("/UserInput/client_id"))
+            .and_then(serde_json::Value::as_str);
         let now_ms = datetime_to_epoch_millis(Utc::now());
         let row = sqlx::query(
             "INSERT INTO queued_items (
@@ -89,6 +95,10 @@ impl SqliteQueueStore {
                     COALESCE((SELECT MAX(queue_order) FROM queued_items WHERE thread_id = ?), -1) + 1,
                     ?, ?
              WHERE (SELECT COUNT(*) FROM queued_items WHERE thread_id = ?) < ?
+               AND (? IS NULL OR NOT EXISTS (
+                   SELECT 1 FROM queued_items WHERE thread_id = ? AND
+                   CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.UserInput.client_id') END = ?
+               ))
              RETURNING id, thread_id, payload_json",
         )
         .bind(Uuid::now_v7().to_string())
@@ -99,9 +109,39 @@ impl SqliteQueueStore {
         .bind(now_ms)
         .bind(thread_id.to_string())
         .bind(i64::try_from(MAX_QUEUE_ITEMS)?)
-        .fetch_one(self.pool.as_ref())
+        .bind(client_id)
+        .bind(thread_id.to_string())
+        .bind(client_id)
+        .fetch_optional(self.pool.as_ref())
         .await?;
-        QueuedUserSubmissionRecord::try_from_row(&row)
+        if let Some(row) = row {
+            return QueuedUserSubmissionRecord::try_from_row(&row);
+        }
+        let existing = sqlx::query(
+            "SELECT id, thread_id, payload_json FROM queued_items
+             WHERE thread_id = ? AND
+             CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.UserInput.client_id') END = ?
+             LIMIT 1",
+        )
+        .bind(thread_id.to_string())
+        .bind(client_id)
+        .fetch_optional(self.pool.as_ref())
+        .await?;
+        let Some(existing) = existing else {
+            return Err(sqlx::Error::RowNotFound.into());
+        };
+        let existing = QueuedUserSubmissionRecord::try_from_row(&existing)?;
+        if Some(serde_json::from_str::<serde_json::Value>(
+            &existing.payload,
+        )?) != payload
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "client user message id already identifies different queued input",
+            )
+            .into());
+        }
+        Ok(existing)
     }
 
     pub async fn list_page(

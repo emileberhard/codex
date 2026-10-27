@@ -978,6 +978,25 @@ pub(crate) async fn run_hooks_and_record_inputs(
             )
             .await;
         }
+        if let TurnInput::UserInput {
+            client_id: Some(client_id),
+            ..
+        } = input_item
+            && let Err(error) = sess
+                .record_input_disposition(client_id, hook_outcome.should_stop)
+                .await
+        {
+            sess.send_event(
+                turn_context,
+                EventMsg::Error(codex_protocol::protocol::ErrorEvent {
+                    message: format!("failed to persist identified input disposition: {error}"),
+                    codex_error_info: Some(codex_protocol::protocol::CodexErrorInfo::Other),
+                    misalignment: None,
+                }),
+            )
+            .await;
+            return true;
+        }
     }
     blocked_input && !accepted_user_input
 }

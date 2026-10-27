@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Selects v2 extraction evidence by provenance, then restores chronological order.
 //! Human replies retain their questions; message media is replaced with placeholders.
 //! Budgets use the same token estimate as the rest of the memory pipeline.
@@ -49,6 +50,7 @@ pub(crate) fn serialize_tiered_input(
             | RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::Compacted(_)
             | RolloutItem::TurnContext(_)
+            | RolloutItem::InputAcceptance(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::WorldState(_)
             | RolloutItem::SecurityRiskScore(_)

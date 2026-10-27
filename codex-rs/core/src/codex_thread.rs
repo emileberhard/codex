@@ -493,15 +493,16 @@ impl CodexThread {
             TurnInputSubmission::Started {
                 turn_id,
                 root_turn_id,
+            }
+            | TurnInputSubmission::Steered {
+                turn_id,
+                root_turn_id,
             } => Ok(StartIfIdleSubmission::Started {
                 turn_id,
                 root_turn_id,
             }),
             TurnInputSubmission::NotSubmitted { reason } => {
                 Ok(StartIfIdleSubmission::NotSubmitted { reason })
-            }
-            TurnInputSubmission::Steered { .. } => {
-                unreachable!("start-if-idle submission cannot steer")
             }
         }
     }
@@ -648,14 +649,12 @@ impl CodexThread {
             .submit_turn_input_with_mode(request, TurnInputMode::Steer { expected_turn_id })
             .await?
         {
-            TurnInputSubmission::Steered { turn_id, .. } => {
+            TurnInputSubmission::Steered { turn_id, .. }
+            | TurnInputSubmission::Started { turn_id, .. } => {
                 Ok(SteerSubmission::Steered { turn_id })
             }
             TurnInputSubmission::NotSubmitted { reason } => {
                 Ok(SteerSubmission::NotSubmitted { reason })
-            }
-            TurnInputSubmission::Started { .. } => {
-                unreachable!("steer-only submission cannot start a turn")
             }
         }
     }

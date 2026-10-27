@@ -929,6 +929,89 @@ async fn turn_start_sends_originator_header(
     Ok(())
 }
 
+#[test_case("danger-full-access"; "full")]
+#[test_case("read-only"; "read_only")]
+#[tokio::test]
+async fn turn_start_identified_input_retries_keep_the_original_turn(
+    sandbox_mode: &str,
+) -> Result<()> {
+    let server = create_mock_responses_server_sequence_unchecked(vec![
+        create_final_assistant_message_sse_response("Done")?,
+    ])
+    .await;
+    let codex_home = TempDir::new()?;
+    let workspace = TempDir::new()?;
+    MockResponsesConfig::new(&server.uri())
+        .with_sandbox_mode(sandbox_mode)
+        .with_approval_policy("never")
+        .write(codex_home.path())?;
+    let mut mcp = TestAppServer::builder()
+        .with_codex_home(codex_home.path())
+        .build_initialized()
+        .await?;
+    let ThreadStartResponse { thread, .. } = mcp
+        .start_thread(ThreadStartParams {
+            model: Some("mock-model".to_string()),
+            cwd: Some(workspace.path().to_string_lossy().into_owned()),
+            ..Default::default()
+        })
+        .await?;
+    let params = TurnStartParams {
+        thread_id: thread.id,
+        client_user_message_id: Some("identified-input-retry".to_string()),
+        input: vec![V2UserInput::Text {
+            text: "Run once".to_string(),
+            text_elements: Vec::new(),
+        }],
+        cwd: Some(workspace.path().to_path_buf()),
+        environments: environment_params(Some(&[LOCAL_ENVIRONMENT_ID]), workspace.path()),
+        ..Default::default()
+    };
+    let accepted: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: params.clone(),
+        })
+        .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_notification_message("turn/completed"),
+    )
+    .await??;
+    let retried: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart {
+            request_id,
+            params: params.clone(),
+        })
+        .await?;
+    assert_eq!(retried.turn.id, accepted.turn.id);
+    let _: codex_app_server_protocol::ThreadRevertResponse = mcp
+        .request(|request_id| ClientRequest::ThreadRevert {
+            request_id,
+            params: codex_app_server_protocol::ThreadRevertParams {
+                thread_id: params.thread_id.clone(),
+                before_turn_id: accepted.turn.id.clone(),
+            },
+        })
+        .await?;
+    let after_revert: TurnStartResponse = mcp
+        .request(|request_id| ClientRequest::TurnStart { request_id, params })
+        .await?;
+    assert_eq!(after_revert.turn.id, accepted.turn.id);
+
+    assert_eq!(
+        server
+            .received_requests()
+            .await
+            .expect("requests")
+            .iter()
+            .filter(|request| request.url.path().ends_with("/responses"))
+            .count(),
+        1
+    );
+    Ok(())
+}
+
 #[tokio::test]
 async fn turn_start_emits_user_message_item_with_text_elements() -> Result<()> {
     let responses = vec![create_final_assistant_message_sse_response("Done")?];

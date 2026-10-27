@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Replays normalized legacy rollout records into canonical paginated JSONL.
 //!
 //! `line_parser` makes old JSON shapes parseable, `legacy_event` converts obsolete completion
@@ -291,6 +292,7 @@ impl LegacyRolloutCanonicalizer {
             item @ (RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::TurnContext(_)
             | RolloutItem::TokenUsageRecord(_)
+            | RolloutItem::InputAcceptance(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::RetainedContext(_)
             | RolloutItem::SecurityRiskScore(_)

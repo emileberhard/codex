@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Rollout persistence and discovery for Codex session files.
 
 use std::sync::LazyLock;
@@ -29,6 +30,7 @@ mod writer_lock;
 pub use codex_history::CompactedItem;
 pub use codex_history::CompactionResumeMetadata;
 pub use codex_history::InitialHistory;
+pub use codex_history::InputAcceptanceEvent;
 pub use codex_history::ResponseItemEnvelope;
 pub use codex_history::ResumedHistory;
 pub use codex_history::RetainedContextEntry;

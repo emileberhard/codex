@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::fmt::Display;
 use std::future::Future;
 
@@ -109,6 +110,14 @@ impl QueueStore for LocalQueueStore {
                             "queue cannot contain more than {MAX_QUEUE_ITEMS} submissions"
                         ),
                     },
+                    _ if error
+                        .downcast_ref::<std::io::Error>()
+                        .is_some_and(|error| error.kind() == std::io::ErrorKind::InvalidInput) =>
+                    {
+                        ThreadStoreError::InvalidRequest {
+                            message: error.to_string(),
+                        }
+                    }
                     _ => ThreadStoreError::Internal {
                         message: format!("queue storage failed: {error}"),
                     },

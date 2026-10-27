@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -409,6 +410,43 @@ async fn starting_a_selected_item_preserves_the_remaining_queue() -> anyhow::Res
             .last()
             .map(String::as_str)
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replaying_a_surviving_queue_row_returns_the_original_turn_without_executing_again()
+-> anyhow::Result<()> {
+    let server = start_mock_server().await;
+    let response =
+        responses::mount_sse_once(&server, responses::sse_completed("accepted-turn")).await;
+    let test = test_codex().build_with_auto_env(&server).await?;
+    let thread_id = test.session_configured.thread_id;
+    let queue = loaded_thread_queue(&test)?;
+    let input = structured_user_input("run once");
+    let item = queue
+        .enqueue(thread_id, serde_json::to_string(&input)?)
+        .await?;
+    let service =
+        QueuedItemService::new(queue.clone(), Weak::new(), Arc::new(NoopExtensionEventSink));
+    let accepted = service
+        .start(test.codex.as_ref(), Some(item.id), /*trace*/ None)
+        .await?;
+    wait_for_event_match(test.codex.as_ref(), |event| match event {
+        EventMsg::TurnComplete(_) => Some(()),
+        _ => None,
+    })
+    .await;
+    let surviving = queue
+        .enqueue(thread_id, serde_json::to_string(&input)?)
+        .await?;
+    assert_eq!(
+        service
+            .start(test.codex.as_ref(), Some(surviving.id), /*trace*/ None)
+            .await?,
+        accepted
+    );
+    assert!(service.list(thread_id).await?.is_empty());
+    response.single_request();
     Ok(())
 }
 

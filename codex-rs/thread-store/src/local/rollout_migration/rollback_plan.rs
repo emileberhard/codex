@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Decides which legacy records remain visible after historical rollback.
 //!
 //! Legacy rollback removes logical instruction turns, not a physical suffix of the rollout file.
@@ -58,6 +59,7 @@ struct RetainedFactSource {
 
 /// Compact plan keyed by parsed source-record index.
 pub(super) struct RollbackPlan {
+    acceptance_thread: Option<codex_protocol::ThreadId>,
     record_boundaries: Vec<Option<usize>>,
     boundary_alive: Vec<bool>,
     compacted_items: HashMap<usize, CompactedItem>,
@@ -81,7 +83,13 @@ impl RollbackPlan {
             &line.item,
             RolloutItem::EventMsg(EventMsg::ThreadRolledBack(_))
         ) {
-            return Ok(None);
+            return Ok(self.acceptance_thread.map(|thread_id| {
+                line.item =
+                    RolloutItem::InputAcceptance(codex_rollout::InputAcceptanceEvent::Fenced {
+                        thread_id,
+                    });
+                line
+            }));
         }
         // A rolled-back turn can still own the empty checkpoint that keeps cold resume from
         // replaying older history.
@@ -98,6 +106,8 @@ impl RollbackPlan {
 
 /// Streaming builder for RollbackPlan.
 pub(super) struct RollbackPlanner {
+    rollout_thread: Option<codex_protocol::ThreadId>,
+    acceptance_thread: Option<codex_protocol::ThreadId>,
     record_boundaries: Vec<Option<usize>>,
     boundaries: Vec<InstructionBoundary>,
     boundary_stack: Vec<usize>,
@@ -117,6 +127,8 @@ pub(super) struct RollbackPlanner {
 impl RollbackPlanner {
     pub(super) fn new() -> Self {
         Self {
+            rollout_thread: None,
+            acceptance_thread: None,
             record_boundaries: Vec::new(),
             boundaries: Vec::new(),
             boundary_stack: Vec::new(),
@@ -159,7 +171,10 @@ impl RollbackPlanner {
         self.pending_delivery_boundary = None;
 
         match &line.item {
-            RolloutItem::SessionMeta(_) => self.record_boundaries[index] = None,
+            RolloutItem::SessionMeta(meta) => {
+                self.rollout_thread = Some(meta.meta.id);
+                self.record_boundaries[index] = None;
+            }
             RolloutItem::ResponseItem(response) => {
                 if matches!(&response.item, ResponseItem::Message { role, .. } if role == "assistant")
                     || matches!(&response.item, ResponseItem::FunctionCall { .. })
@@ -278,6 +293,14 @@ impl RollbackPlanner {
             RolloutItem::TokenUsageRecord(record) => {
                 self.assign_targeted_record(index, Some(record.turn_id.as_str()));
             }
+            RolloutItem::InputAcceptance(event) => {
+                if let codex_rollout::InputAcceptanceEvent::Accepted(accepted) = event
+                    && Some(accepted.thread_id) == self.rollout_thread
+                {
+                    self.acceptance_thread = Some(accepted.thread_id);
+                }
+                self.record_boundaries[index] = None;
+            }
             RolloutItem::WorldState(_) | RolloutItem::RealtimeItem(_) => {}
             RolloutItem::RetainedContext(codex_rollout::RetainedContextEvent::VerifiedAnswer {
                 answer,
@@ -354,6 +377,7 @@ impl RollbackPlanner {
 
     pub(super) fn finish(self) -> RollbackPlan {
         let RollbackPlanner {
+            acceptance_thread,
             record_boundaries,
             boundaries,
             compactions,
@@ -380,6 +404,7 @@ impl RollbackPlanner {
             })
             .collect::<HashMap<_, _>>();
         RollbackPlan {
+            acceptance_thread,
             record_boundaries,
             boundary_alive,
             compacted_items,

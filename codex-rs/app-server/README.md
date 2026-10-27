@@ -808,3 +808,32 @@ The regression cases use synthetic tokens and local mock backends: two
 connections with an unrelated error reply, owner absent before refresh,
 disconnect during refresh, and disconnect racing with callback registration.
 No upstream issue or PR has been submitted.
+
+
+### Identified user-input acceptance
+
+A nonempty `clientUserMessageId` identifies immutable input within its exact thread.
+Core records the original turn binding, request fingerprint and bounded recovery
+input in that thread's rollout, then completes an explicit file and directory
+persistence barrier before publishing input or acknowledging acceptance. Repeating
+the ID with identical input/settings returns the original binding; changing the
+payload rejects the request. Routing mode, expected turn and trace are not part
+of its fingerprint. Inputs without an ID retain their existing submission path.
+
+Native queue admission deduplicates the same thread/ID atomically in SQLite.
+Retrying a queue row after acceptance returns the original binding and cannot
+create another turn. Pending queue edits retain their existing semantics until
+Core accepts the identified payload.
+
+Recovery restores all accepted, unrecorded inputs for the reserved turn in their
+original order. Canonical user-item recording is evidence of recording, not model
+consumption. Terminal, Stop, rollback and later-turn evidence prevent replay.
+Acceptance metadata is invisible to the model, retained through compaction and
+rollback canonicalization, and cannot authorize input in a copied or forked
+thread. IDs are limited to 512 bytes, accepted request plus captured context to
+32 MiB, and distinct accepted IDs to 65,536 per thread.
+
+Environment requests reference the receiving thread's configuration. An identified
+internal request carrying a compiled `Ready` environment must apply that
+configuration separately before submitting input; it is rejected before execution.
+Public environment, cwd and workspace-root overrides use thread-derived authority.

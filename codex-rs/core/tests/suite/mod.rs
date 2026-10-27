@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 // Aggregates all former standalone integration tests as modules.
 use codex_apply_patch::CODEX_CORE_APPLY_PATCH_ARG1;
 #[cfg(unix)]
@@ -124,6 +125,7 @@ mod hooks_mcp;
 mod hooks_plugin_policy_refresh;
 mod image_rollout;
 mod injected_models_cache;
+mod input_acceptance;
 #[cfg(not(target_os = "windows"))]
 mod interrupt_hooks;
 mod items;

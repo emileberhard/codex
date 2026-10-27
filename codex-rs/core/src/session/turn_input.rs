@@ -4,7 +4,8 @@
 //! This is the one place Core decides whether submitted input starts a turn,
 //! steers an active turn, or is rejected. It replies after that decision; it
 //! does not wait for user-prompt hooks, updating the in-memory model context,
-//! rollout persistence, or sampling.
+//! sampling. Identified user input persists its acceptance before replying;
+//! other input preserves the existing asynchronous rollout behavior.
 //!
 //! Persistent thread settings apply on Started and Steered. Turn start
 //! options only update turn context on Started; input provenance follows each request.
@@ -14,6 +15,7 @@
 //! Sender evidence is read without the active-turn lock and bound to the accepted turn.
 
 use super::TurnInput;
+use super::input_acceptance::PreparedInputAcceptance;
 use super::session::Session;
 use super::session::SessionConfiguration;
 use super::session::SessionSettingsUpdate;
@@ -239,8 +241,39 @@ pub(super) async fn handle(
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
     let request = request.into();
+    let acceptance = PreparedInputAcceptance::prepare(&request.request)?;
+    let _acceptance_guard = if acceptance.is_some() {
+        Some(session.input_queue.acceptance_submission.lock().await)
+    } else {
+        None
+    };
+    if let Some(acceptance) = &acceptance
+        && let Some(previous) = acceptance.previous(session).await?
+    {
+        if let Some((turn_id, request)) = session
+            .input_acceptance_recovery(&acceptance.client_id)
+            .await?
+        {
+            if session.active_turn.lock().await.is_some() {
+                reconcile_accepted_inputs_for_active_turn(session, &turn_id).await?;
+            } else {
+                start_if_idle(
+                    session,
+                    request.into(),
+                    turn_id,
+                    TurnStartKind::Recovery,
+                    /*expected_previous_turn_id*/ None,
+                    /*acceptance*/ None,
+                )
+                .await?;
+            }
+        }
+        return Ok(previous);
+    }
     let result = match mode {
-        TurnInputMode::StartOrSteer => start_or_steer(session, request, submission_id).await,
+        TurnInputMode::StartOrSteer => {
+            start_or_steer(session, request, submission_id, acceptance.as_ref()).await
+        }
         TurnInputMode::StartIfIdle => {
             let kind = match &request.request.input {
                 SubmittedTurnInput::UserInput { content, .. } if !content.is_empty() => {
@@ -257,6 +290,7 @@ pub(super) async fn handle(
                 submission_id,
                 kind,
                 /*expected_previous_turn_id*/ None,
+                acceptance.as_ref(),
             )
             .await
         }
@@ -277,11 +311,19 @@ pub(super) async fn handle(
                 submission_id,
                 TurnStartKind::Recovery,
                 Some(expected_previous_turn_id),
+                acceptance.as_ref(),
             )
             .await
         }
         TurnInputMode::Steer { expected_turn_id } => {
-            steer(session, request, expected_turn_id, submission_id).await
+            steer(
+                session,
+                request,
+                expected_turn_id,
+                submission_id,
+                acceptance.as_ref(),
+            )
+            .await
         }
     };
     // Link this request's trace to the accepted turn, which may have an older trace.
@@ -320,6 +362,7 @@ pub(super) async fn handle_recovery(
         submission_id,
         TurnStartKind::Recovery,
         /*expected_previous_turn_id*/ None,
+        /*acceptance*/ None,
     )
     .await;
     if let Ok(TurnInputSubmission::Started { turn_id, .. }) = &result {
@@ -348,6 +391,7 @@ async fn start_or_steer(
     session: &Arc<Session>,
     request: WithTurnExtensionData<TurnInputRequest>,
     submission_id: String,
+    acceptance: Option<&PreparedInputAcceptance>,
 ) -> CodexResult<TurnInputSubmission> {
     let WithTurnExtensionData {
         request,
@@ -398,8 +442,9 @@ async fn start_or_steer(
             settings.required_active_final_output_json_schema(),
             responsesapi_client_metadata.clone(),
             origin,
+            acceptance,
         )
-        .await
+        .await?
     {
         Ok((turn_id, root_turn_id)) => {
             settings.apply_steered(session, submission_id).await?;
@@ -443,6 +488,18 @@ async fn start_or_steer(
                     .turn_metadata_state
                     .set_responsesapi_client_metadata(responsesapi_client_metadata);
             }
+            if let Some(acceptance) = acceptance {
+                acceptance
+                    .persist(
+                        session,
+                        &turn_context,
+                        TurnInputSubmission::Started {
+                            turn_id: submission_id.clone(),
+                            root_turn_id: turn_context.root_turn_id(),
+                        },
+                    )
+                    .await?;
+            }
             session
                 .maybe_emit_model_warnings_for_turn(turn_context.as_ref())
                 .await;
@@ -465,6 +522,9 @@ async fn start_or_steer(
             session
                 .spawn_task(Arc::clone(&turn_context), task_input, RegularTask::new())
                 .await?;
+            if let Some(acceptance) = acceptance {
+                session.mark_input_live(&acceptance.client_id).await;
+            }
             Ok(TurnInputSubmission::Started {
                 turn_id: submission_id,
                 root_turn_id: turn_context.root_turn_id(),
@@ -484,6 +544,7 @@ async fn start_if_idle(
     submission_id: String,
     kind: TurnStartKind,
     expected_previous_turn_id: Option<String>,
+    acceptance: Option<&PreparedInputAcceptance>,
 ) -> CodexResult<TurnInputSubmission> {
     let WithTurnExtensionData {
         request,
@@ -602,6 +663,21 @@ async fn start_if_idle(
             .turn_metadata_state
             .set_responsesapi_client_metadata(responsesapi_client_metadata);
     }
+    if let Some(acceptance) = acceptance
+        && let Err(error) = acceptance
+            .persist(
+                session,
+                &turn_context,
+                TurnInputSubmission::Started {
+                    turn_id: submission_id.clone(),
+                    root_turn_id: turn_context.root_turn_id(),
+                },
+            )
+            .await
+    {
+        session.clear_reserved_idle_turn(&turn_state).await;
+        return Err(error);
+    }
     session
         .maybe_emit_model_warnings_for_turn(turn_context.as_ref())
         .await;
@@ -614,6 +690,19 @@ async fn start_if_idle(
             if let SubmittedTurnInput::UserInput { content, .. } = &input {
                 turn_context.session_telemetry.user_prompt(content);
             }
+            task_input.push(
+                pending_turn_input(
+                    session,
+                    input,
+                    sender_messages.as_ref(),
+                    &turn_context.sub_id,
+                    origin,
+                )
+                .await,
+            );
+        }
+        TurnStartKind::Recovery if matches!(&input, SubmittedTurnInput::UserInput { content, .. } if !content.is_empty()) =>
+        {
             task_input.push(
                 pending_turn_input(
                     session,
@@ -647,6 +736,36 @@ async fn start_if_idle(
             }
         }
     }
+    if kind == TurnStartKind::Recovery {
+        let recovered = match session.pending_accepted_requests(&submission_id).await {
+            Ok(recovered) => recovered,
+            Err(error) => {
+                session.clear_reserved_idle_turn(&turn_state).await;
+                return Err(error);
+            }
+        };
+        for request in recovered {
+            task_input
+                .extend(merge_additional_context_input(session, request.additional_context).await);
+            task_input.push(
+                pending_turn_input(
+                    session,
+                    request.input,
+                    None,
+                    &submission_id,
+                    UserInputOrigin::from_turn_trigger(request.start.turn_trigger.as_deref()),
+                )
+                .await,
+            );
+        }
+    }
+    let live_input_ids: Vec<String> = task_input
+        .iter()
+        .filter_map(|input| match input {
+            TurnInput::UserInput { client_id, .. } => client_id.clone(),
+            _ => None,
+        })
+        .collect();
     if let Err(error) = session
         .start_task(Arc::clone(&turn_context), task_input, RegularTask::new())
         .await
@@ -654,10 +773,66 @@ async fn start_if_idle(
         session.clear_reserved_idle_turn(&turn_state).await;
         return Err(error);
     }
+    for client_id in live_input_ids {
+        session.mark_input_live(&client_id).await;
+    }
     Ok(TurnInputSubmission::Started {
         turn_id: submission_id,
         root_turn_id: turn_context.root_turn_id(),
     })
+}
+
+async fn reconcile_accepted_inputs_for_active_turn(
+    session: &Arc<Session>,
+    turn_id: &str,
+) -> CodexResult<()> {
+    let requests = session.pending_accepted_requests(turn_id).await?;
+    if requests.is_empty() {
+        return Ok(());
+    }
+    let active = session.active_turn.lock().await;
+    let Some(active_turn) = active.as_ref() else {
+        return Ok(());
+    };
+    let Some(task) = active_turn.task.as_ref() else {
+        return Ok(());
+    };
+    if task.turn_context.sub_id != turn_id {
+        return Ok(());
+    }
+    let mut inputs = Vec::new();
+    let mut client_ids = Vec::new();
+    for request in requests {
+        if let SubmittedTurnInput::UserInput {
+            client_id: Some(client_id),
+            ..
+        } = &request.input
+        {
+            client_ids.push(client_id.clone());
+        }
+        inputs.extend(merge_additional_context_input(session, request.additional_context).await);
+        inputs.push(
+            pending_turn_input(
+                session,
+                request.input,
+                None,
+                turn_id,
+                UserInputOrigin::from_turn_trigger(request.start.turn_trigger.as_deref()),
+            )
+            .await,
+        );
+    }
+    session
+        .input_queue
+        .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
+            active_turn.turn_state.as_ref(),
+            inputs,
+        )
+        .await;
+    for client_id in client_ids {
+        session.mark_input_live(&client_id).await;
+    }
+    Ok(())
 }
 
 async fn steer(
@@ -665,6 +840,7 @@ async fn steer(
     request: WithTurnExtensionData<TurnInputRequest>,
     expected_turn_id: String,
     submission_id: String,
+    acceptance: Option<&PreparedInputAcceptance>,
 ) -> CodexResult<TurnInputSubmission> {
     let WithTurnExtensionData {
         request,
@@ -702,8 +878,9 @@ async fn steer(
             settings.required_active_final_output_json_schema(),
             responsesapi_client_metadata,
             origin,
+            acceptance,
         )
-        .await
+        .await?
     {
         Ok((turn_id, root_turn_id)) => {
             settings.apply_steered(session, submission_id).await?;
@@ -841,42 +1018,43 @@ impl Session {
         required_final_output_json_schema: Option<&Value>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
         origin: UserInputOrigin,
-    ) -> Result<(String, String), NotSubmittedReason> {
+        acceptance: Option<&PreparedInputAcceptance>,
+    ) -> CodexResult<Result<(String, String), NotSubmittedReason>> {
         let mut active = self.active_turn.lock().await;
         let Some(active_turn) = active.as_mut() else {
-            return Err(NotSubmittedReason::NoActiveTurn);
+            return Ok(Err(NotSubmittedReason::NoActiveTurn));
         };
 
         let Some(active_task) = active_turn.task.as_ref() else {
-            return Err(NotSubmittedReason::NoActiveTurn);
+            return Ok(Err(NotSubmittedReason::NoActiveTurn));
         };
         let active_turn_id = &active_task.turn_context.sub_id;
 
         if let Some(expected_turn_id) = expected_turn_id
             && expected_turn_id != active_turn_id
         {
-            return Err(NotSubmittedReason::ExpectedTurnMismatch {
+            return Ok(Err(NotSubmittedReason::ExpectedTurnMismatch {
                 expected: expected_turn_id.to_string(),
                 actual: active_turn_id.clone(),
-            });
+            }));
         }
 
         match active_task.kind {
             crate::state::TaskKind::Regular => {}
             crate::state::TaskKind::Review => {
-                return Err(NotSubmittedReason::ActiveTurnNotSteerable {
+                return Ok(Err(NotSubmittedReason::ActiveTurnNotSteerable {
                     turn_kind: NonSteerableTurnKind::Review,
-                });
+                }));
             }
             crate::state::TaskKind::Compact => {
-                return Err(NotSubmittedReason::ActiveTurnNotSteerable {
+                return Ok(Err(NotSubmittedReason::ActiveTurnNotSteerable {
                     turn_kind: NonSteerableTurnKind::Compact,
-                });
+                }));
             }
         }
 
         if matches!(input, SubmittedTurnInput::UserInput { content, .. } if content.is_empty()) {
-            return Err(NotSubmittedReason::EmptyInput);
+            return Ok(Err(NotSubmittedReason::EmptyInput));
         }
         // Compare JSON values directly instead of serialized schema text.
         // Value equality ignores object key order while preserving array and
@@ -884,7 +1062,19 @@ impl Session {
         if let Some(required_schema) = required_final_output_json_schema
             && active_task.turn_context.final_output_json_schema.as_ref() != Some(required_schema)
         {
-            return Err(NotSubmittedReason::ActiveTurnOutputSchemaMismatch);
+            return Ok(Err(NotSubmittedReason::ActiveTurnOutputSchemaMismatch));
+        }
+        if let Some(acceptance) = acceptance {
+            acceptance
+                .persist(
+                    self,
+                    &active_task.turn_context,
+                    TurnInputSubmission::Steered {
+                        turn_id: active_turn_id.clone(),
+                        root_turn_id: active_task.turn_context.root_turn_id(),
+                    },
+                )
+                .await?;
         }
         let mut pending_input = merge_additional_context_input(self, additional_context).await;
 
@@ -915,6 +1105,10 @@ impl Session {
                     .await
             }
         };
+        let client_id = match &input {
+            TurnInput::UserInput { client_id, .. } => client_id.clone(),
+            _ => None,
+        };
         pending_input.push(input);
         self.input_queue
             .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
@@ -922,10 +1116,13 @@ impl Session {
                 pending_input,
             )
             .await;
-        Ok((
+        if let Some(client_id) = client_id {
+            self.mark_input_live(&client_id).await;
+        }
+        Ok(Ok((
             active_turn_id.clone(),
             active_task.turn_context.root_turn_id(),
-        ))
+        )))
     }
 }
 

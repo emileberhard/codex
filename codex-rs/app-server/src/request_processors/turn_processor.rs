@@ -1721,6 +1721,15 @@ impl TurnRequestProcessor {
 
         let (thread_uuid, thread) = self.load_thread(&thread_id).await?;
 
+        if !is_startup_interrupt
+            && thread
+                .interrupt_accepted_turn(&turn_id)
+                .await
+                .map_err(|error| internal_error(error.to_string()))?
+        {
+            return Ok(Some(TurnInterruptResponse {}));
+        }
+
         // Record turn interrupts so we can reply when TurnAborted arrives. Startup
         // interrupts do not have a turn and are acknowledged after submission.
         if !is_startup_interrupt {

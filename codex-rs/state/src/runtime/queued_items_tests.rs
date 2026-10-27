@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use crate::migrations::QUEUE_MIGRATOR;
 use crate::runtime::test_support::test_thread_metadata;
@@ -41,6 +42,40 @@ async fn competing_runtimes_preserve_fifo_queue_order() {
         .unwrap();
     actual.sort_by(|first, second| first.id.cmp(&second.id));
     assert_eq!(expected, actual);
+}
+
+#[tokio::test]
+async fn competing_runtimes_deduplicate_identified_queue_input_and_reject_conflicts() {
+    let (runtime, thread_id) = runtime_with_thread().await;
+    let other = StateRuntime::init(runtime.sqlite().clone(), "test-provider".to_string())
+        .await
+        .unwrap();
+    let payload = r#"{"UserInput":{"content":[{"type":"text","text":"run once","text_elements":[]}],"client_id":"same-input"}}"#;
+    let queue = runtime.thread_queue();
+    let other_queue = other.thread_queue();
+    let (first, second) = tokio::join!(
+        queue.enqueue(thread_id, payload),
+        other_queue.enqueue(thread_id, payload)
+    );
+    let first = first.unwrap();
+    assert_eq!(first, second.unwrap());
+    assert_eq!(
+        queue
+            .list_page(thread_id, /*offset*/ 0, /*limit*/ 10)
+            .await
+            .unwrap(),
+        vec![first]
+    );
+    let error = queue
+        .enqueue(thread_id, &payload.replace("run once", "different work"))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    let another_thread = ThreadId::new();
+    assert!(queue.enqueue(another_thread, payload).await.is_ok());
 }
 
 #[tokio::test]

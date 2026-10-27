@@ -654,14 +654,14 @@ pub struct ThreadSettingsOverrides {
 }
 
 /// Source classification for client-supplied context.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AdditionalContextKind {
     Untrusted,
     Application,
 }
 
 /// Client-supplied context keyed by an opaque source identifier.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdditionalContextEntry {
     pub value: String,
     pub kind: AdditionalContextKind,

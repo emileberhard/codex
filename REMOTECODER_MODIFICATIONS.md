@@ -29,6 +29,8 @@ thread whose provider was defined for that thread. It applies only while loading
 the thread from storage; the persisted model, provider and permissions stay
 authoritative, and any other key is rejected.
 
+
+
 - `.gitignore`
 - `MODULE.bazel.lock`
 - `codex-rs/Cargo.lock`
@@ -217,6 +219,7 @@ authoritative, and any other key is rejected.
 - `codex-rs/core/src/realtime_history_tests.rs`
 - `codex-rs/core/src/session/extension_interruption_tests.rs`
 - `codex-rs/core/src/session/handlers.rs`
+- `codex-rs/core/src/session/input_acceptance.rs`
 - `codex-rs/core/src/session/input_queue.rs`
 - `codex-rs/core/src/session/input_queue/mailbox_checkpoint.rs`
 - `codex-rs/core/src/session/input_queue/mailbox_submission_tests.rs`
@@ -224,6 +227,7 @@ authoritative, and any other key is rejected.
 - `codex-rs/core/src/session/mod.rs`
 - `codex-rs/core/src/session/notification_tests.rs`
 - `codex-rs/core/src/session/review.rs`
+- `codex-rs/core/src/session/rollout_reconstruction.rs`
 - `codex-rs/core/src/session/rollout_reconstruction_tests.rs`
 - `codex-rs/core/src/session/session.rs`
 - `codex-rs/core/src/session/step_activation_tests.rs`
@@ -249,6 +253,8 @@ authoritative, and any other key is rejected.
 - `codex-rs/core/src/tools/handlers/view_image_snapshot_tests.rs`
 - `codex-rs/core/src/tools/network_approval_tests.rs`
 - `codex-rs/core/tests/suite/abort_tasks.rs`
+- `codex-rs/core/tests/suite/input_acceptance.rs`
+- `codex-rs/core/tests/suite/mod.rs`
 - `codex-rs/core/tests/suite/model_switching.rs`
 - `codex-rs/core/tests/suite/openai_file_mcp.rs`
 - `codex-rs/core/tests/suite/realtime_conversation.rs`
@@ -265,9 +271,17 @@ authoritative, and any other key is rejected.
 - `codex-rs/exec/src/lib.rs`
 - `codex-rs/exec/tests/event_processor_with_json_output.rs`
 - `codex-rs/ext/guardian-v2/src/async_scorer/startup.rs`
+- `codex-rs/ext/queue/tests/queue_service.rs`
+- `codex-rs/external-agent-migration/src/sessions/append.rs`
 - `codex-rs/external-agent-migration/src/sessions/export.rs`
+- `codex-rs/history/src/compaction_resume_metadata.rs`
+- `codex-rs/history/src/input_acceptance.rs`
+- `codex-rs/history/src/lib.rs`
+- `codex-rs/history/src/rollout_payload.rs`
 - `codex-rs/login/src/auth/manager.rs`
 - `codex-rs/login/tests/suite/auth_refresh.rs`
+- `codex-rs/memories/write/src/phase1.rs`
+- `codex-rs/memories/write/src/rollout_input.rs`
 - `codex-rs/memories/write/src/runtime.rs`
 - `codex-rs/memories/write/src/startup_tests.rs`
 - `codex-rs/model-provider-info/src/capabilities.rs`
@@ -286,15 +300,23 @@ authoritative, and any other key is rejected.
 - `codex-rs/protocol/src/turn_input.rs`
 - `codex-rs/rmcp-client/src/stdio_server_launcher.rs`
 - `codex-rs/rollout/src/compression_tests.rs`
+- `codex-rs/rollout/src/lib.rs`
+- `codex-rs/rollout/src/list.rs`
+- `codex-rs/rollout/src/metadata.rs`
+- `codex-rs/rollout/src/persistence_metrics.rs`
 - `codex-rs/rollout/src/policy.rs`
 - `codex-rs/rollout/src/recorder.rs`
 - `codex-rs/rollout/src/recorder_tests.rs`
+- `codex-rs/rollout/src/search.rs`
 - `codex-rs/rollout/src/state_db_tests.rs`
 - `codex-rs/rollout/src/tests.rs`
 - `codex-rs/state/BUILD.bazel`
 - `codex-rs/state/src/extract.rs`
 - `codex-rs/state/src/lib.rs`
 - `codex-rs/state/src/migrations_tests.rs`
+- `codex-rs/state/src/runtime/queued_items.rs`
+- `codex-rs/state/src/runtime/queued_items_tests.rs`
+- `codex-rs/state/src/runtime/threads.rs`
 - `codex-rs/state/src/sqlite.rs`
 - `codex-rs/state/src/thread_history_migration_repair.rs`
 - `codex-rs/state/src/thread_history_migration_repair_tests.rs`
@@ -304,6 +326,7 @@ authoritative, and any other key is rejected.
 - `codex-rs/state/thread_history_migrations/1000004_observation_lineage.sql`
 - `codex-rs/thread-manager-sample/src/main.rs`
 - `codex-rs/thread-store/BUILD.bazel`
+- `codex-rs/thread-store/src/in_memory.rs`
 - `codex-rs/thread-store/src/lib.rs`
 - `codex-rs/thread-store/src/live_thread.rs`
 - `codex-rs/thread-store/src/local/item_lifecycle_tests.rs`
@@ -312,8 +335,12 @@ authoritative, and any other key is rejected.
 - `codex-rs/thread-store/src/local/mod.rs`
 - `codex-rs/thread-store/src/local/observation_lineage_tests.rs`
 - `codex-rs/thread-store/src/local/pending_thread_metadata_tests.rs`
+- `codex-rs/thread-store/src/local/revert_thread.rs`
 - `codex-rs/thread-store/src/local/revert_thread_tests.rs`
 - `codex-rs/thread-store/src/local/rollout_lineage.rs`
+- `codex-rs/thread-store/src/local/rollout_migration/canonicalizer.rs`
+- `codex-rs/thread-store/src/local/rollout_migration/rollback_plan.rs`
+- `codex-rs/thread-store/src/local/rollout_migration/rollback_replay.rs`
 - `codex-rs/thread-store/src/local/rollout_migration/startup_tests.rs`
 - `codex-rs/thread-store/src/local/rollout_migration_tests.rs`
 - `codex-rs/thread-store/src/local/thread_history.rs`
@@ -324,6 +351,7 @@ authoritative, and any other key is rejected.
 - `codex-rs/thread-store/src/local/thread_history/segment_paging.rs`
 - `codex-rs/thread-store/src/local/thread_history_materialization.rs`
 - `codex-rs/thread-store/src/local/thread_history_materialization_tests.rs`
+- `codex-rs/thread-store/src/queue_store.rs`
 - `codex-rs/thread-store/src/store.rs`
 - `codex-rs/thread-store/src/thread_metadata_sync.rs`
 - `codex-rs/thread-store/src/types.rs`

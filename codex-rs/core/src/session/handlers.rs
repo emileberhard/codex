@@ -62,6 +62,9 @@ use tracing::info;
 use tracing::warn;
 
 pub async fn interrupt(sess: &Arc<Session>) {
+    if let Err(error) = sess.fence_accepted_inputs().await {
+        warn!("failed to durably fence identified inputs before interrupt: {error}");
+    }
     sess.interrupt_task().await;
 }
 

@@ -214,6 +214,16 @@ pub trait ThreadStore: Any + Send + Sync {
     /// Flushes all queued items and returns once they are durable/readable.
     fn flush_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()>;
 
+    fn persist_thread_durable(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
+        Box::pin(async move {
+            Err(crate::ThreadStoreError::InvalidRequest {
+                message: format!(
+                    "thread {thread_id} store does not support durable input acceptance"
+                ),
+            })
+        })
+    }
+
     /// Flushes pending items and closes the live thread writer.
     /// Stores with opt-in disposable preparations may discard an unactivated preparation.
     fn shutdown_thread(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()>;
@@ -230,6 +240,13 @@ pub trait ThreadStore: Any + Send + Sync {
         &self,
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreFuture<'_, StoredThreadHistory>;
+
+    fn load_input_acceptance_history(
+        &self,
+        _params: LoadThreadHistoryParams,
+    ) -> ThreadStoreFuture<'_, Option<StoredThreadHistory>> {
+        Box::pin(async { Ok(None) })
+    }
 
     /// Loads the persisted rollout items needed to reconstruct the latest model-visible context.
     ///

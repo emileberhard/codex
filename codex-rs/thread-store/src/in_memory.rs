@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -953,6 +954,10 @@ impl ThreadStore for InMemoryThreadStore {
         })
     }
 
+    fn persist_thread_durable(&self, thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
+        self.flush_thread(thread_id)
+    }
+
     fn shutdown_thread(&self, _thread_id: ThreadId) -> ThreadStoreFuture<'_, ()> {
         Box::pin(async move {
             self.state.lock().await.calls.shutdown_thread += 1;
@@ -972,6 +977,17 @@ impl ThreadStore for InMemoryThreadStore {
         params: LoadThreadHistoryParams,
     ) -> ThreadStoreFuture<'_, StoredThreadHistory> {
         Box::pin(InMemoryThreadStore::load_history(self, params))
+    }
+
+    fn load_input_acceptance_history(
+        &self,
+        params: LoadThreadHistoryParams,
+    ) -> ThreadStoreFuture<'_, Option<StoredThreadHistory>> {
+        Box::pin(async move {
+            InMemoryThreadStore::load_history(self, params)
+                .await
+                .map(Some)
+        })
     }
 
     fn load_latest_model_context(

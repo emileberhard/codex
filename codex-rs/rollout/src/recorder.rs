@@ -993,6 +993,7 @@ impl RolloutRecorder {
                     rollout_path: path,
                     ordinal_state,
                     last_logged_error: None,
+                    directory_synced: false,
                 }
             }
             RolloutRecorderParams::Resume { path } => {
@@ -1007,6 +1008,7 @@ impl RolloutRecorder {
                     rollout_path: path,
                     ordinal_state,
                     last_logged_error: None,
+                    directory_synced: false,
                 }
             }
         };
@@ -1820,6 +1822,7 @@ struct RolloutWriterState {
     rollout_path: PathBuf,
     ordinal_state: RolloutOrdinalState,
     last_logged_error: Option<String>,
+    directory_synced: bool,
 }
 
 impl RolloutWriterState {
@@ -1848,7 +1851,7 @@ impl RolloutWriterState {
             .ok_or_else(|| IoError::other("durable rollout persist has no writer"))?;
         writer.file.sync_all().await?;
         #[cfg(unix)]
-        {
+        if !self.directory_synced {
             let path = self.rollout_path.clone();
             tokio::task::spawn_blocking(move || {
                 let parent = path
@@ -1861,6 +1864,7 @@ impl RolloutWriterState {
             })
             .await
             .map_err(IoError::other)??;
+            self.directory_synced = true;
         }
         Ok(())
     }
@@ -1923,6 +1927,7 @@ impl RolloutWriterState {
         }
         self.last_logged_error = Some(message);
         self.writer = None;
+        self.directory_synced = false;
     }
 
     async fn ensure_writer_open(&mut self) -> std::io::Result<()> {
@@ -2268,6 +2273,7 @@ async fn resume_candidate_matches_cwd(
             | RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::Compacted(_)
             | RolloutItem::WorldState(_)
+            | RolloutItem::InputAcceptance(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::RetainedContext(_)

@@ -254,6 +254,7 @@ mod reasoning_effort;
 mod submission;
 pub(crate) use reasoning_effort::RequestEffortUsage;
 pub(crate) use submission::Submission;
+mod input_acceptance;
 mod input_queue;
 mod mcp;
 mod mcp_prewarm;
@@ -1655,6 +1656,8 @@ impl Session {
     }
 
     async fn record_initial_history(&self, conversation_history: InitialHistory) {
+        self.remember_input_acceptances(conversation_history.get_rollout_items())
+            .await;
         let (is_subagent, is_paginated_subagent) = {
             let state = self.state.lock().await;
             let session_configuration = &state.session_configuration;
@@ -2704,7 +2707,8 @@ impl Session {
         }
         // Persist the event into rollout storage; the store applies its persistence policy.
         if persist {
-            let rollout_items = vec![RolloutItem::EventMsg(event.msg.clone())];
+            let mut rollout_items = self.input_acceptance_lifecycle_records(&event.msg).await;
+            rollout_items.push(RolloutItem::EventMsg(event.msg.clone()));
             self.persist_rollout_items(&rollout_items).await;
         }
         self.services

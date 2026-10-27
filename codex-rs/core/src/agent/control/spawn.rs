@@ -111,7 +111,8 @@ fn keep_forked_rollout_item(item: &RolloutItem, preserve_context_baselines: bool
             | ResponseItem::ContextCompaction { .. }
             | ResponseItem::Other => false,
         },
-        RolloutItem::RealtimeItem(_)
+        RolloutItem::InputAcceptance(_)
+        | RolloutItem::RealtimeItem(_)
         | RolloutItem::InterAgentCommunication(_)
         | RolloutItem::InterAgentCommunicationMetadata { .. }
         | RolloutItem::RetainedContext(_)
@@ -1310,7 +1311,7 @@ impl LocalAgentControl {
                     }
                     true
                 }
-                RolloutItem::RealtimeItem(_) => false,
+                RolloutItem::InputAcceptance(_) | RolloutItem::RealtimeItem(_) => false,
                 RolloutItem::EventMsg(_)
                 | RolloutItem::SessionMeta(_)
                 | RolloutItem::TurnContext(_)

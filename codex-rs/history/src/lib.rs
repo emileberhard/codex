@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 //! Model-history and persisted-rollout domain types.
 
 mod heartbeat;
@@ -16,6 +17,11 @@ pub use compaction_checkpoint::CompactionCheckpoint;
 
 mod initialization;
 pub use initialization::HistoryInitialization;
+
+mod input_acceptance;
+pub use input_acceptance::InputAcceptance;
+pub use input_acceptance::InputAcceptanceEvent;
+pub use input_acceptance::InputAcceptanceKind;
 
 use std::borrow::Borrow;
 use std::ops::Deref;
@@ -213,6 +219,7 @@ impl Borrow<ResponseItem> for ResponseItemEnvelope {
 /// Persisted rollout item used by core history and rollout storage.
 #[derive(Debug, Clone)]
 pub enum RolloutItem {
+    InputAcceptance(InputAcceptanceEvent),
     SessionMeta(SessionMetaLine),
     ResponseItem(ResponseItemEnvelope),
     InterAgentCommunication(InterAgentCommunication),

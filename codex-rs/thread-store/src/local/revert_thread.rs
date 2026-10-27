@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_rollout::RolloutConfig;
@@ -69,6 +70,31 @@ pub(super) async fn revert(
         });
     }
 
+    let acceptance_history = store
+        .input_acceptance_history(crate::LoadThreadHistoryParams {
+            thread_id,
+            include_archived: false,
+        })
+        .await?;
+    let mut accepted_inputs = std::collections::BTreeMap::new();
+    for item in acceptance_history.items {
+        if let codex_rollout::RolloutItem::InputAcceptance(
+            codex_rollout::InputAcceptanceEvent::Accepted(accepted),
+        ) = item
+            && accepted.thread_id == thread_id
+        {
+            if let Some(previous) =
+                accepted_inputs.insert(accepted.client_id.clone(), accepted.clone())
+                && (previous.fingerprint != accepted.fingerprint
+                    || previous.submission() != accepted.submission())
+            {
+                return Err(ThreadStoreError::InvalidRequest {
+                    message: "conflicting input acceptance while reverting thread".to_string(),
+                });
+            }
+        }
+    }
+
     // Older binaries can omit creator fields when replacing a rollout during revert.
     source_meta.creator_user_id = source_meta
         .creator_user_id
@@ -129,7 +155,29 @@ pub(super) async fn revert(
     )
     .await?;
     let replacement_path = recorder.rollout_path().to_path_buf();
-    recorder.persist().await.map_err(thread_store_io_error)?;
+    if accepted_inputs.is_empty() {
+        recorder.persist().await.map_err(thread_store_io_error)?;
+    } else {
+        let mut records = accepted_inputs
+            .into_values()
+            .map(|accepted| {
+                codex_rollout::RolloutItem::InputAcceptance(
+                    codex_rollout::InputAcceptanceEvent::Accepted(accepted),
+                )
+            })
+            .collect::<Vec<_>>();
+        records.push(codex_rollout::RolloutItem::InputAcceptance(
+            codex_rollout::InputAcceptanceEvent::Fenced { thread_id },
+        ));
+        recorder
+            .record_canonical_items(&records)
+            .await
+            .map_err(thread_store_io_error)?;
+        recorder
+            .persist_durable()
+            .await
+            .map_err(thread_store_io_error)?;
+    }
     recorder.shutdown().await.map_err(thread_store_io_error)?;
 
     let replaced = state_db
