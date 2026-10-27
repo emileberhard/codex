@@ -376,10 +376,10 @@ impl Session {
         }
         {
             let active = self.active_turn.lock().await;
-            if !active
+            if active
                 .as_ref()
                 .and_then(|turn| turn.task.as_ref())
-                .is_some_and(|task| task.turn_context.sub_id == turn_id)
+                .is_none_or(|task| task.turn_context.sub_id != turn_id)
             {
                 return Ok(());
             }

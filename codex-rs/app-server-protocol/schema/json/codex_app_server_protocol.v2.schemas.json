@@ -6652,6 +6652,29 @@
       ],
       "type": "string"
     },
+    "DaemonToolContext": {
+      "properties": {
+        "rootProcessIdentity": {
+          "$ref": "#/definitions/LocalProcessIdentity"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rootProcessIdentity",
+        "threadId",
+        "toolCallId",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "DeprecationNoticeNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
@@ -9810,6 +9833,17 @@
       "title": "InitializeParams",
       "type": "object"
     },
+    "InputAcceptanceFact": {
+      "enum": [
+        "recorded",
+        "rejected",
+        "stopped",
+        "finished",
+        "terminal",
+        "suspended"
+      ],
+      "type": "string"
+    },
     "InputModality": {
       "description": "Canonical user-input modality tags advertised by a model.",
       "oneOf": [
@@ -10118,6 +10152,24 @@
         "data"
       ],
       "title": "ListMcpServerStatusResponse",
+      "type": "object"
+    },
+    "LocalProcessIdentity": {
+      "properties": {
+        "pid": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "startedAtUnixMicros": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pid",
+        "startedAtUnixMicros"
+      ],
       "type": "object"
     },
     "LocalShellAction": {
@@ -19938,6 +19990,32 @@
     "ThreadInjectItemsResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "ThreadInjectItemsResponse",
+      "type": "object"
+    },
+    "ThreadInputAcceptance": {
+      "properties": {
+        "facts": {
+          "items": {
+            "$ref": "#/definitions/InputAcceptanceFact"
+          },
+          "type": "array"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "rootTurnId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "facts",
+        "fingerprint",
+        "rootTurnId",
+        "turnId"
+      ],
       "type": "object"
     },
     "ThreadItem": {

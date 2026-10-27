@@ -87,12 +87,16 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json`
 - `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst`
 - `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst`
+- `codex-rs/app-server-protocol/schema/typescript/v2/DaemonToolContext.ts`
+- `codex-rs/app-server-protocol/schema/typescript/v2/InputAcceptanceFact.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ItemCompletedNotification.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ItemStartedNotification.ts`
+- `codex-rs/app-server-protocol/schema/typescript/v2/LocalProcessIdentity.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ServerDiagnosticsFileDescriptorLimits.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ServerDiagnosticsProcess.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ServerDiagnosticsResourceLimit.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadExtra.ts`
+- `codex-rs/app-server-protocol/schema/typescript/v2/ThreadInputAcceptance.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadItem.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadItemEntry.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ThreadListResponse.ts`

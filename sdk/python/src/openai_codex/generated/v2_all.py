@@ -2164,6 +2164,15 @@ class InitializeParams(BaseModel):
     client_info: Annotated[ClientInfo, Field(alias="clientInfo")]
 
 
+class InputAcceptanceFact(Enum):
+    recorded = "recorded"
+    rejected = "rejected"
+    stopped = "stopped"
+    finished = "finished"
+    terminal = "terminal"
+    suspended = "suspended"
+
+
 class InputModality(Enum):
     text = "text"
     image = "image"
@@ -2208,6 +2217,14 @@ class LegacyAppPathString(RootModel[str]):
         populate_by_name=True,
     )
     root: str
+
+
+class LocalProcessIdentity(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    pid: int
+    started_at_unix_micros: Annotated[int, Field(alias="startedAtUnixMicros", ge=0)]
 
 
 class ExecLocalShellAction(BaseModel):
@@ -5439,6 +5456,16 @@ class ThreadInjectItemsResponse(BaseModel):
     )
 
 
+class ThreadInputAcceptance(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    facts: list[InputAcceptanceFact]
+    fingerprint: str
+    root_turn_id: Annotated[str, Field(alias="rootTurnId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class HookPromptThreadItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8289,6 +8316,16 @@ class ContentItem(
         | InputAudioContentItem
         | OutputTextContentItem
     )
+
+
+class DaemonToolContext(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root_process_identity: Annotated[LocalProcessIdentity, Field(alias="rootProcessIdentity")]
+    thread_id: Annotated[str, Field(alias="threadId")]
+    tool_call_id: Annotated[str, Field(alias="toolCallId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
 
 
 class ExperimentalFeature(BaseModel):

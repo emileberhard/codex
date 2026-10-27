@@ -121,6 +121,7 @@ export type { ConsumeAccountRateLimitResetCreditResponse } from "./ConsumeAccoun
 export type { ContextCompactedNotification } from "./ContextCompactedNotification";
 export type { CreditsSnapshot } from "./CreditsSnapshot";
 export type { CyberAccessProgram } from "./CyberAccessProgram";
+export type { DaemonToolContext } from "./DaemonToolContext";
 export type { DeprecationNoticeNotification } from "./DeprecationNoticeNotification";
 export type { DesktopOnboardingEntrypoint } from "./DesktopOnboardingEntrypoint";
 export type { DynamicToolCallOutputContentItem } from "./DynamicToolCallOutputContentItem";
@@ -237,6 +238,7 @@ export type { HooksListEntry } from "./HooksListEntry";
 export type { HooksListParams } from "./HooksListParams";
 export type { HooksListResponse } from "./HooksListResponse";
 export type { InAppBrowserRequirements } from "./InAppBrowserRequirements";
+export type { InputAcceptanceFact } from "./InputAcceptanceFact";
 export type { InstalledApp } from "./InstalledApp";
 export type { ItemCompletedNotification } from "./ItemCompletedNotification";
 export type { ItemGuardianApprovalReviewCompletedNotification } from "./ItemGuardianApprovalReviewCompletedNotification";
@@ -244,6 +246,7 @@ export type { ItemGuardianApprovalReviewStartedNotification } from "./ItemGuardi
 export type { ItemStartedNotification } from "./ItemStartedNotification";
 export type { ListMcpServerStatusParams } from "./ListMcpServerStatusParams";
 export type { ListMcpServerStatusResponse } from "./ListMcpServerStatusResponse";
+export type { LocalProcessIdentity } from "./LocalProcessIdentity";
 export type { LoginAccountParams } from "./LoginAccountParams";
 export type { LoginAccountResponse } from "./LoginAccountResponse";
 export type { LoginAppBrand } from "./LoginAppBrand";
@@ -521,6 +524,7 @@ export type { ThreadGoalUpdatedNotification } from "./ThreadGoalUpdatedNotificat
 export type { ThreadHistoryMode } from "./ThreadHistoryMode";
 export type { ThreadInjectItemsParams } from "./ThreadInjectItemsParams";
 export type { ThreadInjectItemsResponse } from "./ThreadInjectItemsResponse";
+export type { ThreadInputAcceptance } from "./ThreadInputAcceptance";
 export type { ThreadItem } from "./ThreadItem";
 export type { ThreadItemEntry } from "./ThreadItemEntry";
 export type { ThreadItemsListAnchor } from "./ThreadItemsListAnchor";

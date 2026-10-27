@@ -35,7 +35,7 @@ pub(super) fn settings_fingerprint(
     Ok(json!({
         "environments": environments,
         "runtimeWorkspaceRoots": settings.runtime_workspace_roots,
-        "profileWorkspaceRoots": settings.profile_workspace_roots.as_ref().map(|roots| roots.iter().map(|root| root.as_uri()).collect::<Vec<_>>()),
+        "profileWorkspaceRoots": settings.profile_workspace_roots.as_ref().map(|roots| roots.iter().map(codex_protocol::models::ProfileWorkspaceRoot::as_uri).collect::<Vec<_>>()),
         "approvalPolicy": settings.approval_policy,
         "approvalsReviewer": settings.approvals_reviewer,
         "sandboxPolicy": settings.sandbox_policy,
