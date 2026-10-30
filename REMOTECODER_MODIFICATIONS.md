@@ -452,3 +452,10 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/core/src/session/input_acceptance/control_tests.rs`
 - `codex-rs/core/src/session/input_acceptance/request.rs`
 - `codex-rs/core/src/session/input_acceptance/request_tests.rs`
+
+
+## Late user final after a realtime handoff
+
+The private V3 transcript accumulator retains `delegation.created.item.user_bidi_turn_id` and `turn.done.turn.id` at the wire boundary. A matching late final consumes that forwarded identity without recreating a caller line in the next handoff; the ordinary transcript event remains unchanged for canonical history and listeners. A new turn with identical text stays new speech. This bookkeeping shares the existing transcript-state lifetime across sideband reconnects. Pending identities are bounded to 8 KiB including their string storage slots, oldest first on overflow, with one visible warning per session; eviction can allow a repeated context line but never terminates the call. No public app-server schema changes.
+
+Owned files: `codex-rs/codex-api/src/endpoint/realtime_websocket/{methods.rs,protocol_frameless_bidi.rs,transcript_tests.rs}`. The focused tests replay raw V3 frames across a reconnect, retain canonical final observations and identical new speech, and exercise missing-final eviction without ending the stream. No upstream issue or PR has been submitted.

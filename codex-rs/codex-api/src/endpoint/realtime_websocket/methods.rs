@@ -20,6 +20,8 @@ use crate::endpoint::realtime_websocket::protocol::RealtimeSessionMode;
 use crate::endpoint::realtime_websocket::protocol::RealtimeTranscriptEntry;
 use crate::endpoint::realtime_websocket::protocol::RealtimeVoice;
 use crate::endpoint::realtime_websocket::protocol::parse_realtime_event;
+use crate::endpoint::realtime_websocket::protocol_frameless_bidi::InputTurnBoundary;
+use crate::endpoint::realtime_websocket::protocol_frameless_bidi::input_turn_boundary;
 use crate::error::ApiError;
 use crate::provider::Provider;
 use codex_client::backoff;
@@ -63,6 +65,7 @@ use url::Url;
 const REALTIME_WIRE_LOG_TARGET: &str = "codex_api::realtime_websocket::wire";
 const OPENAI_REALTIME_API_BASE_URL: &str = "https://api.openai.com/v1";
 const MAX_ACTIVE_TRANSCRIPT_BYTES: usize = 8 * 1024;
+const MAX_FORWARDED_INPUT_TURN_BYTES: usize = 8 * 1024;
 const TRUNCATED_TRANSCRIPT_PREFIX: &str = "…";
 
 struct WsStream {
@@ -273,6 +276,8 @@ struct ActiveTranscriptState {
     new_output_entry: bool,
     output_open: bool,
     assistant_deltas_only: bool,
+    forwarded_input_turns: VecDeque<String>,
+    forwarded_input_overflow_reported: bool,
 }
 
 impl RealtimeWebsocketConnection {
@@ -574,7 +579,17 @@ impl RealtimeWebsocketEvents {
                             self.is_closed.store(true, Ordering::SeqCst);
                             return Ok(Some(event));
                         }
-                        self.update_active_transcript(&mut event).await;
+                        let input_turn = if self.event_parser == RealtimeEventParser::FramelessBidi
+                            && matches!(
+                                &event,
+                                RealtimeEvent::HandoffRequested(_)
+                                    | RealtimeEvent::InputTranscriptDone(_)
+                            ) {
+                            input_turn_boundary(&text)
+                        } else {
+                            None
+                        };
+                        self.update_active_transcript(&mut event, input_turn).await;
                         debug!(?event, "realtime websocket parsed event");
                         return Ok(Some(event));
                     }
@@ -631,8 +646,48 @@ impl RealtimeWebsocketEvents {
         }
     }
 
-    async fn update_active_transcript(&self, event: &mut RealtimeEvent) {
+    async fn update_active_transcript(
+        &self,
+        event: &mut RealtimeEvent,
+        input_turn: Option<InputTurnBoundary>,
+    ) {
         let mut active_transcript = self.transcript_state.active.lock().await;
+        match input_turn {
+            Some(InputTurnBoundary::Completed(id)) => {
+                if let Some(index) = active_transcript
+                    .forwarded_input_turns
+                    .iter()
+                    .position(|forwarded| *forwarded == id)
+                {
+                    active_transcript.forwarded_input_turns.remove(index);
+                    return;
+                }
+            }
+            Some(InputTurnBoundary::HandedOff(id)) => {
+                if !active_transcript.forwarded_input_turns.contains(&id) {
+                    active_transcript.forwarded_input_turns.push_back(id);
+                    let mut bytes: usize = active_transcript
+                        .forwarded_input_turns
+                        .iter()
+                        .map(|id| id.len() + size_of::<String>())
+                        .sum();
+                    let mut evicted = false;
+                    while bytes > MAX_FORWARDED_INPUT_TURN_BYTES {
+                        if let Some(id) = active_transcript.forwarded_input_turns.pop_front() {
+                            bytes -= id.len() + size_of::<String>();
+                            evicted = true;
+                        }
+                    }
+                    if evicted && !active_transcript.forwarded_input_overflow_reported {
+                        active_transcript.forwarded_input_overflow_reported = true;
+                        warn!(
+                            "realtime forwarded input identities exceeded their byte limit; a late final may repeat caller context"
+                        );
+                    }
+                }
+            }
+            None => {}
+        }
         match event {
             RealtimeEvent::InputAudioSpeechStarted(_) => {
                 active_transcript.new_input_entry = true;
@@ -1458,14 +1513,18 @@ mod tests {
         let mut covered = RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
             delta: "already handed off".to_string(),
         });
-        events.update_active_transcript(&mut covered).await;
+        events
+            .update_active_transcript(&mut covered, /*input_turn*/ None)
+            .await;
         let mut handoff = RealtimeEvent::HandoffRequested(RealtimeHandoffRequested {
             handoff_id: "handoff_1".to_string(),
             item_id: "item_1".to_string(),
             input_transcript: "already handed off".to_string(),
             active_transcript: vec![],
         });
-        events.update_active_transcript(&mut handoff).await;
+        events
+            .update_active_transcript(&mut handoff, /*input_turn*/ None)
+            .await;
         assert_eq!(
             handoff,
             RealtimeEvent::HandoffRequested(RealtimeHandoffRequested {
@@ -1482,7 +1541,9 @@ mod tests {
         let mut tail = RealtimeEvent::OutputTranscriptDelta(RealtimeTranscriptDelta {
             delta: "tail".to_string(),
         });
-        events.update_active_transcript(&mut tail).await;
+        events
+            .update_active_transcript(&mut tail, /*input_turn*/ None)
+            .await;
         assert_eq!(
             events.take_transcript_tail().await,
             vec![RealtimeTranscriptEntry {
@@ -1507,7 +1568,9 @@ mod tests {
         let mut partial = RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
             delta: "hello wor".to_string(),
         });
-        first_events.update_active_transcript(&mut partial).await;
+        first_events
+            .update_active_transcript(&mut partial, /*input_turn*/ None)
+            .await;
 
         let (_second_tx, second_rx) = async_channel::unbounded();
         let second_events = RealtimeWebsocketEvents {
@@ -1520,7 +1583,9 @@ mod tests {
         let mut done = RealtimeEvent::InputTranscriptDone(RealtimeTranscriptDone {
             text: "hello world".to_string(),
         });
-        second_events.update_active_transcript(&mut done).await;
+        second_events
+            .update_active_transcript(&mut done, /*input_turn*/ None)
+            .await;
 
         assert_eq!(
             second_events.take_transcript_tail().await,
@@ -1545,7 +1610,9 @@ mod tests {
         let mut oversized = RealtimeEvent::InputTranscriptDelta(RealtimeTranscriptDelta {
             delta: format!("old{}new", "x".repeat(MAX_ACTIVE_TRANSCRIPT_BYTES)),
         });
-        events.update_active_transcript(&mut oversized).await;
+        events
+            .update_active_transcript(&mut oversized, /*input_turn*/ None)
+            .await;
 
         let tail = events.take_transcript_tail().await;
         assert!(transcript_entries_bytes(&tail) <= MAX_ACTIVE_TRANSCRIPT_BYTES);
