@@ -9,8 +9,21 @@ use serde::Serialize;
 #[ts(export_to = "v2/")]
 pub struct DaemonToolContextParams {
     pub pid: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable, type = "number | null")]
+    pub started_at_unix_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
+    pub linux_birth: Option<LinuxProcessBirth>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct LinuxProcessBirth {
+    pub boot_id: String,
     #[ts(type = "number")]
-    pub started_at_unix_micros: u64,
+    pub start_ticks: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
@@ -18,8 +31,12 @@ pub struct DaemonToolContextParams {
 #[ts(export_to = "v2/")]
 pub struct LocalProcessIdentity {
     pub pid: i32,
-    #[ts(type = "number")]
-    pub started_at_unix_micros: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional, type = "number")]
+    pub started_at_unix_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub linux_birth: Option<LinuxProcessBirth>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

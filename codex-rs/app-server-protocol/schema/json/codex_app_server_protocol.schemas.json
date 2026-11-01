@@ -14092,6 +14092,23 @@
       "LegacyAppPathString": {
         "type": "string"
       },
+      "LinuxProcessBirth": {
+        "properties": {
+          "bootId": {
+            "type": "string"
+          },
+          "startTicks": {
+            "format": "uint64",
+            "minimum": 0.0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bootId",
+          "startTicks"
+        ],
+        "type": "object"
+      },
       "ListMcpServerStatusParams": {
         "$schema": "http://json-schema.org/draft-07/schema#",
         "properties": {
@@ -14164,6 +14181,16 @@
       },
       "LocalProcessIdentity": {
         "properties": {
+          "linuxBirth": {
+            "anyOf": [
+              {
+                "$ref": "#/definitions/v2/LinuxProcessBirth"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pid": {
             "format": "int32",
             "type": "integer"
@@ -14171,12 +14198,14 @@
           "startedAtUnixMicros": {
             "format": "uint64",
             "minimum": 0.0,
-            "type": "integer"
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "required": [
-          "pid",
-          "startedAtUnixMicros"
+          "pid"
         ],
         "type": "object"
       },

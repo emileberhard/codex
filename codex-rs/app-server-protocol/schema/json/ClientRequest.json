@@ -1733,6 +1733,23 @@
     "LegacyAppPathString": {
       "type": "string"
     },
+    "LinuxProcessBirth": {
+      "properties": {
+        "bootId": {
+          "type": "string"
+        },
+        "startTicks": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "bootId",
+        "startTicks"
+      ],
+      "type": "object"
+    },
     "ListMcpServerStatusParams": {
       "properties": {
         "cursor": {
