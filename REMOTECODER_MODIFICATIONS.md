@@ -10,6 +10,12 @@ unchanged. Non-comment formats carry the modification notice in a sibling
 schema files carry their modification notice here to preserve
 deployed migration checksums and generator-owned output bytes.
 
+The managed runtime omits AWS SDK browser-login credentials until its optional
+DPoP private-signing dependency has an approved constant-time implementation.
+Environment, profile, SSO and credential-process providers remain available.
+
+- `codex-rs/aws-auth/Cargo.toml`
+
 Viewed images are snapshots of the prepared model input, stored once by content
 hash under Codex home. The process serializes admissions and evicts by modification
 time to stay within 1 GiB and 4,096 snapshots, refreshing dedupe hits and removing
