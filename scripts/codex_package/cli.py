@@ -189,13 +189,19 @@ def create_parser() -> argparse.ArgumentParser:
             "the host is built with Cargo."
         ),
     )
-    parser.add_argument(
+    bwrap = parser.add_mutually_exclusive_group()
+    bwrap.add_argument(
         "--bwrap-bin",
         type=Path,
         help=(
             "Optional prebuilt Linux bwrap executable. If omitted for Linux "
             "targets, bwrap is built with Cargo."
         ),
+    )
+    bwrap.add_argument(
+        "--system-bwrap",
+        action="store_true",
+        help="Require system bubblewrap on Linux instead of building or bundling a fallback.",
     )
     parser.add_argument(
         "--codex-command-runner-bin",
@@ -249,6 +255,7 @@ def assemble_package(args: argparse.Namespace) -> Path:
         variant,
         cargo=args.cargo,
         profile=args.cargo_profile,
+        system_bwrap=args.system_bwrap,
         entrypoint_bin=resolve_optional_input_path(
             args.entrypoint_bin,
             "prebuilt entrypoint executable",

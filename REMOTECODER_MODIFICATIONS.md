@@ -429,6 +429,8 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/tui/src/thread_transcript/other_items_tests.rs`
 - `codex-rs/utils/pty/src/tests.rs`
 - `scripts/codex_package/cli.py`
+- `scripts/codex_package/cargo.py`
+- `scripts/codex_package/test_cargo.py`
 - `scripts/codex_package/layout.py`
 - `scripts/codex_package/test_cli.py`
 - `scripts/codex_package/test_layout.py`

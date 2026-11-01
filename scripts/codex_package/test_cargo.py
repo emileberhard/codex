@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 
 from pathlib import Path
 import sys
@@ -101,6 +102,7 @@ class SourceBinariesForTargetTest(unittest.TestCase):
                 PACKAGE_VARIANTS["codex"],
                 cargo=str(root / "cargo-that-should-not-run"),
                 profile="release",
+                system_bwrap=False,
                 entrypoint_bin=entrypoint,
                 code_mode_host_bin=code_mode_host,
                 bwrap_bin=None,

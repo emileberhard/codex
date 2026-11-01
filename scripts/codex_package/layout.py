@@ -100,6 +100,8 @@ def build_package_dir(
             },
         },
     }
+    if spec.is_linux and inputs.bwrap_bin is None:
+        metadata["linuxSandbox"] = "system"
     write_json(package_dir / "codex-package.json", metadata)
 
 
@@ -154,11 +156,22 @@ def validate_package_dir(
         Path("codex-path") / spec.rg_name,
     ]
     executable_files = list(required_files)
-    required_files.extend([Path("LICENSE"), Path("NOTICE"), Path("THIRD_PARTY_NOTICES.md")])
+    required_files.extend(
+        [Path("LICENSE"), Path("NOTICE"), Path("THIRD_PARTY_NOTICES.md")]
+    )
     if not (package_dir / "LICENSES").is_dir():
         raise RuntimeError("Missing package license directory: LICENSES")
 
-    if spec.is_linux:
+    linux_sandbox = metadata.get("linuxSandbox")
+    if linux_sandbox is not None and (not spec.is_linux or linux_sandbox != "system"):
+        raise RuntimeError("Invalid Linux sandbox dependency")
+    if linux_sandbox == "system":
+        bwrap = package_dir / "codex-resources" / "bwrap"
+        if bwrap.exists() or bwrap.is_symlink():
+            raise RuntimeError(
+                "System bubblewrap package must not contain a bundled fallback"
+            )
+    elif spec.is_linux:
         required_files.append(Path("codex-resources") / "bwrap")
         executable_files.append(Path("codex-resources") / "bwrap")
 
