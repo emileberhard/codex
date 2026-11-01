@@ -52,6 +52,18 @@ class PackageLayoutTest(unittest.TestCase):
             )
             metadata = json.loads((package / "codex-package.json").read_text())
             self.assertEqual(metadata["linuxSandbox"], "system")
+            missing = root / "unselected"
+            with self.assertRaisesRegex(RuntimeError, "explicitly selected"):
+                build_package_dir(
+                    missing,
+                    "1.2.3",
+                    PACKAGE_VARIANTS["codex"],
+                    TARGET_SPECS["x86_64-unknown-linux-musl"],
+                    PackageInputs(executable, executable, executable, None, None, None),
+                    source_commit="abc123",
+                    system_bwrap=False,
+                )
+            self.assertFalse(missing.exists())
             fallback = package / "codex-resources/bwrap"
             self.assertFalse(fallback.exists())
             fallback.write_bytes(b"unreviewed fallback")
@@ -232,6 +244,7 @@ int main(void) {
                             spec,
                             inputs,
                             source_commit="abc123",
+                            system_bwrap=False,
                         )
                         validate_package_dir(package_dir, variant, spec)
 
@@ -265,6 +278,7 @@ int main(void) {
                 TARGET_SPECS["x86_64-unknown-linux-musl"],
                 inputs,
                 source_commit="abc123",
+                system_bwrap=False,
             )
             validate_package_dir(
                 package_dir,
@@ -299,6 +313,7 @@ int main(void) {
                 TARGET_SPECS["x86_64-unknown-linux-musl"],
                 inputs,
                 source_commit="abc123",
+                system_bwrap=False,
             )
 
             metadata = json.loads(

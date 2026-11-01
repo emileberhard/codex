@@ -39,7 +39,14 @@ def build_package_dir(
     inputs: PackageInputs,
     *,
     source_commit: str,
+    system_bwrap: bool,
 ) -> None:
+    if system_bwrap and (not spec.is_linux or inputs.bwrap_bin is not None):
+        raise RuntimeError("System bubblewrap requires Linux without a bundled binary")
+    if spec.is_linux and inputs.bwrap_bin is None and not system_bwrap:
+        raise RuntimeError(
+            "Linux package requires bundled or explicitly selected system bubblewrap"
+        )
     bin_dir = package_dir / "bin"
     resources_dir = package_dir / "codex-resources"
     path_dir = package_dir / "codex-path"
@@ -100,7 +107,7 @@ def build_package_dir(
             },
         },
     }
-    if spec.is_linux and inputs.bwrap_bin is None:
+    if system_bwrap:
         metadata["linuxSandbox"] = "system"
     write_json(package_dir / "codex-package.json", metadata)
 

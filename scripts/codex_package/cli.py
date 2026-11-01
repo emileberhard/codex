@@ -298,6 +298,7 @@ def assemble_package(args: argparse.Namespace) -> Path:
         spec,
         inputs,
         source_commit=resolve_source_commit(),
+        system_bwrap=args.system_bwrap,
     )
     for filename, prebuilt in (
         (variant.entrypoint_name(spec), args.entrypoint_bin),
