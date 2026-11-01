@@ -70,12 +70,67 @@ fn process_parent(pid: u32) -> Option<(LocalProcessIdentity, u32)> {
     ))
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+fn process_parent(pid: u32) -> Option<(LocalProcessIdentity, u32)> {
+    use std::io::Read;
+
+    if pid == 0 {
+        return None;
+    }
+    let read = |path: &str| {
+        let mut value = String::new();
+        std::fs::File::open(path)
+            .ok()?
+            .take(1_048_577)
+            .read_to_string(&mut value)
+            .ok()?;
+        (value.len() <= 1_048_576).then_some(value)
+    };
+    let parse = |text: &str| {
+        let (prefix, fields) = text.rsplit_once(") ")?;
+        let (actual, _) = prefix.split_once(" (")?;
+        if actual.parse::<u32>().ok()? != pid {
+            return None;
+        }
+        let fields = fields.split_whitespace().collect::<Vec<_>>();
+        if fields.len() < 20 || matches!(fields[0], "Z" | "X" | "x") {
+            return None;
+        }
+        Some((
+            fields[1].parse::<u32>().ok()?,
+            fields[19].parse::<u64>().ok()?,
+        ))
+    };
+    let path = format!("/proc/{pid}/stat");
+    let before = parse(&read(&path)?)?;
+    let kernel = read("/proc/stat")?;
+    let boot = kernel
+        .lines()
+        .find_map(|line| line.strip_prefix("btime "))?
+        .parse::<u64>()
+        .ok()?;
+    let ticks = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks <= 0 || parse(&read(&path)?)? != before {
+        return None;
+    }
+    let started_at_unix_micros = boot
+        .checked_mul(1_000_000)?
+        .checked_add(before.1.checked_mul(1_000_000)? / ticks as u64)?;
+    Some((
+        LocalProcessIdentity {
+            pid,
+            started_at_unix_micros,
+        },
+        before.0,
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn process_parent(_pid: u32) -> Option<(LocalProcessIdentity, u32)> {
     None
 }
 
-#[cfg(all(test, target_os = "macos"))]
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests {
     use super::*;
 
