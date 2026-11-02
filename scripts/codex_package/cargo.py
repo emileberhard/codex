@@ -1,3 +1,4 @@
+# Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 """Cargo builds for source-built Codex package artifacts."""
 
 import os
@@ -29,12 +30,15 @@ def build_source_binaries(
     *,
     cargo: str,
     profile: str,
+    system_bwrap: bool,
     entrypoint_bin: Path | None,
     code_mode_host_bin: Path | None,
     bwrap_bin: Path | None,
     codex_command_runner_bin: Path | None,
     codex_windows_sandbox_setup_bin: Path | None,
 ) -> SourceBuildOutputs:
+    if system_bwrap and (not spec.is_linux or bwrap_bin is not None):
+        raise RuntimeError("System bubblewrap requires Linux without --bwrap-bin.")
     validate_prebuilt_resource_inputs(
         spec,
         bwrap_bin=bwrap_bin,
@@ -46,7 +50,7 @@ def build_source_binaries(
         variant,
         build_entrypoint=entrypoint_bin is None,
         build_code_mode_host=code_mode_host_bin is None,
-        build_bwrap=spec.is_linux and bwrap_bin is None,
+        build_bwrap=spec.is_linux and not system_bwrap and bwrap_bin is None,
         build_codex_command_runner=spec.is_windows and codex_command_runner_bin is None,
         build_codex_windows_sandbox_setup=spec.is_windows
         and codex_windows_sandbox_setup_bin is None,
@@ -90,7 +94,7 @@ def build_source_binaries(
         ),
         bwrap_bin=resolve_output_path(
             bwrap_bin,
-            output_dir / "bwrap" if spec.is_linux else None,
+            output_dir / "bwrap" if spec.is_linux and not system_bwrap else None,
         ),
         codex_command_runner_bin=resolve_output_path(
             codex_command_runner_bin,

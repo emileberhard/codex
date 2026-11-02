@@ -867,7 +867,7 @@ claiming success. Stopped IDs count toward the same 65,536-ID bound; Stop at
 capacity writes no additional ID, and existing accepted IDs remain stoppable.
 
 Experimental `daemon/toolContext` takes an actual local `pid` and
-`startedAtUnixMicros`. On macOS it verifies a bounded live ancestry against
+`startedAtUnixMicros` on macOS, or `linuxBirth` with `bootId` and `startTicks` on Linux. It verifies a bounded live ancestry against
 birth identities captured by the existing local tool-process owner at spawn.
 Its optional `context` contains `threadId`, launch `turnId`, `toolCallId`, and
 `rootProcessIdentity` with the same process identity fields. Unrelated,

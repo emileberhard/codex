@@ -2219,12 +2219,21 @@ class LegacyAppPathString(RootModel[str]):
     root: str
 
 
+class LinuxProcessBirth(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    boot_id: Annotated[str, Field(alias="bootId")]
+    start_ticks: Annotated[int, Field(alias="startTicks", ge=0)]
+
+
 class LocalProcessIdentity(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    linux_birth: Annotated[LinuxProcessBirth | None, Field(alias="linuxBirth")] = None
     pid: int
-    started_at_unix_micros: Annotated[int, Field(alias="startedAtUnixMicros", ge=0)]
+    started_at_unix_micros: Annotated[int | None, Field(alias="startedAtUnixMicros", ge=0)] = None
 
 
 class ExecLocalShellAction(BaseModel):

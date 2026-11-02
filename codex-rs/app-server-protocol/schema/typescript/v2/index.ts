@@ -244,6 +244,7 @@ export type { ItemCompletedNotification } from "./ItemCompletedNotification";
 export type { ItemGuardianApprovalReviewCompletedNotification } from "./ItemGuardianApprovalReviewCompletedNotification";
 export type { ItemGuardianApprovalReviewStartedNotification } from "./ItemGuardianApprovalReviewStartedNotification";
 export type { ItemStartedNotification } from "./ItemStartedNotification";
+export type { LinuxProcessBirth } from "./LinuxProcessBirth";
 export type { ListMcpServerStatusParams } from "./ListMcpServerStatusParams";
 export type { ListMcpServerStatusResponse } from "./ListMcpServerStatusResponse";
 export type { LocalProcessIdentity } from "./LocalProcessIdentity";

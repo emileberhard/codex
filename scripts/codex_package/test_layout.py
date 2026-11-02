@@ -22,6 +22,58 @@ from codex_package.targets import default_target
 
 
 class PackageLayoutTest(unittest.TestCase):
+    def test_system_bubblewrap_profile_never_builds_or_bundles_a_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            package = root / "package"
+            executable = Path(sys.executable).resolve()
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).resolve().parents[1] / "build_codex_package.py"),
+                    "--target",
+                    "x86_64-unknown-linux-musl",
+                    "--system-bwrap",
+                    "--strip",
+                    "none",
+                    "--cargo",
+                    str(root / "absent-cargo"),
+                    "--entrypoint-bin",
+                    str(executable),
+                    "--code-mode-host-bin",
+                    str(executable),
+                    "--rg-bin",
+                    str(executable),
+                    "--package-dir",
+                    str(package),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            metadata = json.loads((package / "codex-package.json").read_text())
+            self.assertEqual(metadata["linuxSandbox"], "system")
+            missing = root / "unselected"
+            with self.assertRaisesRegex(RuntimeError, "explicitly selected"):
+                build_package_dir(
+                    missing,
+                    "1.2.3",
+                    PACKAGE_VARIANTS["codex"],
+                    TARGET_SPECS["x86_64-unknown-linux-musl"],
+                    PackageInputs(executable, executable, executable, None, None, None),
+                    source_commit="abc123",
+                    system_bwrap=False,
+                )
+            self.assertFalse(missing.exists())
+            fallback = package / "codex-resources/bwrap"
+            self.assertFalse(fallback.exists())
+            fallback.write_bytes(b"unreviewed fallback")
+            with self.assertRaisesRegex(RuntimeError, "must not contain"):
+                validate_package_dir(
+                    package,
+                    PACKAGE_VARIANTS["codex"],
+                    TARGET_SPECS["x86_64-unknown-linux-musl"],
+                )
+
     @unittest.skipIf(sys.platform == "win32", "MSVC symbols are separate PDB files")
     def test_strip_policy_preserves_inputs_and_runs_packaged_executables(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -192,6 +244,7 @@ int main(void) {
                             spec,
                             inputs,
                             source_commit="abc123",
+                            system_bwrap=False,
                         )
                         validate_package_dir(package_dir, variant, spec)
 
@@ -225,6 +278,7 @@ int main(void) {
                 TARGET_SPECS["x86_64-unknown-linux-musl"],
                 inputs,
                 source_commit="abc123",
+                system_bwrap=False,
             )
             validate_package_dir(
                 package_dir,
@@ -259,6 +313,7 @@ int main(void) {
                 TARGET_SPECS["x86_64-unknown-linux-musl"],
                 inputs,
                 source_commit="abc123",
+                system_bwrap=False,
             )
 
             metadata = json.loads(
@@ -266,7 +321,9 @@ int main(void) {
             )
             repository = Path(__file__).resolve().parents[2]
             for name in ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"):
-                self.assertEqual((package_dir / name).read_bytes(), (repository / name).read_bytes())
+                self.assertEqual(
+                    (package_dir / name).read_bytes(), (repository / name).read_bytes()
+                )
             self.assertTrue((package_dir / "LICENSES" / "ripgrep.txt").is_file())
             self.assertEqual(metadata["sourceCommit"], "abc123")
             self.assertEqual(

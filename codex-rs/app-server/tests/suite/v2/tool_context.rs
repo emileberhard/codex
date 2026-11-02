@@ -19,6 +19,27 @@ use tempfile::TempDir;
 use tokio::time::Duration;
 use tokio::time::timeout;
 
+fn params(identity: codex_utils_pty::LocalProcessIdentity) -> DaemonToolContextParams {
+    let (started_at_unix_micros, linux_birth) = match identity.birth {
+        codex_utils_pty::ProcessBirth::UnixMicros(value) => (Some(value), None),
+        codex_utils_pty::ProcessBirth::Linux {
+            boot_id,
+            start_ticks,
+        } => (
+            None,
+            Some(codex_app_server_protocol::LinuxProcessBirth {
+                boot_id: String::from_utf8_lossy(&boot_id).into_owned(),
+                start_ticks,
+            }),
+        ),
+    };
+    DaemonToolContextParams {
+        pid: identity.pid as i32,
+        started_at_unix_micros,
+        linux_birth,
+    }
+}
+
 #[tokio::test]
 async fn tool_context_uses_the_live_tool_owner_and_rejects_unrelated_processes() -> Result<()> {
     let workspace = TempDir::new()?;
@@ -93,10 +114,7 @@ async fn tool_context_uses_the_live_tool_owner_and_rejects_unrelated_processes()
             let response: DaemonToolContextResponse = mcp
                 .request(|request_id| ClientRequest::DaemonToolContext {
                     request_id,
-                    params: DaemonToolContextParams {
-                        pid: pid as i32,
-                        started_at_unix_micros: identity.started_at_unix_micros,
-                    },
+                    params: params(identity),
                 })
                 .await?;
             if let Some(context) = response.context {
@@ -117,16 +135,23 @@ async fn tool_context_uses_the_live_tool_owner_and_rejects_unrelated_processes()
             .iter()
             .any(
                 |process| process.pid as i32 == context.root_process_identity.pid
-                    && process.started_at_unix_micros
+                    && params(*process).started_at_unix_micros
                         == context.root_process_identity.started_at_unix_micros
+                    && params(*process).linux_birth == context.root_process_identity.linux_birth
             )
     );
     let wrong_birth: DaemonToolContextResponse = mcp
         .request(|request_id| ClientRequest::DaemonToolContext {
             request_id,
-            params: DaemonToolContextParams {
-                pid: pid as i32,
-                started_at_unix_micros: identity.started_at_unix_micros + 1,
+            params: {
+                let mut value = params(identity);
+                if let Some(micros) = &mut value.started_at_unix_micros {
+                    *micros += 1;
+                }
+                if let Some(birth) = &mut value.linux_birth {
+                    birth.start_ticks += 1;
+                }
+                value
             },
         })
         .await?;
@@ -136,10 +161,7 @@ async fn tool_context_uses_the_live_tool_owner_and_rejects_unrelated_processes()
     let unrelated: DaemonToolContextResponse = mcp
         .request(|request_id| ClientRequest::DaemonToolContext {
             request_id,
-            params: DaemonToolContextParams {
-                pid: unrelated.pid as i32,
-                started_at_unix_micros: unrelated.started_at_unix_micros,
-            },
+            params: params(unrelated),
         })
         .await?;
     assert!(unrelated.context.is_none());
@@ -159,10 +181,7 @@ async fn tool_context_uses_the_live_tool_owner_and_rejects_unrelated_processes()
     let terminated: DaemonToolContextResponse = mcp
         .request(|request_id| ClientRequest::DaemonToolContext {
             request_id,
-            params: DaemonToolContextParams {
-                pid: pid as i32,
-                started_at_unix_micros: identity.started_at_unix_micros,
-            },
+            params: params(identity),
         })
         .await?;
     assert!(terminated.context.is_none());
