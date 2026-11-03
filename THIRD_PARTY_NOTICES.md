@@ -2,8 +2,8 @@
 
 OpenAI Codex and RemoteCoder's modifications remain under Apache-2.0. The original LICENSE and OpenAI/Ratatui NOTICE are retained beside this file. The RemoteCoder modification inventory is REMOTECODER_MODIFICATIONS.md.
 
-- Codex CLI, including app-server: LICENSES/codex-rust.md.
-- codex-code-mode-host: LICENSES/codex-code-mode-host-rust.md.
+- Codex CLI, including app-server: LICENSES/codex-rust.md (macOS), LICENSES/codex-linux-rust.md (Linux).
+- codex-code-mode-host: LICENSES/codex-code-mode-host-rust.md (macOS), LICENSES/codex-linux-code-mode-host-rust.md (Linux).
 - V8 native artifact and its exact source: LICENSES/V8-OpenAI-artifact.md; full notices: LICENSES/V8.txt.
 - Bundled ripgrep 15.2.0: LICENSES/ripgrep.txt (MIT).
 
