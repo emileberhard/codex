@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use std::fs::File;
 use std::path::Path;
 use std::path::PathBuf;
@@ -1047,6 +1048,9 @@ fn extract_zipball_to_dir(bytes: &[u8], destination: &Path) -> Result<(), String
             .by_index(index)
             .map_err(|err| format!("failed to read curated plugins zip entry: {err}"))?;
         let Some(relative_path) = entry.enclosed_name() else {
+            entry
+                .name()
+                .map_err(|err| format!("invalid curated plugins zip entry {index}: {err}"))?;
             return Err(format!(
                 "curated plugins zip entry at index {index} escapes extraction root"
             ));
@@ -1114,6 +1118,7 @@ fn apply_zip_permissions<R: std::io::Read + ?Sized>(
     let Some(mode) = entry.unix_mode() else {
         return Ok(());
     };
+    // zip strips setuid, setgid, and sticky bits from the archive's Unix mode.
     std::fs::set_permissions(output_path, std::fs::Permissions::from_mode(mode & 0o777)).map_err(
         |err| {
             format!(

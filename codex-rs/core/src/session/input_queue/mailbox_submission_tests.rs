@@ -4,6 +4,7 @@ use crate::session::tests::make_session_and_context;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::turn_input::TurnInputMode;
 use codex_protocol::turn_input::TurnInputRequest;
+use futures::FutureExt;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -19,7 +20,7 @@ async fn submission_refuses_checkpoint_failure_while_mailbox_drain_waits() {
     );
     session
         .input_queue
-        .enqueue_mailbox_communication(communication, Default::default())
+        .enqueue_mailbox_communication(communication.into(), Default::default())
         .await;
     let mailbox = session.input_queue.mailbox_pending_mails.lock().await;
     let mut admission = Some(
@@ -30,7 +31,7 @@ async fn submission_refuses_checkpoint_failure_while_mailbox_drain_waits() {
             .expect("admission"),
     );
     let mut checkpoint = Box::pin(session.checkpoint_mailbox_for_eviction(&mut admission));
-    assert!(futures::poll!(checkpoint.as_mut()).is_pending());
+    assert!(checkpoint.as_mut().now_or_never().is_none());
     let mut submission = Box::pin(crate::session::turn_input::handle(
         &session,
         TurnInputRequest::user_input(vec![UserInput::Text {
@@ -40,7 +41,7 @@ async fn submission_refuses_checkpoint_failure_while_mailbox_drain_waits() {
         TurnInputMode::StartOrSteer,
         "concurrent-mailbox-submission".into(),
     ));
-    assert!(futures::poll!(submission.as_mut()).is_pending());
+    assert!(submission.as_mut().now_or_never().is_none());
     assert!(!session.input_queue.has_unresolved_mail_checkpoint());
     drop(mailbox);
     checkpoint

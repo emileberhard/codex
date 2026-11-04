@@ -43,6 +43,7 @@ impl App {
                                 params: ThreadListParams {
                                     include_completion_times: None,
                                     excluded_thread_ids: None,
+                                    attached_to_thread_id: None,
                                     originators: None,
                                     cursor,
                                     limit: Some(AGENT_PICKER_PAGE_SIZE),

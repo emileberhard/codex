@@ -227,7 +227,7 @@ impl ThreadRequestProcessor {
                     )
                     .await?;
                 let (thread_history, _) = self
-                    .load_resume_initial_history_from_stored_thread(stored_thread)
+                    .load_resume_initial_history_from_stored_thread(stored_thread, None)
                     .await?;
                 let persisted_settings =
                     latest_restart_recovery_settings(thread_history.get_rollout_items());

@@ -1,4 +1,5 @@
 // Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
+use anyhow::Context;
 use codex_core::StartIfIdleSubmission;
 use codex_core::TurnInput;
 use codex_core::TurnInputRequest;
@@ -121,15 +122,26 @@ async fn identified_input_survives_loss_after_durable_acceptance(stop: bool) -> 
     )
     .await;
     let test = test_codex().build_with_auto_env(&server).await?;
+    let start_request = request("recover this exact input").with_responses_metadata(Some(
+        std::collections::HashMap::from([("accepted_source".to_owned(), "root".to_owned())]),
+    ));
     let accepted = test
         .codex
-        .start_or_steer_turn(request("recover this exact input"))
+        .start_or_steer_turn(start_request.clone())
         .await?;
     wait_for_event(&test.codex, |event| {
         matches!(event, EventMsg::TurnStarted(_))
     })
     .await;
-    let mut steer_request = request("recover the pending steer");
+    let mut steer_request = request("recover the pending steer")
+        .with_responses_metadata(Some(std::collections::HashMap::from([(
+            "accepted_source".to_owned(),
+            "steer".to_owned(),
+        )])))
+        .with_responses_metadata_patch(Some(std::collections::HashMap::from([(
+            "accepted_patch".to_owned(),
+            "replayed".to_owned(),
+        )])));
     if let TurnInput::UserInput { client_id, .. } = &mut steer_request.input {
         *client_id = Some("durable-steer".to_string());
     }
@@ -175,10 +187,7 @@ async fn identified_input_survives_loss_after_durable_acceptance(stop: bool) -> 
         assert!(recovered.codex.interrupt_accepted_turn(turn_id).await?);
     }
     assert_eq!(
-        recovered
-            .codex
-            .start_or_steer_turn(request("recover this exact input"))
-            .await?,
+        recovered.codex.start_or_steer_turn(start_request).await?,
         accepted
     );
     if stop {
@@ -205,6 +214,14 @@ async fn identified_input_survives_loss_after_durable_acceptance(stop: bool) -> 
                     "recover the pending steer".to_string()
                 ])
         );
+        let body = response.single_request().body_json();
+        let metadata: serde_json::Value = serde_json::from_str(
+            body["client_metadata"]["x-codex-turn-metadata"]
+                .as_str()
+                .context("turn metadata")?,
+        )?;
+        assert_eq!(metadata["accepted_source"], "steer");
+        assert_eq!(metadata["accepted_patch"], "replayed");
     }
     Ok(())
 }

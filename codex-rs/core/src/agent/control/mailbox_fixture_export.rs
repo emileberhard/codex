@@ -3,6 +3,7 @@ use super::*;
 use base64::Engine;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
+use std::io::Write;
 
 impl MailFixture {
     pub(super) async fn export_fixture(
@@ -105,7 +106,8 @@ impl MailFixture {
         );
         assert_eq!(child["multi_agent_version"], "v2");
         assert_eq!(child["history_mode"], "paginated");
-        println!(
+        writeln!(
+        std::io::stdout(),
             "NATIVE_V2_MAIL_FIXTURE={}",
             serde_json::json!({
                 "representation": representation, "threadId": self.child_id(),
@@ -117,6 +119,6 @@ impl MailFixture {
                 "communications": mail,
                 "modelInput": mail.iter().map(InterAgentCommunication::to_model_input_item).collect::<Vec<_>>(),
             })
-        );
+        ).expect("fixture stdout");
     }
 }

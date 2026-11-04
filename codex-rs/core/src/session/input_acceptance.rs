@@ -21,7 +21,6 @@ mod control;
 mod request;
 
 use request::DurableInputRequest;
-use request::restore_settings;
 use request::settings_fingerprint;
 
 const MAX_ACCEPTED_INPUTS: usize = codex_history::MAX_IDENTIFIED_INPUTS;
@@ -88,10 +87,12 @@ impl PreparedInputAcceptance {
         let settings = settings_fingerprint(&request.thread_settings)?;
         let request = DurableInputRequest {
             input: request.input.clone(),
+            user_item_uuid: request.user_item_uuid,
             settings,
             start: request.start.clone(),
             additional_context: request.additional_context.clone(),
-            responsesapi_client_metadata: request.responsesapi_client_metadata.clone(),
+            responsesapi_client_metadata: request.responsesapi_client_metadata.replacement.clone(),
+            responsesapi_client_metadata_patch: request.responsesapi_client_metadata.patch.clone(),
         };
         let mut canonical = json!({"request": request});
         canonical.sort_all_objects();
@@ -358,6 +359,10 @@ impl Session {
             .any(|state| state.acceptance.turn_id == turn_id && state.terminal))
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "restart custody must serialize with input acceptance and stop"
+    )]
     pub(super) async fn prepare_accepted_input_restart(&self, turn_id: &str) -> CodexResult<()> {
         let _admission = self.input_queue.acceptance_submission.lock().await;
         if !self.load_input_acceptances().await? {
@@ -427,6 +432,10 @@ impl Session {
             .remove(turn_id);
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the durable stop fence must serialize with input acceptance"
+    )]
     pub(super) async fn fence_accepted_inputs(&self) -> CodexResult<()> {
         let _admission = self.input_queue.acceptance_submission.lock().await;
         self.load_input_acceptances().await?;
@@ -556,11 +565,7 @@ impl Session {
                 let accepted = state.acceptance;
                 let request: DurableInputRequest = serde_json::from_value(accepted.request.clone())
                     .map_err(|error| CodexErr::Fatal(error.to_string()))?;
-                Ok(TurnInputRequest::new(request.input)
-                    .with_thread_settings(restore_settings(&request.settings)?)
-                    .on_start(request.start)
-                    .with_additional_context(request.additional_context)
-                    .with_responses_metadata(request.responsesapi_client_metadata))
+                request.into_request()
             })
             .collect()
     }
@@ -608,11 +613,7 @@ impl Session {
         let turn_id = &accepted.turn_id;
         let request: DurableInputRequest = serde_json::from_value(accepted.request.clone())
             .map_err(|error| CodexErr::Fatal(error.to_string()))?;
-        let mut request = TurnInputRequest::new(request.input)
-            .on_start(request.start)
-            .with_thread_settings(restore_settings(&request.settings)?)
-            .with_additional_context(request.additional_context)
-            .with_responses_metadata(request.responsesapi_client_metadata);
+        let mut request = request.into_request()?;
         request.thread_settings.model = Some(accepted.context.model.clone());
         request.thread_settings.effort = Some(accepted.context.effort.clone());
         request.thread_settings.approval_policy = Some(accepted.context.approval_policy);

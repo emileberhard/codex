@@ -11,7 +11,7 @@ use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
 use codex_app_server_protocol::JSONRPCMessage;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadStartResponse;
 use codex_app_server_protocol::ThreadSubscribeResponse;
@@ -238,7 +238,9 @@ async fn exercise_checkpoint(
         Some(turn.as_str())
     );
     assert_eq!(checkpoint.live_items.len(), 1);
-    let ThreadItem::AgentMessage { text: prefix, .. } = &checkpoint.live_items[0].item else {
+    let ThreadItemPayload::AgentMessage { text: prefix, .. } =
+        &checkpoint.live_items[0].item.payload
+    else {
         bail!("message prefix missing")
     };
     assert_eq!(prefix, "before ");
@@ -305,7 +307,7 @@ async fn exercise_checkpoint(
         .iter()
         .find(|entry| entry.item.id() == "observation-barrier")
         .context("checkpoint message")?;
-    let ThreadItem::AgentMessage { text: durable, .. } = &message.item else {
+    let ThreadItemPayload::AgentMessage { text: durable, .. } = &message.item.payload else {
         bail!("wrong checkpoint item")
     };
     if matches!(timing, CompletionRelativeToSubscribe::After) {

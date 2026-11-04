@@ -1093,8 +1093,11 @@ async fn recovery_preserves_durable_turn_attribution(
 #[tokio::test]
 async fn continue_turn_if_idle_starts_new_turn_with_internal_input() {
     let server = responses::start_mock_server().await;
+    let mut extensions = ExtensionRegistryBuilder::new();
+    extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
     let test = test_codex()
         .with_model("gpt-5.6-sol")
+        .with_extensions(Arc::new(extensions.build()))
         .with_config(|config| {
             config
                 .features
@@ -1123,6 +1126,7 @@ async fn continue_turn_if_idle_starts_new_turn_with_internal_input() {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    ThreadIdle::wait(&test.codex).await;
     let mock = responses::mount_sse_once(&server, responses::sse_completed("continued")).await;
     let input = ContextualUserFragment::into(InternalModelContextFragment::new(
         InternalContextSource::from_static("daemon_recovery"),
@@ -1154,6 +1158,7 @@ async fn continue_turn_if_idle_starts_new_turn_with_internal_input() {
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    ThreadIdle::wait(&test.codex).await;
     let request = mock.single_request();
     assert!(request.has_content_kinds(&["daemon_recovery.internal_context"]));
     let metadata: Value = serde_json::from_str(

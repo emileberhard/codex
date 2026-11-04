@@ -12,6 +12,7 @@ use crate::test_support::models_manager_with_provider;
 use crate::tools::context::ToolCallSource;
 use crate::tools::context::ToolOutput;
 use crate::tools::context::ToolPayload;
+use crate::tools::handlers::PreparedPermissionRequest;
 use crate::tools::orchestrator::ToolOrchestrator;
 use crate::tools::sandboxing::Approvable;
 use crate::tools::sandboxing::ApprovalAction;
@@ -46,7 +47,6 @@ use codex_protocol::models::ResponseInputItem;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::request_permissions::PermissionGrantScope;
 use codex_protocol::request_permissions::RequestPermissionProfile;
-use codex_protocol::request_permissions::RequestPermissionsArgs;
 use codex_protocol::request_permissions::RequestPermissionsResponse;
 use core_test_support::PathExt;
 use core_test_support::TempDirExt;
@@ -273,12 +273,11 @@ async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
         session.request_permissions_for_environment(
             &step_context,
             "perm-call-1".to_string(),
-            RequestPermissionsArgs {
-                environment_id: None,
+            PreparedPermissionRequest {
+                environment_id: environment.environment_id.clone(),
                 reason: Some("need network".to_string()),
                 permissions: requested_permissions.clone(),
             },
-            environment.clone(),
             CancellationToken::new(),
         ),
     )
@@ -297,12 +296,11 @@ async fn request_permissions_routes_to_guardian_when_reviewer_is_enabled() {
         .request_permissions_for_environment(
             &step_context,
             "perm-call-2".to_string(),
-            RequestPermissionsArgs {
-                environment_id: None,
+            PreparedPermissionRequest {
+                environment_id: environment.environment_id,
                 reason: Some("need network".to_string()),
                 permissions: requested_permissions.clone(),
             },
-            environment,
             CancellationToken::new(),
         )
         .await;
@@ -372,15 +370,17 @@ async fn request_permissions_uses_issuing_step_policy_and_reviewer() {
         session.request_permissions_for_environment(
             &step,
             "step-permissions".to_string(),
-            RequestPermissionsArgs {
-                environment_id: None,
+            PreparedPermissionRequest {
+                environment_id: step
+                    .environments
+                    .primary()
+                    .expect("primary environment")
+                    .selection
+                    .environment_id
+                    .clone(),
                 reason: Some("need network".to_string()),
                 permissions: permissions.clone(),
             },
-            step.environments
-                .primary()
-                .expect("primary environment")
-                .selection(),
             CancellationToken::new(),
         ),
     )
@@ -477,12 +477,11 @@ async fn request_permissions_guardian_review_stops_when_cancelled(
                 .request_permissions_for_environment(
                     &StepContext::for_test(Arc::clone(&turn_context)),
                     "perm-call-cancelled".to_string(),
-                    RequestPermissionsArgs {
-                        environment_id: None,
+                    PreparedPermissionRequest {
+                        environment_id: environment.environment_id,
                         reason: Some("need network".to_string()),
                         permissions: requested_permissions,
                     },
-                    environment,
                     cancellation_token,
                 )
                 .await
@@ -619,6 +618,7 @@ async fn guardian_allows_exec_command_additional_permissions_requests_past_polic
             call_id: "test-call".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
+            environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
                     "cmd": "echo hi",
@@ -744,6 +744,7 @@ async fn strict_auto_review_turn_grant_forces_guardian_for_exec_command_policy_s
             call_id: "strict-shell-command-call".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: ToolCallSource::Direct,
+            environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
                     "cmd": "echo hi",
@@ -897,6 +898,7 @@ async fn delayed_exec_command_uses_its_captured_authority_after_next_turn_starts
         call_id: call_id.to_string(),
         tool_name: codex_tools::ToolName::plain("exec_command"),
         source: ToolCallSource::Direct,
+        environments: Default::default(),
         payload: ToolPayload::Function {
             arguments: serde_json::json!({
                 "cmd": command,
@@ -1074,6 +1076,7 @@ async fn guardian_allows_unified_exec_additional_permissions_requests_past_polic
             call_id: "exec-call".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
+            environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
                     "cmd": "echo hi",
@@ -1198,6 +1201,7 @@ async fn exec_command_allows_sticky_turn_permissions_without_inline_request_perm
             call_id: "sticky-turn-grant".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
+            environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
                     "cmd": "echo hi",
@@ -1293,8 +1297,10 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
     let mut thread_extension_init = codex_extension_api::ExtensionDataInit::default();
     thread_extension_init.insert(codex_extension_api::SessionIsolation::Isolated);
     let (session, io) = Session::spawn(SessionSpawnArgs {
+        attached_thread: false,
         startup: None,
         config,
+        prompt_cache_key: PromptCacheKey::default(),
         allow_provider_model_fallback: false,
         instructions: Default::default(),
         installation_id: "11111111-1111-4111-8111-111111111111".to_string(),
@@ -1308,6 +1314,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         code_mode_session_provider: Arc::new(codex_code_mode::DisabledCodeModeSessionProvider),
         extensions: codex_extension_api::empty_extension_registry(),
         conversation_history: InitialHistory::New,
+        resume_preparation: None,
         history_initialization: HistoryInitialization::New,
         disabled_plugin_ids: None,
         requested_history_mode: None,

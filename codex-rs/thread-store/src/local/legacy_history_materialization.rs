@@ -3,10 +3,10 @@ use std::path::Path;
 
 use codex_app_server_protocol::LegacyThreadHistoryProjection;
 use codex_protocol::ThreadId;
-use tokio::io::AsyncBufReadExt;
-use tokio::io::AsyncReadExt;
-use tokio::io::AsyncSeekExt;
-use tokio::io::BufReader;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::io::Seek;
 
 use super::LocalThreadStore;
 use super::thread_history::ProjectedRolloutLine;
@@ -24,7 +24,7 @@ pub(super) async fn materialize(
     path: &Path,
 ) -> ThreadStoreResult<()> {
     let saved = super::thread_history::projection_state(store, thread_id).await?;
-    let mut projection = match saved.as_ref() {
+    let projection = match saved.as_ref() {
         Some(saved) => LegacyThreadHistoryProjection::restore(
             saved
                 .legacy_state_json
@@ -34,22 +34,36 @@ pub(super) async fn materialize(
         .map_err(failure)?,
         None => LegacyThreadHistoryProjection::default(),
     };
-    let mut offset = saved.as_ref().map_or(0, |saved| saved.next_byte_offset);
-    let mut ordinal = saved.as_ref().map_or(0, |saved| saved.next_ordinal);
+    let offset = saved.as_ref().map_or(0, |saved| saved.next_byte_offset);
+    let ordinal = saved.as_ref().map_or(0, |saved| saved.next_ordinal);
     let owned_path = path.to_owned();
-    let file = tokio::task::spawn_blocking(move || {
-        codex_rollout::open_rollout_seekable_reader(&owned_path)
-    })
+    super::thread_history_materialization::pipeline::read_and_apply_with(
+        store,
+        thread_id,
+        offset,
+        0,
+        move |is_cancelled, emit| {
+            read_batches(&owned_path, projection, offset, ordinal, is_cancelled, emit)
+        },
+    )
     .await
-    .map_err(failure)?
-    .map_err(failure)?;
-    let mut file = tokio::fs::File::from_std(file);
-    let length = file.metadata().await.map_err(failure)?.len();
+}
+
+fn read_batches(
+    path: &Path,
+    mut projection: LegacyThreadHistoryProjection,
+    mut offset: u64,
+    mut ordinal: u64,
+    is_cancelled: &dyn Fn() -> bool,
+    emit: &mut dyn FnMut(Vec<RolloutProjectionStep>, u64) -> ThreadStoreResult<()>,
+) -> ThreadStoreResult<()> {
+    let mut file =
+        codex_rollout::open_rollout_seekable_reader(path, is_cancelled).map_err(failure)?;
+    let length = file.seek(std::io::SeekFrom::End(0)).map_err(failure)?;
     let remaining = length
         .checked_sub(offset)
         .ok_or_else(|| failure("legacy rollout shrank behind its projection"))?;
     file.seek(std::io::SeekFrom::Start(offset))
-        .await
         .map_err(failure)?;
     let mut reader = BufReader::new(file.take(remaining));
     let mut batch = Vec::new();
@@ -58,7 +72,7 @@ pub(super) async fn materialize(
     loop {
         let mut record = Vec::new();
         loop {
-            let available = reader.fill_buf().await.map_err(failure)?;
+            let available = reader.fill_buf().map_err(failure)?;
             if available.is_empty() {
                 break;
             }
@@ -96,15 +110,7 @@ pub(super) async fn materialize(
             batch.push(RolloutProjectionStep::LegacyState(
                 projection.checkpoint().map_err(failure)?,
             ));
-            super::thread_history::apply_projection(
-                store,
-                thread_id,
-                batch_start,
-                offset,
-                0,
-                std::mem::take(&mut batch),
-            )
-            .await?;
+            emit(std::mem::take(&mut batch), offset)?;
             batch_start = offset;
             bytes = 0;
         }
@@ -140,15 +146,7 @@ pub(super) async fn materialize(
             batch.push(RolloutProjectionStep::LegacyState(
                 projection.checkpoint().map_err(failure)?,
             ));
-            super::thread_history::apply_projection(
-                store,
-                thread_id,
-                batch_start,
-                offset,
-                0,
-                std::mem::take(&mut batch),
-            )
-            .await?;
+            emit(std::mem::take(&mut batch), offset)?;
             batch_start = offset;
             bytes = 0;
         }
@@ -157,8 +155,7 @@ pub(super) async fn materialize(
         batch.push(RolloutProjectionStep::LegacyState(
             projection.checkpoint().map_err(failure)?,
         ));
-        super::thread_history::apply_projection(store, thread_id, batch_start, offset, 0, batch)
-            .await?;
+        emit(batch, offset)?;
     }
     Ok(())
 }

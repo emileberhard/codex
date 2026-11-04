@@ -13,6 +13,34 @@ use tracing::debug;
 const DEFAULT_AUDIO_SAMPLE_RATE: u32 = 24_000;
 const DEFAULT_AUDIO_CHANNELS: u16 = 1;
 
+pub(super) enum InputTurnBoundary {
+    HandedOff(String),
+    Completed(String),
+}
+
+pub(super) fn input_turn_boundary(payload: &str) -> Option<InputTurnBoundary> {
+    let parsed: Value = serde_json::from_str(payload).ok()?;
+    let boundary = match parsed.get("type")?.as_str()? {
+        "delegation.created" => InputTurnBoundary::HandedOff(
+            parsed
+                .get("item")?
+                .get("user_bidi_turn_id")?
+                .as_str()?
+                .to_owned(),
+        ),
+        "turn.done" if parsed.get("turn")?.get("role")?.as_str()? == "user" => {
+            InputTurnBoundary::Completed(parsed.get("turn")?.get("id")?.as_str()?.to_owned())
+        }
+        _ => return None,
+    };
+    match &boundary {
+        InputTurnBoundary::HandedOff(id) | InputTurnBoundary::Completed(id) if id.is_empty() => {
+            None
+        }
+        _ => Some(boundary),
+    }
+}
+
 pub(super) fn parse_frameless_bidi_event(payload: &str) -> Option<RealtimeEvent> {
     let (parsed, message_type) = parse_realtime_payload(payload, "frameless bidi")?;
     match message_type.as_str() {

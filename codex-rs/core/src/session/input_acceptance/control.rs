@@ -22,6 +22,10 @@ impl InputAcceptances {
 }
 
 impl crate::CodexThread {
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "the durable stop fence and acceptance lookup must remain atomic"
+    )]
     pub async fn stop_identified_input(
         &self,
         client_id: &str,
@@ -88,6 +92,10 @@ impl crate::CodexThread {
         }
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "custody evidence must serialize with durable acceptance writes"
+    )]
     pub async fn read_input_acceptance(
         &self,
         client_id: &str,
@@ -127,6 +135,10 @@ impl crate::CodexThread {
         self.session.prepare_accepted_input_restart(turn_id).await
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "accepted turn stop and terminal persistence must remain atomic"
+    )]
     pub async fn interrupt_accepted_turn(&self, turn_id: &str) -> CodexResult<bool> {
         let session = &self.session;
         let _admission = session.input_queue.acceptance_submission.lock().await;

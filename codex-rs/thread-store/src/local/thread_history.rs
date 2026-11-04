@@ -1,10 +1,11 @@
 // Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_app_server_protocol::ThreadHistoryChangeSet;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::TurnStatus;
 use codex_protocol::ThreadId;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::realtime::RealtimeItem;
+use codex_state::SqlitePoolWriteExt;
 
 use super::LocalThreadStore;
 use crate::ThreadStoreError;
@@ -118,10 +119,7 @@ pub(super) async fn apply_projection(
     // Write the projected rows and advance the JSONL offset and ordinal in one transaction. If
     // SQLite fails, it stays behind the durable rollout instead of claiming data it did not
     // materialize.
-    let mut transaction = pool
-        .begin_with("BEGIN IMMEDIATE")
-        .await
-        .map_err(thread_history_error)?;
+    let mut transaction = pool.begin_immediate().await.map_err(thread_history_error)?;
     let thread_id = thread_id.to_string();
     let projection_state = sqlx::query_as::<_, (i64, i64)>(
         r#"
@@ -266,7 +264,7 @@ pub(super) async fn delete_thread(
 
     let pool = store.thread_history_db().await?;
     let mut transaction = pool
-        .begin_with("BEGIN IMMEDIATE")
+        .begin_immediate()
         .await
         .map_err(thread_history_delete_error)?;
     let thread_id = thread_id.to_string();
@@ -452,7 +450,8 @@ WHERE thread_id = ?
         .map_err(thread_history_error)?;
     }
 
-    for item in changes.changed_items {
+    for change in changes.changed_items {
+        let item = change.item;
         let created_at_ms =
             item.started_at_ms
                 .or(fallback_created_at_ms)
@@ -461,8 +460,8 @@ WHERE thread_id = ?
                         "thread history projection for {thread_id} is missing an item creation timestamp"
                     ),
                 })?;
-        let item_id = item.item.id().to_string();
-        let item_json = serde_json::to_string(&item.item).map_err(thread_history_error)?;
+        let item_id = item.id().to_string();
+        let item_json = serde_json::to_string(&item.payload).map_err(thread_history_error)?;
         // First projection owns position. Completion updates that row without moving it;
         // the initial snapshot remains available to forks whose boundary precedes completion.
         sqlx::query(
@@ -491,7 +490,7 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
             "#,
         )
         .bind(thread_id)
-        .bind(item.turn_id.as_str())
+        .bind(change.turn_id.as_str())
         .bind(item_id.as_str())
         .bind(rollout_ordinal)
         .bind(rollout_ordinal)
@@ -500,7 +499,7 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
         .bind(item.completed_at_ms)
         .bind(item_json.as_str())
         .bind(item_json.as_str())
-        .bind(item.is_complete)
+        .bind(change.is_complete)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;
@@ -509,20 +508,20 @@ WHERE thread_items.is_complete = 0 OR excluded.is_complete = 1
             "INSERT OR IGNORE INTO thread_item_versions (thread_id, turn_id, item_id, rollout_ordinal, item_json, is_complete, started_at_ms, completed_at_ms) SELECT thread_id, turn_id, item_id, updated_at_ordinal, item_json, is_complete, started_at_ms, completed_at_ms FROM thread_items WHERE thread_id = ? AND turn_id = ? AND item_id = ? AND updated_at_ordinal = ?",
         )
         .bind(thread_id)
-        .bind(item.turn_id.as_str())
+        .bind(change.turn_id.as_str())
         .bind(item_id.as_str())
         .bind(rollout_ordinal)
         .execute(&mut **transaction)
         .await
         .map_err(thread_history_error)?;
 
-        if !item.is_complete {
+        if !change.is_complete {
             continue;
         }
         // Keep summary item IDs on the turn row so reads do not need to scan every item in the
         // turn.
-        match item.item {
-            ThreadItem::UserMessage { .. } => {
+        match item.payload {
+            ThreadItemPayload::UserMessage { .. } => {
                 sqlx::query(
                     r#"
 UPDATE thread_turns
@@ -536,12 +535,12 @@ WHERE thread_id = ?
                 .bind(item_id.as_str())
                 .bind(rollout_ordinal)
                 .bind(thread_id)
-                .bind(item.turn_id.as_str())
+                .bind(change.turn_id.as_str())
                 .execute(&mut **transaction)
                 .await
                 .map_err(thread_history_error)?;
             }
-            ThreadItem::AgentMessage {
+            ThreadItemPayload::AgentMessage {
                 phase: Some(MessagePhase::FinalAnswer),
                 ..
             } => {
@@ -558,32 +557,32 @@ WHERE thread_id = ?
                 .bind(item_id.as_str())
                 .bind(rollout_ordinal)
                 .bind(thread_id)
-                .bind(item.turn_id.as_str())
+                .bind(change.turn_id.as_str())
                 .execute(&mut **transaction)
                 .await
                 .map_err(thread_history_error)?;
             }
-            ThreadItem::AgentMessage {
+            ThreadItemPayload::AgentMessage {
                 phase: Some(MessagePhase::Commentary | MessagePhase::PartialAnswer) | None,
                 ..
             }
-            | ThreadItem::HookPrompt { .. }
-            | ThreadItem::FunctionCallOutput { .. }
-            | ThreadItem::Plan { .. }
-            | ThreadItem::Reasoning { .. }
-            | ThreadItem::CommandExecution { .. }
-            | ThreadItem::FileChange { .. }
-            | ThreadItem::McpToolCall { .. }
-            | ThreadItem::DynamicToolCall { .. }
-            | ThreadItem::CollabAgentToolCall { .. }
-            | ThreadItem::SubAgentActivity { .. }
-            | ThreadItem::WebSearch(_)
-            | ThreadItem::ImageView { .. }
-            | ThreadItem::Sleep(_)
-            | ThreadItem::ImageGeneration(_)
-            | ThreadItem::EnteredReviewMode { .. }
-            | ThreadItem::ExitedReviewMode { .. }
-            | ThreadItem::ContextCompaction { .. } => {}
+            | ThreadItemPayload::HookPrompt { .. }
+            | ThreadItemPayload::FunctionCallOutput { .. }
+            | ThreadItemPayload::Plan { .. }
+            | ThreadItemPayload::Reasoning { .. }
+            | ThreadItemPayload::CommandExecution { .. }
+            | ThreadItemPayload::FileChange { .. }
+            | ThreadItemPayload::McpToolCall { .. }
+            | ThreadItemPayload::DynamicToolCall { .. }
+            | ThreadItemPayload::CollabAgentToolCall { .. }
+            | ThreadItemPayload::SubAgentActivity { .. }
+            | ThreadItemPayload::WebSearch(_)
+            | ThreadItemPayload::ImageView { .. }
+            | ThreadItemPayload::Sleep(_)
+            | ThreadItemPayload::ImageGeneration(_)
+            | ThreadItemPayload::EnteredReviewMode { .. }
+            | ThreadItemPayload::ExitedReviewMode { .. }
+            | ThreadItemPayload::ContextCompaction { .. } => {}
         }
     }
     Ok(())

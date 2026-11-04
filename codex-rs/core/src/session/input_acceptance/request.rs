@@ -10,11 +10,51 @@ use std::collections::HashMap;
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct DurableInputRequest {
     pub(super) input: TurnInput,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) user_item_uuid: Option<uuid::Uuid>,
     pub(super) settings: serde_json::Value,
     pub(super) start: codex_protocol::turn_input::TurnStartOptions,
+    #[serde(serialize_with = "serialize_additional_context")]
     pub(super) additional_context:
         std::collections::BTreeMap<String, codex_protocol::protocol::AdditionalContextEntry>,
     pub(super) responsesapi_client_metadata: Option<HashMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) responsesapi_client_metadata_patch: Option<HashMap<String, String>>,
+}
+
+impl DurableInputRequest {
+    pub(super) fn into_request(self) -> CodexResult<codex_protocol::turn_input::TurnInputRequest> {
+        let mut request = codex_protocol::turn_input::TurnInputRequest::new(self.input)
+            .with_thread_settings(restore_settings(&self.settings)?)
+            .on_start(self.start)
+            .with_additional_context(self.additional_context)
+            .with_responses_metadata(self.responsesapi_client_metadata)
+            .with_responses_metadata_patch(self.responsesapi_client_metadata_patch);
+        request.user_item_uuid = self.user_item_uuid;
+        Ok(request)
+    }
+}
+
+fn serialize_additional_context<S: serde::Serializer>(
+    context: &std::collections::BTreeMap<String, codex_protocol::protocol::AdditionalContextEntry>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let context = context
+        .iter()
+        .map(|(key, entry)| {
+            let mut value = serde_json::to_value(entry).map_err(serde::ser::Error::custom)?;
+            if entry.name.is_none() {
+                value
+                    .as_object_mut()
+                    .ok_or_else(|| {
+                        serde::ser::Error::custom("context entry must serialize to an object")
+                    })?
+                    .remove("name");
+            }
+            Ok((key, value))
+        })
+        .collect::<Result<std::collections::BTreeMap<_, _>, S::Error>>()?;
+    context.serialize(serializer)
 }
 
 pub(super) fn settings_fingerprint(

@@ -2,6 +2,7 @@
 //! existing selections; explicit replacements migrate to dedicated packages and stay pinned.
 //! WinGet sources are verified in their original layout before staging a canonical daemon package.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -231,18 +232,18 @@ async fn prepare_from_package(
     let stage = tempfile::Builder::new()
         .prefix(".staging.")
         .tempdir_in(&releases)?;
-    let digest = package_tree(source, Some(stage.path()))?;
+    let mut staged_digests = BTreeMap::new();
+    let digest = package_tree(source, Some(stage.path()), &mut staged_digests)?;
     let staged_exe = if cfg!(target_os = "macos") && stage.path().join("CodexCLI.app").is_dir() {
-        stage.path().join("CodexCLI.app/Contents/MacOS/codex")
+        Path::new("CodexCLI.app/Contents/MacOS/codex")
     } else {
-        stage.path().join(source_entrypoint)
+        Path::new(source_entrypoint)
     };
     anyhow::ensure!(
-        package_tree(source, /*destination*/ None)? == digest
+        package_tree(source, /*destination*/ None, &mut BTreeMap::new())? == digest
             && std::fs::read(stage.path().join("codex-package.json"))? == manifest_bytes
-            && managed_install::executable_identity(&staged_exe)
-                .await?
-                .same_contents(&running_identity),
+            && staged_digests.get(staged_exe).map(blake3::Hash::as_bytes)
+                == Some(&running_identity.digest),
         "the CLI package changed while preparing the daemon or differs from the running executable"
     );
     // Reverse the WinGet archive's root filenames only after verifying the copied
@@ -250,13 +251,17 @@ async fn prepare_from_package(
     let digest = if winget {
         std::fs::create_dir_all(stage.path().join("bin"))?;
         #[cfg(windows)]
-        {
-            windows::publish_release(&staged_exe, &stage.path().join(entrypoint)).await?;
-            windows::publish_release(
-                &stage.path().join("codex-code-mode-host.exe"),
-                &stage.path().join("bin/codex-code-mode-host.exe"),
-            )
-            .await?;
+        for (from, to) in [
+            (staged_exe, Path::new(entrypoint)),
+            (
+                Path::new("codex-code-mode-host.exe"),
+                Path::new("bin/codex-code-mode-host.exe"),
+            ),
+        ] {
+            windows::publish_release(&stage.path().join(from), &stage.path().join(to)).await?;
+            if let Some(digest) = staged_digests.remove(from) {
+                staged_digests.insert(to.to_path_buf(), digest);
+            }
         }
         let voice_path = stage.path().join("codex-resources/voice/manifest.json");
         if voice_path.try_exists()? {
@@ -269,14 +274,18 @@ async fn prepare_from_package(
                 .remove(source_entrypoint)
                 .context("WinGet voice manifest is missing the CLI checksum")?;
             checksums.insert(entrypoint.to_string(), checksum);
-            std::fs::write(voice_path, serde_json::to_vec_pretty(&voice)?)?;
+            let bytes = serde_json::to_vec_pretty(&voice)?;
+            std::fs::write(voice_path, &bytes)?;
+            staged_digests.insert(
+                PathBuf::from("codex-resources/voice/manifest.json"),
+                blake3::hash(&bytes),
+            );
         }
         metadata["entrypoint"] = entrypoint.into();
-        std::fs::write(
-            stage.path().join("codex-package.json"),
-            serde_json::to_vec_pretty(&metadata)?,
-        )?;
-        package_tree(stage.path(), /*destination*/ None)?
+        let bytes = serde_json::to_vec_pretty(&metadata)?;
+        std::fs::write(stage.path().join("codex-package.json"), &bytes)?;
+        staged_digests.insert(PathBuf::from("codex-package.json"), blake3::hash(&bytes));
+        package_tree(stage.path(), /*destination*/ None, &mut staged_digests)?
     } else {
         digest
     };
@@ -296,7 +305,7 @@ async fn prepare_from_package(
     if release.try_exists()? {
         anyhow::ensure!(
             !release.symlink_metadata()?.file_type().is_symlink()
-                && package_tree(&release, /*destination*/ None)? == digest,
+                && package_tree(&release, /*destination*/ None, &mut BTreeMap::new())? == digest,
             "an existing daemon release has different contents; refusing to overwrite it"
         );
     } else {
@@ -309,6 +318,7 @@ async fn prepare_from_package(
         #[cfg(not(windows))]
         std::fs::rename(stage.path(), &release)?;
     }
+    let release = release.canonicalize()?;
     let standalone = home.join("packages/standalone");
     let canonical_source = source.canonicalize()?;
     let follows_latest = mode == InstallMode::Missing
@@ -377,15 +387,22 @@ async fn prepare_from_package(
     } else if marker.exists() {
         std::fs::remove_file(marker)?;
     }
-    #[cfg(unix)]
-    {
-        let temporary = tempfile::TempDir::new_in(&root)?;
-        let link = temporary.path().join("current");
-        std::os::unix::fs::symlink(&release, &link)?;
-        std::fs::rename(link, root.join("current"))?;
+    if previous_release.as_deref() != Some(release.as_path()) {
+        #[cfg(unix)]
+        {
+            let temporary = tempfile::TempDir::new_in(&root)?;
+            let link = temporary.path().join("current");
+            std::os::unix::fs::symlink(&release, &link)?;
+            std::fs::rename(link, root.join("current"))?;
+        }
+        #[cfg(windows)]
+        windows::select_release(&root, &release)?;
+        if let Err(error) =
+            crate::release_pruning::record_selection(&root, previous_release.as_deref())
+        {
+            tracing::warn!(%error, "could not record daemon selection for pruning");
+        }
     }
-    #[cfg(windows)]
-    windows::select_release(&root, &release)?;
     if backend.is_some() {
         let selected = Daemon {
             pid_file: daemon.pid_file.with_file_name(crate::DAEMON_PID_FILE_NAME),
@@ -400,12 +417,21 @@ async fn prepare_from_package(
         )?;
         selected.wait_until_ready().await?;
     }
+    if let Err(error) = crate::release_pruning::prune(daemon, &root, settings).await {
+        tracing::debug!(%error, "skipped daemon release pruning");
+    }
     Ok(true)
 }
 
 /// Hash the complete tree and optionally copy those same bytes. Relative file
 /// links are materialized; escaping links and directory links are rejected.
-fn package_tree(root: &Path, destination: Option<&Path>) -> Result<String> {
+/// Only reuse digests for a private staging directory; source and release
+/// validation must pass a fresh map.
+fn package_tree(
+    root: &Path,
+    destination: Option<&Path>,
+    file_digests: &mut BTreeMap<PathBuf, blake3::Hash>,
+) -> Result<String> {
     let canonical_root = root.canonicalize()?;
     let mut hasher = blake3::Hasher::new();
     let mut paths = vec![root.to_path_buf()];
@@ -443,18 +469,27 @@ fn package_tree(root: &Path, destination: Option<&Path>) -> Result<String> {
             paths.extend(entries);
         } else {
             anyhow::ensure!(metadata.is_file(), "package contains an unsupported file");
-            let bytes = std::fs::read(&path)?;
+            let digest = if let Some(digest) = file_digests.get(relative)
+                && destination.is_none()
+            {
+                *digest
+            } else {
+                let bytes = std::fs::read(&path)?;
+                let digest = blake3::hash(&bytes);
+                if let Some(destination) = destination {
+                    let target = destination.join(relative);
+                    std::fs::write(&target, bytes)?;
+                    std::fs::set_permissions(target, metadata.permissions())?;
+                }
+                file_digests.insert(relative.to_path_buf(), digest);
+                digest
+            };
             hasher.update(b"file");
-            hasher.update(blake3::hash(&bytes).as_bytes());
+            hasher.update(digest.as_bytes());
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 hasher.update(&(metadata.permissions().mode() & 0o777).to_le_bytes());
-            }
-            if let Some(destination) = destination {
-                let target = destination.join(relative);
-                std::fs::write(&target, bytes)?;
-                std::fs::set_permissions(target, metadata.permissions())?;
             }
         }
     }
