@@ -25,6 +25,7 @@ impl InputQueue {
     pub(crate) async fn checkpoint_mailbox_for_eviction(
         &self,
         live_thread: Option<&codex_thread_store::LiveThread>,
+        thread_id: codex_protocol::ThreadId,
         admission: &mut Option<tokio::sync::OwnedRwLockReadGuard<()>>,
     ) -> codex_protocol::error::Result<Vec<InterAgentCommunication>> {
         let mut pending = self.mailbox_pending_mails.lock().await;
@@ -36,14 +37,12 @@ impl InputQueue {
             .iter_mut()
             .take_while(|mail| !mail.communication.trigger_turn)
         {
-            mail.communication
-                .id
-                .get_or_insert_with(|| codex_protocol::ResponseItemId::new("amsg"));
+            mail.communication.ensure_id();
         }
         let mail: Vec<_> = pending
             .iter()
             .take_while(|mail| !mail.communication.trigger_turn)
-            .map(|mail| mail.communication.clone())
+            .map(|mail| (*mail.communication).clone())
             .collect();
         let persisted = async {
             let live_thread = live_thread.ok_or_else(|| {
@@ -66,7 +65,11 @@ impl InputQueue {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if persisted.is_ok() {
-            pending.drain(..mail.len());
+            for mail in pending.drain(..mail.len()) {
+                if let Some(delivery) = mail.communication.delivery {
+                    delivery.consumed(thread_id);
+                }
+            }
         } else if retained_admission.is_none() {
             *retained_admission = admission.take();
         }
@@ -111,7 +114,11 @@ impl Session {
             .unwrap_or_else(|_| unreachable!("communication boundary remains open"));
         let mail = match self
             .input_queue
-            .checkpoint_mailbox_for_eviction(self.services.live_thread.as_ref(), admission)
+            .checkpoint_mailbox_for_eviction(
+                self.services.live_thread.as_ref(),
+                self.thread_id,
+                admission,
+            )
             .await
         {
             Ok(mail) => mail,

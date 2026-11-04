@@ -91,6 +91,7 @@ async fn thread_section_move_pins_and_archives_before_first_turn() -> Result<()>
     let list_params = ThreadListParams {
         include_completion_times: None,
         excluded_thread_ids: None,
+        attached_to_thread_id: None,
         originators: None,
         cursor: None,
         limit: Some(100),
@@ -297,6 +298,7 @@ async fn thread_section_move_pins_and_unpins_with_filtered_recency_pagination() 
     let list_params = ThreadListParams {
         include_completion_times: None,
         excluded_thread_ids: None,
+        attached_to_thread_id: None,
         originators: None,
         cursor: None,
         limit: Some(1),
@@ -491,6 +493,7 @@ async fn thread_sections_preserve_server_owned_manual_order_across_moves_and_res
     let list_params = ThreadListParams {
         include_completion_times: None,
         excluded_thread_ids: None,
+        attached_to_thread_id: None,
         originators: None,
         cursor: None,
         limit: Some(10),

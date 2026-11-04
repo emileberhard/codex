@@ -337,9 +337,11 @@ pub(super) async fn page_item_rows(
         let mut query = QueryBuilder::<Sqlite>::new("WITH visible_items AS (");
         push_visible_items(&mut query, segment)?;
         query.push(
-            ") SELECT turn_id, item_id, rollout_ordinal, rollout_ordinal AS started_at_ordinal, created_at_ms, started_at_ms, item_json, is_complete, completed_at_ms, updated_at_ordinal FROM visible_items WHERE thread_id = ",
+            ") SELECT turn_id, item_id, rollout_ordinal, rollout_ordinal AS started_at_ordinal, created_at_ms, started_at_ms, item_json, is_complete, completed_at_ms, updated_at_ordinal FROM visible_items",
         );
-        query.push_bind(segment.rollout_id().to_string());
+        query
+            .push(" WHERE thread_id = ")
+            .push_bind(segment.rollout_id().to_string());
         push_segment_range(&mut query, segment)?;
         if let Some(after_updated_at_ordinal) = params.after_updated_at_ordinal {
             query

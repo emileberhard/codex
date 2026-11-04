@@ -60,7 +60,11 @@ fn checkpoint_contains_consumed_message_prefix_and_completion_releases_it() {
         checkpoint,
         vec![ObservedItem {
             turn_id: "turn".into(),
-            item: ThreadItem::from(message("before ")),
+            item: ThreadItem {
+                payload: ThreadItemPayload::from(message("before ")),
+                started_at_ms: Some(1000),
+                completed_at_ms: None
+            },
             started_at_ms: Some(1000),
             completed_at_ms: None,
             is_complete: false,
@@ -68,7 +72,11 @@ fn checkpoint_contains_consumed_message_prefix_and_completion_releases_it() {
     );
     assert_eq!(
         state.snapshot().unwrap()[0].item,
-        ThreadItem::from(message("before after"))
+        ThreadItem {
+            payload: ThreadItemPayload::from(message("before after")),
+            started_at_ms: Some(1000),
+            completed_at_ms: None
+        }
     );
     state.track("turn", &complete(message("before after")));
     assert!(state.snapshot().unwrap().is_empty());
@@ -97,10 +105,14 @@ fn checkpoint_preserves_reasoning_section_indices() {
     }
     assert_eq!(
         state.snapshot().unwrap()[0].item,
-        ThreadItem::Reasoning {
-            id: "reasoning".into(),
-            summary: vec!["first section".into(), "second".into()],
-            content: vec![],
+        ThreadItem {
+            payload: ThreadItemPayload::Reasoning {
+                id: "reasoning".into(),
+                summary: vec!["first section".into(), "second".into()],
+                content: vec![],
+            },
+            started_at_ms: Some(1000),
+            completed_at_ms: None,
         }
     );
 }
@@ -150,7 +162,14 @@ fn ephemeral_checkpoint_retains_completion_and_reports_eviction() {
     state.track("turn", &start(message("")));
     state.track("turn", &complete(message("answer")));
     let snapshot = state.snapshot().unwrap();
-    assert_eq!(snapshot[0].item, ThreadItem::from(message("answer")));
+    assert_eq!(
+        snapshot[0].item,
+        ThreadItem {
+            payload: ThreadItemPayload::from(message("answer")),
+            started_at_ms: Some(1000),
+            completed_at_ms: Some(2000)
+        }
+    );
     assert!(snapshot[0].is_complete);
     assert_eq!(snapshot[0].completed_at_ms, Some(2000));
     for index in 0..MAX_UNFINISHED_ITEMS {

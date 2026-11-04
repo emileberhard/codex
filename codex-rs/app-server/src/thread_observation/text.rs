@@ -1,5 +1,6 @@
 // Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_protocol::protocol::EventMsg;
 use std::collections::BTreeMap;
 
@@ -65,13 +66,17 @@ impl ObservationItems {
     pub(crate) fn track(&mut self, turn_id: &str, event: &EventMsg) {
         match event {
             EventMsg::ItemStarted(start) => {
-                let item = ThreadItem::from(start.item.clone());
+                let item = ThreadItem {
+                    payload: ThreadItemPayload::from(start.item.clone()),
+                    started_at_ms: Some(start.started_at_ms),
+                    completed_at_ms: None,
+                };
                 if self.ephemeral
                     || matches!(
-                        item,
-                        ThreadItem::AgentMessage { .. }
-                            | ThreadItem::Reasoning { .. }
-                            | ThreadItem::Plan { .. }
+                        item.payload,
+                        ThreadItemPayload::AgentMessage { .. }
+                            | ThreadItemPayload::Reasoning { .. }
+                            | ThreadItemPayload::Plan { .. }
                     )
                 {
                     self.retain(
@@ -88,7 +93,7 @@ impl ObservationItems {
                 if self.ephemeral {
                     self.retain(
                         end.turn_id.clone(),
-                        ThreadItem::from(end.item.clone()),
+                        ThreadItem::from(end),
                         end.started_at_ms,
                         Some(end.completed_at_ms),
                         true,
@@ -154,19 +159,21 @@ impl ObservationItems {
             // Canonical ItemStarted/Completed own these payloads. Their legacy
             // mirrors can otherwise replace a multi-part item with one part.
             if matches!(
-                change.item,
-                ThreadItem::AgentMessage { .. }
-                    | ThreadItem::Reasoning { .. }
-                    | ThreadItem::Plan { .. }
-                    | ThreadItem::UserMessage { .. }
+                change.item.payload,
+                ThreadItemPayload::AgentMessage { .. }
+                    | ThreadItemPayload::Reasoning { .. }
+                    | ThreadItemPayload::Plan { .. }
+                    | ThreadItemPayload::UserMessage { .. }
             ) {
                 continue;
             }
+            let started_at_ms = change.item.started_at_ms;
+            let completed_at_ms = change.item.completed_at_ms;
             self.retain(
                 change.turn_id,
                 change.item,
-                change.started_at_ms,
-                change.completed_at_ms,
+                started_at_ms,
+                completed_at_ms,
                 change.is_complete,
             );
         }
@@ -282,13 +289,13 @@ impl ObservationItems {
                 TextPart::Summary(_) | TextPart::Content(_) => 8,
                 _ => 0,
             };
-        let target = match (item, part) {
-            (ThreadItem::AgentMessage { text, .. }, TextPart::Message)
-            | (ThreadItem::Plan { text, .. }, TextPart::Plan) => Some(text),
-            (ThreadItem::Reasoning { summary, .. }, TextPart::Summary(index)) => {
+        let target = match (&mut item.payload, part) {
+            (ThreadItemPayload::AgentMessage { text, .. }, TextPart::Message)
+            | (ThreadItemPayload::Plan { text, .. }, TextPart::Plan) => Some(text),
+            (ThreadItemPayload::Reasoning { summary, .. }, TextPart::Summary(index)) => {
                 section(summary, index)
             }
-            (ThreadItem::Reasoning { content, .. }, TextPart::Content(index)) => {
+            (ThreadItemPayload::Reasoning { content, .. }, TextPart::Content(index)) => {
                 section(content, index)
             }
             _ => None,

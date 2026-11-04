@@ -11,7 +11,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::ItemCompletedNotification;
-use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadItemPayload;
 use codex_app_server_protocol::ThreadItemsListParams;
 use codex_app_server_protocol::ThreadItemsListResponse;
 use codex_app_server_protocol::ThreadResumeParams;
@@ -102,7 +102,7 @@ async fn viewed_image_survives_file_overwrite_and_paginated_history_reload() -> 
             mcp.read_notification("item/completed"),
         )
         .await??;
-        if matches!(completed.item, ThreadItem::ImageView { .. }) {
+        if matches!(completed.item.payload, ThreadItemPayload::ImageView { .. }) {
             break completed.item;
         }
     };
@@ -111,17 +111,17 @@ async fn viewed_image_survives_file_overwrite_and_paginated_history_reload() -> 
         mcp.read_notification("turn/completed"),
     )
     .await??;
-    let ThreadItem::ImageView {
+    let ThreadItemPayload::ImageView {
         saved_path: Some(saved_path),
         ..
-    } = &viewed
+    } = &viewed.payload
     else {
         anyhow::bail!("completed image view should carry a savedPath");
     };
     let saved_path = saved_path.clone();
     assert_eq!(
-        viewed,
-        ThreadItem::ImageView {
+        viewed.payload,
+        ThreadItemPayload::ImageView {
             id: "view-image".to_string(),
             path: image_path.clone().into(),
             saved_path: Some(saved_path.clone()),
@@ -297,7 +297,8 @@ async fn fresh_context_subagent_inherits_disabled_view_image_and_mcp_tools() -> 
             mcp.read_notification("item/completed"),
         )
         .await??;
-        if matches!(&completed.item, ThreadItem::McpToolCall { id, .. } if id == MCP_CALL_ID) {
+        if matches!(&completed.item.payload, ThreadItemPayload::McpToolCall { id, .. } if id == MCP_CALL_ID)
+        {
             assert_ne!(completed.thread_id, thread.id);
             break completed.thread_id;
         }

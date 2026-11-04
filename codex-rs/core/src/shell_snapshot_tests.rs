@@ -1,3 +1,4 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 #[cfg(unix)]
 use crate::config::NetworkProxySpec;
@@ -376,6 +377,7 @@ async fn inactive_profiles_keep_snapshots_but_active_brokers_require_sandbox() -
         /*prefer_executor_snapshots*/ false,
     );
     let mut config = EnvironmentConfig {
+        environment_hooks: Default::default(),
         allow_login_shell: false,
         workspace_roots: Vec::new(),
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
@@ -1780,7 +1782,7 @@ async fn snapshot_shell_does_not_inherit_stdin() -> Result<()> {
 
     let home_display = home.display();
     let script = format!(
-        "HOME=\"{home_display}\"; export HOME; {}",
+        "unset BASH_ENV; HOME=\"{home_display}\"; export HOME; {}",
         snapshot_capture_script(
             ShellType::Bash,
             SnapshotCaptureOptions {

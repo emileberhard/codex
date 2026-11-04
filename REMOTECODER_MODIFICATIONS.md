@@ -33,7 +33,11 @@ omits its provider keeps the source thread's provider. A provider's
 and `provider_model_catalog_json`, so a fenced replacement can recover a cold
 thread whose provider was defined for that thread. It applies only while loading
 the thread from storage; the persisted model, provider and permissions stay
-authoritative, and any other key is rejected.
+authoritative, and any other key is rejected. Input, resume, queue and goal
+admission validate the retained route against current managed requirements.
+They do not compare it with the host's default provider; request-defined and
+retained per-thread routes remain authoritative, including during recovery.
+An undefined provider fails rather than falling back to the host default.
 
 
 Identified inputs use thread-local durable acceptance and exact reserved turn
@@ -49,8 +53,15 @@ suspension preserves exact restart authority instead of turning interruption int
 birth identity, without treating provider environment variables as authority.
 
 - `.gitignore`
+- `.gitignore.license`
+- `AGENTS.md`
 - `MODULE.bazel.lock`
+- `MODULE.bazel.lock.license`
+- `README.md`
+- `THIRD_PARTY_NOTICES.md`
 - `codex-rs/Cargo.lock`
+- `codex-rs/Cargo.lock.license`
+- `codex-rs/Cargo.toml`
 - `codex-rs/analytics/src/client.rs`
 - `codex-rs/analytics/src/client_product_tests.rs`
 - `codex-rs/analytics/src/client_tests.rs`
@@ -92,11 +103,14 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server-protocol/schema/json/v2/TurnStartResponse.json`
 - `codex-rs/app-server-protocol/schema/json/v2/TurnStartedNotification.json`
 - `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst`
+- `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-experimental.json.zst.license`
 - `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst`
+- `codex-rs/app-server-protocol/schema/precomputed/app-server-exports-stable.json.zst.license`
 - `codex-rs/app-server-protocol/schema/typescript/v2/DaemonToolContext.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/InputAcceptanceFact.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ItemCompletedNotification.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ItemStartedNotification.ts`
+- `codex-rs/app-server-protocol/schema/typescript/v2/LinuxProcessBirth.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/LocalProcessIdentity.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ServerDiagnosticsFileDescriptorLimits.ts`
 - `codex-rs/app-server-protocol/schema/typescript/v2/ServerDiagnosticsProcess.ts`
@@ -122,14 +136,18 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server-protocol/src/protocol/v2/diagnostics.rs`
 - `codex-rs/app-server-protocol/src/protocol/v2/diagnostics_tests.rs`
 - `codex-rs/app-server-protocol/src/protocol/v2/item.rs`
+- `codex-rs/app-server-protocol/src/protocol/v2/mod.rs`
 - `codex-rs/app-server-protocol/src/protocol/v2/realtime.rs`
 - `codex-rs/app-server-protocol/src/protocol/v2/tests.rs`
 - `codex-rs/app-server-protocol/src/protocol/v2/thread.rs`
 - `codex-rs/app-server-protocol/src/protocol/v2/thread_data.rs`
+- `codex-rs/app-server-protocol/src/protocol/v2/tool_context.rs`
 - `codex-rs/app-server-test-client/src/lib.rs`
 - `codex-rs/app-server/Cargo.toml`
 - `codex-rs/app-server/README.md`
 - `codex-rs/app-server/src/bespoke_event_handling.rs`
+- `codex-rs/app-server/src/config_manager.rs`
+- `codex-rs/app-server/src/config_manager_provider_tests.rs`
 - `codex-rs/app-server/src/dynamic_tools.rs`
 - `codex-rs/app-server/src/extensions.rs`
 - `codex-rs/app-server/src/external_auth.rs`
@@ -141,23 +159,27 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server/src/message_processor.rs`
 - `codex-rs/app-server/src/message_processor_tracing_tests.rs`
 - `codex-rs/app-server/src/message_processor_workspace_routing_tests.rs`
-- `codex-rs/app-server/src/notification_media.rs`
 - `codex-rs/app-server/src/outgoing_message.rs`
 - `codex-rs/app-server/src/request_processors.rs`
 - `codex-rs/app-server/src/request_processors/account_processor.rs`
+- `codex-rs/app-server/src/request_processors/daemon_snapshot.rs`
 - `codex-rs/app-server/src/request_processors/diagnostics.rs`
+- `codex-rs/app-server/src/request_processors/input_acceptance_processor.rs`
 - `codex-rs/app-server/src/request_processors/persisted_resume_settings.rs`
 - `codex-rs/app-server/src/request_processors/persisted_resume_settings_tests.rs`
 - `codex-rs/app-server/src/request_processors/restart_recovery_processor.rs`
 - `codex-rs/app-server/src/request_processors/restart_recovery_settings.rs`
 - `codex-rs/app-server/src/request_processors/restart_recovery_settings_tests.rs`
+- `codex-rs/app-server/src/request_processors/thread_goal_processor.rs`
 - `codex-rs/app-server/src/request_processors/thread_lifecycle.rs`
 - `codex-rs/app-server/src/request_processors/thread_observation.rs`
+- `codex-rs/app-server/src/request_processors/thread_persist_processor.rs`
 - `codex-rs/app-server/src/request_processors/thread_processor.rs`
 - `codex-rs/app-server/src/request_processors/thread_processor_tests.rs`
 - `codex-rs/app-server/src/request_processors/thread_queue_processor.rs`
 - `codex-rs/app-server/src/request_processors/thread_read_state.rs`
 - `codex-rs/app-server/src/request_processors/token_usage_replay.rs`
+- `codex-rs/app-server/src/request_processors/tool_context_processor.rs`
 - `codex-rs/app-server/src/request_processors/turn_processor.rs`
 - `codex-rs/app-server/src/resources.rs`
 - `codex-rs/app-server/src/resources_tests.rs`
@@ -172,11 +194,13 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server/tests/common/test_app_server.rs`
 - `codex-rs/app-server/tests/nofile_startup.rs`
 - `codex-rs/app-server/tests/suite/v2/connection_handling_websocket.rs`
+- `codex-rs/app-server/tests/suite/v2/connection_handling_websocket_compression_tests.rs`
 - `codex-rs/app-server/tests/suite/v2/connection_handling_websocket_unix.rs`
 - `codex-rs/app-server/tests/suite/v2/experimental_api.rs`
 - `codex-rs/app-server/tests/suite/v2/external_agent_config.rs`
 - `codex-rs/app-server/tests/suite/v2/external_auth_ownership_tests.rs`
 - `codex-rs/app-server/tests/suite/v2/file_descriptor_pressure.rs`
+- `codex-rs/app-server/tests/suite/v2/input_acceptance_stop.rs`
 - `codex-rs/app-server/tests/suite/v2/mod.rs`
 - `codex-rs/app-server/tests/suite/v2/projects.rs`
 - `codex-rs/app-server/tests/suite/v2/realtime_conversation.rs`
@@ -193,10 +217,13 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server/tests/suite/v2/thread_resume.rs`
 - `codex-rs/app-server/tests/suite/v2/thread_start.rs`
 - `codex-rs/app-server/tests/suite/v2/thread_subscribe.rs`
+- `codex-rs/app-server/tests/suite/v2/tool_context.rs`
 - `codex-rs/app-server/tests/suite/v2/turn_start.rs`
 - `codex-rs/app-server/tests/suite/v2/view_image.rs`
+- `codex-rs/aws-auth/Cargo.toml`
 - `codex-rs/cli/src/main.rs`
 - `codex-rs/cli/tests/app_server_daemon.rs`
+- `codex-rs/cli/tests/app_server_daemon/support.rs`
 - `codex-rs/cli/tests/queue.rs`
 - `codex-rs/cloud-tasks/src/lib.rs`
 - `codex-rs/codex-api/src/endpoint/realtime_websocket/methods.rs`
@@ -208,7 +235,10 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/codex-mcp/src/mcp/mod.rs`
 - `codex-rs/codex-mcp/src/mcp/mod_tests.rs`
 - `codex-rs/config/src/config_toml.rs`
+- `codex-rs/core-plugins/src/startup_sync.rs`
+- `codex-rs/core-plugins/src/startup_sync_tests.rs`
 - `codex-rs/core/Cargo.toml`
+- `codex-rs/core/Cargo.toml.license`
 - `codex-rs/core/config.schema.json`
 - `codex-rs/core/src/agent/control.rs`
 - `codex-rs/core/src/agent/control/api.rs`
@@ -221,7 +251,10 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/core/src/agent/control/runtime_tests.rs`
 - `codex-rs/core/src/agent/control/spawn.rs`
 - `codex-rs/core/src/agent/control_tests.rs`
+- `codex-rs/core/src/agent/history.rs`
+- `codex-rs/core/src/agent_communication.rs`
 - `codex-rs/core/src/client.rs`
+- `codex-rs/core/src/client_runtime_auth_tests.rs`
 - `codex-rs/core/src/codex_delegate.rs`
 - `codex-rs/core/src/codex_delegate_tests.rs`
 - `codex-rs/core/src/codex_thread.rs`
@@ -241,6 +274,10 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/core/src/session/extension_interruption_tests.rs`
 - `codex-rs/core/src/session/handlers.rs`
 - `codex-rs/core/src/session/input_acceptance.rs`
+- `codex-rs/core/src/session/input_acceptance/control.rs`
+- `codex-rs/core/src/session/input_acceptance/control_tests.rs`
+- `codex-rs/core/src/session/input_acceptance/request.rs`
+- `codex-rs/core/src/session/input_acceptance/request_tests.rs`
 - `codex-rs/core/src/session/input_queue.rs`
 - `codex-rs/core/src/session/input_queue/mailbox_checkpoint.rs`
 - `codex-rs/core/src/session/input_queue/mailbox_submission_tests.rs`
@@ -263,6 +300,7 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/core/src/session/turn_start_mcp_tests.rs`
 - `codex-rs/core/src/session/turn_suspension.rs`
 - `codex-rs/core/src/session/world_state.rs`
+- `codex-rs/core/src/shell_snapshot_tests.rs`
 - `codex-rs/core/src/tasks/mod.rs`
 - `codex-rs/core/src/tasks/mod_tests.rs`
 - `codex-rs/core/src/thread_manager.rs`
@@ -273,7 +311,13 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/core/src/tools/handlers/view_image_snapshot.rs`
 - `codex-rs/core/src/tools/handlers/view_image_snapshot_tests.rs`
 - `codex-rs/core/src/tools/network_approval_tests.rs`
+- `codex-rs/core/src/unified_exec/mod.rs`
+- `codex-rs/core/src/unified_exec/mod_tests.rs`
+- `codex-rs/core/src/unified_exec/process.rs`
+- `codex-rs/core/src/unified_exec/process_manager.rs`
+- `codex-rs/core/src/unified_exec/process_manager_tests.rs`
 - `codex-rs/core/tests/suite/abort_tasks.rs`
+- `codex-rs/core/tests/suite/agent_execution.rs`
 - `codex-rs/core/tests/suite/input_acceptance.rs`
 - `codex-rs/core/tests/suite/mod.rs`
 - `codex-rs/core/tests/suite/model_switching.rs`
@@ -287,6 +331,8 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/core/tests/suite/view_image.rs`
 - `codex-rs/diagnostics/src/lib.rs`
 - `codex-rs/diagnostics/src/tests.rs`
+- `codex-rs/exec-server/src/local_process.rs`
+- `codex-rs/exec-server/src/process.rs`
 - `codex-rs/exec-server/tests/exec_process/windows_sandbox.rs`
 - `codex-rs/exec/src/event_processor_with_jsonl_output_tests.rs`
 - `codex-rs/exec/src/lib.rs`
@@ -347,6 +393,7 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/state/thread_history_migrations/1000004_observation_lineage.sql`
 - `codex-rs/thread-manager-sample/src/main.rs`
 - `codex-rs/thread-store/BUILD.bazel`
+- `codex-rs/thread-store/Cargo.toml`
 - `codex-rs/thread-store/src/in_memory.rs`
 - `codex-rs/thread-store/src/lib.rs`
 - `codex-rs/thread-store/src/live_thread.rs`
@@ -371,6 +418,7 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/thread-store/src/local/thread_history/search.rs`
 - `codex-rs/thread-store/src/local/thread_history/segment_paging.rs`
 - `codex-rs/thread-store/src/local/thread_history_materialization.rs`
+- `codex-rs/thread-store/src/local/thread_history_materialization_pipeline.rs`
 - `codex-rs/thread-store/src/local/thread_history_materialization_tests.rs`
 - `codex-rs/thread-store/src/queue_store.rs`
 - `codex-rs/thread-store/src/store.rs`
@@ -394,6 +442,7 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/tui/src/app/thread_events.rs`
 - `codex-rs/tui/src/app/thread_title_tests.rs`
 - `codex-rs/tui/src/app_server_session/realtime.rs`
+- `codex-rs/tui/src/bottom_pane/AGENTS.md`
 - `codex-rs/tui/src/bottom_pane/CLAUDE.md`
 - `codex-rs/tui/src/chatwidget.rs`
 - `codex-rs/tui/src/chatwidget/protocol.rs`
@@ -426,37 +475,24 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/tui/src/resume_picker_transcript_preview_tests.rs`
 - `codex-rs/tui/src/task_mentions.rs`
 - `codex-rs/tui/src/temporary_structured_request_tests.rs`
+- `codex-rs/tui/src/thread_transcript/other_items.rs`
 - `codex-rs/tui/src/thread_transcript/other_items_tests.rs`
-- `codex-rs/utils/pty/src/tests.rs`
-- `scripts/codex_package/cli.py`
-- `scripts/codex_package/cargo.py`
-- `scripts/codex_package/test_cargo.py`
-- `scripts/codex_package/layout.py`
-- `scripts/codex_package/test_cli.py`
-- `scripts/codex_package/test_layout.py`
-- `sdk/python/src/openai_codex/generated/v2_all.py`
-- `codex-rs/app-server-protocol/src/protocol/v2/mod.rs`
-- `codex-rs/app-server-protocol/src/protocol/v2/tool_context.rs`
-- `codex-rs/app-server/src/request_processors/daemon_snapshot.rs`
-- `codex-rs/app-server/src/request_processors/input_acceptance_processor.rs`
-- `codex-rs/app-server/src/request_processors/tool_context_processor.rs`
-- `codex-rs/app-server/tests/suite/v2/tool_context.rs`
-- `codex-rs/core/src/unified_exec/mod.rs`
-- `codex-rs/core/src/unified_exec/mod_tests.rs`
-- `codex-rs/core/src/unified_exec/process.rs`
-- `codex-rs/core/src/unified_exec/process_manager.rs`
-- `codex-rs/core/src/unified_exec/process_manager_tests.rs`
-- `codex-rs/exec-server/src/local_process.rs`
-- `codex-rs/exec-server/src/process.rs`
 - `codex-rs/utils/pty/src/lib.rs`
 - `codex-rs/utils/pty/src/pipe.rs`
 - `codex-rs/utils/pty/src/process.rs`
 - `codex-rs/utils/pty/src/process_identity.rs`
 - `codex-rs/utils/pty/src/pty.rs`
-- `codex-rs/app-server/tests/suite/v2/input_acceptance_stop.rs`
-- `codex-rs/app-server/src/request_processors/thread_persist_processor.rs`
-- `codex-rs/thread-store/Cargo.toml`
-- `codex-rs/core/src/session/input_acceptance/control.rs`
-- `codex-rs/core/src/session/input_acceptance/control_tests.rs`
-- `codex-rs/core/src/session/input_acceptance/request.rs`
-- `codex-rs/core/src/session/input_acceptance/request_tests.rs`
+- `codex-rs/utils/pty/src/tests.rs`
+- `scripts/codex_package/cargo.py`
+- `scripts/codex_package/cli.py`
+- `scripts/codex_package/layout.py`
+- `scripts/codex_package/test_cargo.py`
+- `scripts/codex_package/test_cli.py`
+- `scripts/codex_package/test_layout.py`
+- `sdk/python/src/openai_codex/generated/v2_all.py`
+
+## Late user final after a realtime handoff
+
+The private V3 transcript accumulator retains `delegation.created.item.user_bidi_turn_id` and `turn.done.turn.id` at the wire boundary. A matching late final consumes that forwarded identity without recreating a caller line in the next handoff; the ordinary transcript event remains unchanged for canonical history and listeners. A new turn with identical text stays new speech. This bookkeeping shares the existing transcript-state lifetime across sideband reconnects. Pending identities are bounded to 8 KiB including their string storage slots, oldest first on overflow, with one visible warning per session; eviction can allow a repeated context line but never terminates the call. No public app-server schema changes.
+
+Owned files: `codex-rs/codex-api/src/endpoint/realtime_websocket/{methods.rs,protocol_frameless_bidi.rs,transcript_tests.rs}`. The focused tests replay raw V3 frames across a reconnect, retain canonical final observations and identical new speech, and exercise missing-final eviction without ending the stream. No upstream issue or PR has been submitted.

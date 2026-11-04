@@ -291,6 +291,7 @@ impl LegacyRolloutCanonicalizer {
             }
             item @ (RolloutItem::InterAgentCommunicationMetadata { .. }
             | RolloutItem::TurnContext(_)
+            | RolloutItem::DynamicToolsUpdated { .. }
             | RolloutItem::TokenUsageRecord(_)
             | RolloutItem::InputAcceptance(_)
             | RolloutItem::RealtimeItem(_)

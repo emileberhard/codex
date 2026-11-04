@@ -179,10 +179,7 @@ impl AgentControl for LocalAgentControl {
         })
     }
 
-    fn take_mailbox(
-        &self,
-        _agent: ThreadId,
-    ) -> Vec<codex_protocol::protocol::InterAgentCommunication> {
+    fn take_mailbox(&self, _agent: ThreadId) -> Vec<crate::PendingAgentMessage> {
         Vec::new()
     }
 

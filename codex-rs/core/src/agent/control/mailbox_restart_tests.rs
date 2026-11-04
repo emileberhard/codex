@@ -205,6 +205,7 @@ impl MailFixture {
                     memory_mode: codex_protocol::protocol::ThreadMemoryMode::Enabled,
                 },
             },
+            None,
         )
         .await
         .expect("exclusive native writer")

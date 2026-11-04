@@ -130,6 +130,10 @@ For complex logic changes the size should be under 500 lines.
 If the change is larger, explore whether it can be split into reviewable stages and identify the smallest coherent stage to land first.
 Base the staging suggestion on the actual diff, dependencies, and affected call sites.
 
+## Realtime handoff transcript ownership
+
+The V3 parser retains provider input-turn IDs privately in `codex-api` for handoff transcript accumulation. A final for an already handed-off turn still reaches canonical observers but does not reopen caller context. Never suppress caller speech by text equality. Pending IDs survive sideband reconnects with `RealtimeTranscriptState`, are consumed by their matching final and die with the session. Their 8 KiB bound evicts oldest identities with one warning per session; overflow may repeat context and must not end a live call.
+
 ## TUI style conventions
 
 See `codex-rs/tui/styles.md`.

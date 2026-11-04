@@ -27,6 +27,9 @@ mod mailbox_checkpoint;
 pub struct UserInputMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acceptance_order: Option<u64>,
+    /// Optional host-assigned UUID for this particular Responses user item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_item_uuid: Option<uuid::Uuid>,
     #[serde(
         default,
         skip_serializing_if = "codex_history::UserInputOrigin::is_user"
@@ -47,7 +50,7 @@ pub enum TurnInput {
     // Preserve the existing serialized format while carrying injection API metadata
     // through the in-memory queue.
     ResponseItem(#[serde(with = "turn_input_response_item")] ResponseItemEnvelope),
-    InterAgentCommunication(InterAgentCommunication),
+    InterAgentCommunication(crate::PendingAgentMessage),
 }
 
 mod turn_input_response_item {
@@ -92,6 +95,8 @@ pub(crate) enum InputQueueActivity {
 #[derive(Default)]
 pub(crate) struct TurnInputQueue {
     items: Vec<TurnInput>,
+    /// Response items queued through a notifying injection, unlike passive context.
+    has_pending_injection: bool,
 }
 
 /// Session-scoped pending input storage and active-turn mailbox delivery coordination.
@@ -105,7 +110,7 @@ pub(crate) struct InputQueue {
 }
 
 pub(crate) struct PendingMailboxCommunication {
-    pub(crate) communication: InterAgentCommunication,
+    pub(crate) communication: crate::PendingAgentMessage,
     start_options: TurnStartOptions,
     _diagnostics_guard: GaugeGuard,
 }
@@ -206,14 +211,14 @@ impl InputQueue {
         turn_state
             .pending_input
             .items
-            .push(TurnInput::InterAgentCommunication(communication));
+            .push(TurnInput::InterAgentCommunication(communication.into()));
         self.activity_tx.send_replace(InputQueueActivity::Mailbox);
         true
     }
 
     pub(crate) async fn enqueue_mailbox_communication(
         &self,
-        communication: InterAgentCommunication,
+        communication: crate::PendingAgentMessage,
         start_options: TurnStartOptions,
     ) {
         let mut pending = self.mailbox_pending_mails.lock().await;
@@ -334,7 +339,10 @@ impl InputQueue {
     pub(crate) async fn clear_pending(&self, active_turn: &ActiveTurn) {
         let mut turn_state = active_turn.turn_state.lock().await;
         turn_state.clear_pending_waiters();
-        turn_state.pending_input.items.clear();
+        // Pending mail can own extension attachments whose destructors need the lock released.
+        let pending_input = std::mem::take(&mut turn_state.pending_input);
+        drop(turn_state);
+        drop(pending_input);
     }
 
     pub(crate) async fn defer_mailbox_delivery_to_next_turn(
@@ -390,6 +398,9 @@ impl InputQueue {
     ) {
         {
             let mut turn_state = turn_state.lock().await;
+            turn_state.pending_input.has_pending_injection |= input
+                .iter()
+                .any(|input| matches!(input, TurnInput::ResponseItem(_)));
             turn_state.pending_input.items.extend(input);
             turn_state.accept_mailbox_delivery_for_current_turn();
         }
@@ -408,7 +419,7 @@ impl InputQueue {
         &self,
         turn_state: &Mutex<TurnState>,
     ) -> Vec<TurnInput> {
-        turn_state.lock().await.pending_input.items.split_off(0)
+        std::mem::take(&mut turn_state.lock().await.pending_input).items
     }
 
     #[expect(
@@ -426,7 +437,7 @@ impl InputQueue {
                 return Ok((Vec::new(), TurnStartOptions::default()));
             }
             let (mailbox_items, start_options) = self.drain_mailbox_input_items().await?;
-            let mut pending_input = turn_state.pending_input.items.split_off(0);
+            let mut pending_input = std::mem::take(&mut turn_state.pending_input).items;
             pending_input.extend(mailbox_items);
             Ok((pending_input, start_options))
         } else {
@@ -491,12 +502,14 @@ impl TurnInputQueue {
     }
 
     fn pending_activity(&self) -> Option<InputQueueActivity> {
-        if self.items.iter().any(|input| {
-            matches!(
-                input,
-                TurnInput::UserInput { .. } | TurnInput::FunctionCallOutput(_)
-            )
-        }) {
+        if self.has_pending_injection
+            || self.items.iter().any(|input| {
+                matches!(
+                    input,
+                    TurnInput::UserInput { .. } | TurnInput::FunctionCallOutput(_)
+                )
+            })
+        {
             Some(InputQueueActivity::Steer)
         } else if self
             .items
@@ -599,7 +612,7 @@ mod tests {
             /*trigger_turn*/ false,
         );
         input_queue
-            .enqueue_mailbox_communication(mail_one, Default::default())
+            .enqueue_mailbox_communication(mail_one.into(), Default::default())
             .await;
         let mail_two = make_mail(
             AgentPath::root(),
@@ -608,7 +621,7 @@ mod tests {
             /*trigger_turn*/ false,
         );
         input_queue
-            .enqueue_mailbox_communication(mail_two, Default::default())
+            .enqueue_mailbox_communication(mail_two.into(), Default::default())
             .await;
 
         activity_rx.changed().await.expect("mailbox update");
@@ -648,10 +661,31 @@ mod tests {
     async fn input_queue_reports_already_pending_steer() {
         let input_queue = InputQueue::new();
         let turn_state = Mutex::new(TurnState::default());
-        let passive_output = serde_json::from_value(serde_json::json!({
+        let passive_output: TurnInput = serde_json::from_value(serde_json::json!({
             "ResponseItem": {"type": "function_call_output", "name": "notify", "output": "passive"}
         }))
         .unwrap();
+        input_queue
+            .extend_pending_input_for_turn_state(&turn_state, vec![passive_output.clone()])
+            .await;
+        assert_eq!(
+            input_queue.subscribe_activity(Some(&turn_state)).await.1,
+            None
+        );
+        input_queue
+            .extend_pending_input_and_accept_mailbox_delivery_for_turn_state(
+                &turn_state,
+                vec![passive_output.clone()],
+            )
+            .await;
+        assert_eq!(
+            input_queue.subscribe_activity(Some(&turn_state)).await.1,
+            Some(InputQueueActivity::Steer)
+        );
+        // Consuming the injection must not make later passive context wake a wait.
+        input_queue
+            .take_pending_input_for_turn_state(&turn_state)
+            .await;
         input_queue
             .extend_pending_input_for_turn_state(&turn_state, vec![passive_output])
             .await;
@@ -668,7 +702,7 @@ mod tests {
         input_queue
             .extend_pending_input_for_turn_state(
                 &turn_state,
-                vec![TurnInput::InterAgentCommunication(communication)],
+                vec![TurnInput::InterAgentCommunication(communication.into())],
             )
             .await;
         assert_eq!(
@@ -712,10 +746,10 @@ mod tests {
         );
 
         input_queue
-            .enqueue_mailbox_communication(mail_one.clone(), Default::default())
+            .enqueue_mailbox_communication(mail_one.clone().into(), Default::default())
             .await;
         input_queue
-            .enqueue_mailbox_communication(mail_two.clone(), Default::default())
+            .enqueue_mailbox_communication(mail_two.clone().into(), Default::default())
             .await;
 
         assert_eq!(
@@ -725,8 +759,8 @@ mod tests {
                 .expect("mailbox input remains available")
                 .0,
             vec![
-                TurnInput::InterAgentCommunication(mail_one),
-                TurnInput::InterAgentCommunication(mail_two)
+                TurnInput::InterAgentCommunication(mail_one.into()),
+                TurnInput::InterAgentCommunication(mail_two.into())
             ]
         );
         assert!(!input_queue.has_pending_mailbox_items().await);
@@ -758,7 +792,7 @@ mod tests {
         );
         input_queue
             .enqueue_mailbox_communication(
-                mail.clone(),
+                mail.clone().into(),
                 TurnStartOptions {
                     parent_turn_id: Some("parent-turn".to_string()),
                     root_turn_id: Some("root-turn".to_string()),
@@ -772,7 +806,7 @@ mod tests {
                 .take_restart_input(&active_turn)
                 .await
                 .expect("restart input remains available"),
-            vec![steer, TurnInput::InterAgentCommunication(mail)]
+            vec![steer, TurnInput::InterAgentCommunication(mail.into())]
         );
         assert!(
             input_queue
@@ -812,7 +846,8 @@ mod tests {
             for (trigger_turn, parent_turn_id, root_turn_id) in pending_mails {
                 input_queue
                     .enqueue_mailbox_communication(
-                        make_mail(AgentPath::root(), AgentPath::root(), "task", trigger_turn),
+                        make_mail(AgentPath::root(), AgentPath::root(), "task", trigger_turn)
+                            .into(),
                         TurnStartOptions {
                             parent_turn_id: parent_turn_id.map(str::to_string),
                             root_turn_id: root_turn_id.map(str::to_string),
@@ -846,7 +881,8 @@ mod tests {
             ] {
                 input_queue
                     .enqueue_mailbox_communication(
-                        make_mail(AgentPath::root(), AgentPath::root(), "task", trigger_turn),
+                        make_mail(AgentPath::root(), AgentPath::root(), "task", trigger_turn)
+                            .into(),
                         TurnStartOptions {
                             cyber_access_program: program,
                             ..Default::default()
@@ -873,7 +909,7 @@ mod tests {
             /*trigger_turn*/ false,
         );
         input_queue
-            .enqueue_mailbox_communication(queued_mail, Default::default())
+            .enqueue_mailbox_communication(queued_mail.into(), Default::default())
             .await;
         assert!(!input_queue.has_trigger_turn_mailbox_items().await);
 
@@ -884,7 +920,7 @@ mod tests {
             /*trigger_turn*/ true,
         );
         input_queue
-            .enqueue_mailbox_communication(trigger_mail, Default::default())
+            .enqueue_mailbox_communication(trigger_mail.into(), Default::default())
             .await;
         assert!(input_queue.has_trigger_turn_mailbox_items().await);
     }

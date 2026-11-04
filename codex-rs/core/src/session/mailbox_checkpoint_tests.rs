@@ -1,6 +1,7 @@
 // Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::*;
 use pretty_assertions::assert_eq;
+use std::io::Write;
 
 #[test_case::test_case(false; "receipt")]
 #[test_case::test_case(true; "cancelled_waiter")]
@@ -30,7 +31,7 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
     for mail in [&first, &second] {
         session
             .input_queue
-            .enqueue_mailbox_communication(mail.clone(), Default::default())
+            .enqueue_mailbox_communication(mail.clone().into(), Default::default())
             .await;
     }
     session
@@ -96,6 +97,7 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
                 memory_mode: codex_protocol::protocol::ThreadMemoryMode::Enabled,
             },
         },
+        None,
     )
     .await
     .expect("recovered canonical writer");
@@ -117,7 +119,7 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
     for mail in [&fresh, &later] {
         session
             .input_queue
-            .enqueue_mailbox_communication(mail.clone(), Default::default())
+            .enqueue_mailbox_communication(mail.clone().into(), Default::default())
             .await;
     }
     let mut recovery = Box::pin(session.reconcile_mailbox_before_consumption());
@@ -145,8 +147,8 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
     assert_eq!(
         input,
         vec![
-            TurnInput::InterAgentCommunication(fresh.clone()),
-            TurnInput::InterAgentCommunication(later.clone())
+            TurnInput::InterAgentCommunication(fresh.clone().into()),
+            TurnInput::InterAgentCommunication(later.clone().into())
         ]
     );
     for mail in [fresh.clone(), later.clone()] {
@@ -165,6 +167,22 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
                 .and_then(|metadata| metadata.create_time.clone())
                 .expect("real consumption stamps creation time"),
         );
+        let ResponseItem::AgentMessage {
+            content,
+            internal_chat_message_metadata_passthrough,
+            ..
+        } = &mut stamped
+        else {
+            panic!("agent message");
+        };
+        internal_chat_message_metadata_passthrough
+            .get_or_insert_default()
+            .content_item_metadata = Some(vec![
+            codex_protocol::models::ContentItemMetadata::tool(
+                Some(codex_protocol::models::ContentItemNamespace::Collaboration,)
+            );
+            content.len()
+        ]);
         expected.push(stamped);
     }
     assert_eq!(live, expected);
@@ -211,13 +229,15 @@ async fn partial_mail_checkpoint_real_consumption_replays_once(cancel: bool) {
         })
         .collect();
     assert_eq!(agent_records, expected);
-    println!(
+    writeln!(
+        std::io::stdout(),
         "NATIVE_MAIL_FIXTURE={}",
         serde_json::json!({
             "threadId": session.thread_id, "turnId": turn.sub_id,
             "rollout": std::fs::read_to_string(&rollout_path).expect("fixture bytes"),
             "communications": canonical_mail, "modelInput": expected,
         })
-    );
+    )
+    .expect("fixture stdout");
     writer.shutdown().await.expect("close writer");
 }

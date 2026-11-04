@@ -1,7 +1,7 @@
 // Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use super::ThreadHistoryBuilder;
 use super::ThreadHistoryChangeSet;
-use super::ThreadItem;
+use super::ThreadItemPayload;
 use codex_rollout::RolloutItem;
 use serde::Deserialize;
 use serde::Serialize;
@@ -64,7 +64,7 @@ impl LegacyThreadHistoryProjection {
         }
         let mut keep = self.pending_parts.clone();
         if let Some(turn) = &self.builder.current_turn
-            && let Some(item @ ThreadItem::Reasoning { .. }) = turn.items.last()
+            && let Some(item @ ThreadItemPayload::Reasoning { .. }) = turn.items.last()
         {
             keep.insert((turn.id.clone(), item.id().to_owned()));
         }
@@ -210,7 +210,7 @@ mod tests {
         assert!(actual.contains_key(&("last".into(), "item-4".into())));
         assert!(actual[&("first".into(), "canonical".into())].1);
         assert!(
-            matches!(&actual[&("first".into(), "reason".into())].0, ThreadItem::Reasoning { summary, content, .. } if summary == &["summary", ""] && content == &[""])
+            matches!(&actual[&("first".into(), "reason".into())].0.payload, ThreadItemPayload::Reasoning { summary, content, .. } if summary == &["summary", ""] && content == &[""])
         );
     }
 

@@ -67,7 +67,7 @@ impl ThreadRequestProcessor {
         }
         #[cfg(debug_assertions)]
         crate::thread_observation::test_barrier("subscribe", thread_id).await;
-        let _ = completion_rx.await;
+        completion_rx.await.map_err(|_| closing_error())?;
         Ok(None)
     }
 

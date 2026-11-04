@@ -19,4 +19,6 @@ pub(crate) struct Submission {
     /// Keeps a V2 recipient resident until this submission is handled or dropped.
     pub residency_guard: Option<OwnedRwLockReadGuard<()>>,
     pub new_work_admission: Option<OwnedRwLockReadGuard<()>>,
+    /// Owns delivery until dispatch; failed or abandoned submissions discard it.
+    pub message_delivery: Option<crate::agent_communication::MessageDelivery>,
 }

@@ -12,6 +12,7 @@ use crate::protocol::thread_history::ThreadHistoryChangeSet;
 use crate::protocol::thread_history::ThreadHistoryItemChange;
 use crate::protocol::thread_history::ThreadHistoryTurnMetadata;
 use crate::protocol::v2::ThreadItem;
+use crate::protocol::v2::ThreadItemPayload;
 use crate::protocol::v2::TurnError;
 use crate::protocol::v2::TurnStatus;
 
@@ -80,9 +81,11 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
             changed_items: vec![ThreadHistoryItemChange {
                 is_complete: false,
                 turn_id: event.turn_id.clone(),
-                item: ThreadItem::from(event.item.clone()),
-                started_at_ms: Some(event.started_at_ms),
-                completed_at_ms: None,
+                item: ThreadItem {
+                    payload: ThreadItemPayload::from(event.item.clone()),
+                    started_at_ms: Some(event.started_at_ms),
+                    completed_at_ms: None,
+                },
             }],
             ..Default::default()
         },
@@ -90,13 +93,12 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
             changed_items: vec![ThreadHistoryItemChange {
                 is_complete: true,
                 turn_id: event.turn_id.clone(),
-                item: ThreadItem::from(event.item.clone()),
-                started_at_ms: event.started_at_ms,
-                completed_at_ms: (event.completed_at_ms != 0).then_some(event.completed_at_ms),
+                item: ThreadItem::from(event),
             }],
             ..Default::default()
         },
-        RolloutItem::SessionMeta(_)
+        RolloutItem::DynamicToolsUpdated { .. }
+        | RolloutItem::SessionMeta(_)
         | RolloutItem::ResponseItem(_)
         | RolloutItem::InterAgentCommunication(_)
         | RolloutItem::InterAgentCommunicationMetadata { .. }

@@ -248,6 +248,7 @@ fn source_model_items(items: &[RolloutItem]) -> Option<Vec<SourceModelItem<'_>>>
             | RolloutItem::Compacted(_)
             | RolloutItem::TurnContext(_)
             | RolloutItem::RetainedContext(_)
+            | RolloutItem::DynamicToolsUpdated { .. }
             | RolloutItem::SecurityRiskScore(_)
             | RolloutItem::WorldState(_) => return None,
             RolloutItem::EventMsg(_) => {}
@@ -266,6 +267,7 @@ fn history_model_items(items: &[RolloutItem]) -> Option<Vec<&ResponseItem>> {
             | RolloutItem::InputAcceptance(_)
             | RolloutItem::RealtimeItem(_)
             | RolloutItem::RetainedContext(_)
+            | RolloutItem::DynamicToolsUpdated { .. }
             | RolloutItem::SecurityRiskScore(_) => {}
             RolloutItem::ResponseItem(response_item) => model_items.push(&response_item.item),
             RolloutItem::EventMsg(
