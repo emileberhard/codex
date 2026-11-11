@@ -1,8 +1,10 @@
+// Modified by Emil Eberhard for RemoteCoder; see REMOTECODER_MODIFICATIONS.md.
 use codex_protocol::protocol::HistoryPosition;
 use std::sync::Arc;
 
 use super::LocalThreadStore;
 use super::live_writer;
+use super::mid_turn_fork;
 use super::model_context;
 use super::thread_history::find_source_turn;
 use super::thread_history::find_visible_turn;
@@ -73,8 +75,19 @@ pub(super) async fn prepare(
     .await?;
 
     let history_base = history_base_at_boundary(store, thread_id, boundary, &lineage).await?;
+    let open_turn_start = match history_base {
+        Some(history_base) => {
+            mid_turn_fork::open_turn_start(store.thread_history_db().await?, &lineage, history_base)
+                .await?
+        }
+        None => None,
+    };
     drop(source_writer_guard);
-    let model_context = Arc::new(model_context::load_for_fork(lineage, history_base).await?);
+    let mut model_context = model_context::load_for_fork(lineage, history_base).await?;
+    if let Some(turn_started) = open_turn_start {
+        mid_turn_fork::keep_turn_start(&mut model_context, turn_started);
+    }
+    let model_context = Arc::new(model_context);
 
     Ok(PreparedFork::new(
         thread_id,
@@ -135,6 +148,18 @@ pub(super) async fn history_base_at_boundary(
                 end_byte_offset: u64::try_from(rollout_end_byte_offset)
                     .map_err(|_| invalid_turn_position(turn_id.as_str()))?,
             }
+        }
+        ForkBoundary::ThroughItem { turn_id, item_id } => {
+            let visible = store
+                .resolve_rollout_lineage_for_history_page(thread_id)
+                .await?;
+            mid_turn_fork::position_after_message_record(
+                pool,
+                &visible,
+                turn_id.as_str(),
+                item_id.as_str(),
+            )
+            .await?
         }
         ForkBoundary::BeforeTurn(turn_id) => {
             let visible = store

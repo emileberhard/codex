@@ -7,6 +7,7 @@ mod history_revision;
 mod legacy_history_materialization;
 mod list_threads;
 mod live_writer;
+mod mid_turn_fork;
 mod model_context;
 mod move_thread_to_section;
 mod paginated_fork;

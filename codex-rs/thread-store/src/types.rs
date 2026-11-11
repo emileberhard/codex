@@ -213,6 +213,10 @@ pub enum ForkBoundary {
     ThroughTurn(String),
     /// Inherit history preceding the original visible occurrence of this turn.
     BeforeTurn(String),
+    ThroughItem {
+        turn_id: String,
+        item_id: String,
+    },
 }
 
 /// Parameters for freezing the source history used to initialize a fork.
