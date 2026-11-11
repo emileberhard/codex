@@ -609,6 +609,18 @@ unfinished start, without later parent completions leaking into its history.
 Older completed-only recordings retain their recorded ordinal as a deterministic
 fallback; it does not prove their exact start order.
 
+# Fork through an item (experimental)
+
+`thread/fork` with `lastTurnId` and `lastItemId` forks a paginated thread
+through one completed assistant message of that turn, inclusive. The turn may
+still be running; the source thread and its turn are not changed. The fork ends
+the cut turn as interrupted, and its history and model context contain nothing
+recorded after the message. The request fails with an invalid-request error,
+rather than choosing another boundary, when `lastTurnId` is missing, the thread
+uses legacy history, the item is not a completed assistant message of that turn,
+or the provider did not record the model-visible message with the same ID
+directly after its completion.
+
 # Client-owned realtime handoffs (experimental)
 
 Pass `handoffOwner: "client"` to `thread/realtime/start` when an external

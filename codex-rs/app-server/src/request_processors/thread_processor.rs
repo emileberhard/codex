@@ -5358,6 +5358,7 @@ impl ThreadRequestProcessor {
             experimental_prediction_mode,
             experimental_disable_prediction_mcp,
             last_turn_id,
+            last_item_id,
             before_turn_id,
             path,
             model,
@@ -5379,6 +5380,9 @@ impl ThreadRequestProcessor {
             defer_goal_continuation,
         } = params;
         let include_turns = !exclude_turns;
+        if last_item_id.is_some() && last_turn_id.is_none() {
+            return Err(invalid_request("`lastItemId` requires `lastTurnId`"));
+        }
         if attach_to_source {
             if ephemeral || defer_goal_continuation {
                 return Err(invalid_request(
@@ -5485,6 +5489,9 @@ impl ThreadRequestProcessor {
                 "`beforeTurnId` cannot be combined with `lastTurnId`",
             ));
         }
+        if last_item_id.is_some() && !paginated_source {
+            return Err(invalid_request("`lastItemId` requires a paginated thread"));
+        }
         if ephemeral && defer_goal_continuation {
             return Err(invalid_request(
                 "`deferGoalContinuation` cannot be combined with `ephemeral`",
@@ -5509,9 +5516,13 @@ impl ThreadRequestProcessor {
             .and_then(codex_core::util::normalize_thread_name);
         let mut prepared_fork = if paginated_source {
             let boundary = match (last_turn_id.as_deref(), before_turn_id.as_deref()) {
-                (Some(turn_id), None) => {
-                    codex_thread_store::ForkBoundary::ThroughTurn(turn_id.to_string())
-                }
+                (Some(turn_id), None) => match last_item_id {
+                    Some(item_id) => codex_thread_store::ForkBoundary::ThroughItem {
+                        turn_id: turn_id.to_string(),
+                        item_id,
+                    },
+                    None => codex_thread_store::ForkBoundary::ThroughTurn(turn_id.to_string()),
+                },
                 (None, Some(turn_id)) => {
                     codex_thread_store::ForkBoundary::BeforeTurn(turn_id.to_string())
                 }

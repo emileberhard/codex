@@ -211,6 +211,7 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/app-server/tests/suite/v2/sleep.rs`
 - `codex-rs/app-server/tests/suite/v2/sqlite_recovery.rs`
 - `codex-rs/app-server/tests/suite/v2/thread_fork.rs`
+- `codex-rs/app-server/tests/suite/v2/thread_fork_through_item_tests.rs`
 - `codex-rs/app-server/tests/suite/v2/thread_list.rs`
 - `codex-rs/app-server/tests/suite/v2/thread_metadata_update.rs`
 - `codex-rs/app-server/tests/suite/v2/thread_read.rs`
@@ -400,8 +401,11 @@ birth identity, without treating provider environment variables as authority.
 - `codex-rs/thread-store/src/local/item_lifecycle_tests.rs`
 - `codex-rs/thread-store/src/local/legacy_history_materialization.rs`
 - `codex-rs/thread-store/src/local/live_writer.rs`
+- `codex-rs/thread-store/src/local/mid_turn_fork.rs`
+- `codex-rs/thread-store/src/local/mid_turn_fork_tests.rs`
 - `codex-rs/thread-store/src/local/mod.rs`
 - `codex-rs/thread-store/src/local/observation_lineage_tests.rs`
+- `codex-rs/thread-store/src/local/paginated_fork.rs`
 - `codex-rs/thread-store/src/local/pending_thread_metadata_tests.rs`
 - `codex-rs/thread-store/src/local/revert_thread.rs`
 - `codex-rs/thread-store/src/local/revert_thread_tests.rs`
@@ -496,3 +500,9 @@ birth identity, without treating provider environment variables as authority.
 The private V3 transcript accumulator retains `delegation.created.item.user_bidi_turn_id` and `turn.done.turn.id` at the wire boundary. A matching late final consumes that forwarded identity without recreating a caller line in the next handoff; the ordinary transcript event remains unchanged for canonical history and listeners. A new turn with identical text stays new speech. This bookkeeping shares the existing transcript-state lifetime across sideband reconnects. Pending identities are bounded to 8 KiB including their string storage slots, oldest first on overflow, with one visible warning per session; eviction can allow a repeated context line but never terminates the call. No public app-server schema changes.
 
 Owned files: `codex-rs/codex-api/src/endpoint/realtime_websocket/{methods.rs,protocol_frameless_bidi.rs,transcript_tests.rs}`. The focused tests replay raw V3 frames across a reconnect, retain canonical final observations and identical new speech, and exercise missing-final eviction without ending the stream. No upstream issue or PR has been submitted.
+
+## Fork through an item
+
+`thread/fork` accepts the experimental `lastItemId` together with `lastTurnId` on paginated threads. The store resolves the item's first completed version in the visible lineage and requires the model-visible assistant `ResponseItem` with the same ID on the very next rollout ordinal; the fork boundary ends after that record, so nothing later is inherited. Anything else is an invalid request, never a substituted boundary: missing `lastTurnId`, legacy history, unknown or non-assistant items, unfinished messages, tool-produced messages and providers that omit or change response IDs. The running source turn is only read under the existing writer guard. Every paginated fork whose boundary falls inside an open turn also re-prepends that turn's persisted `TurnStarted` when the model-context scan started after it at a compaction, so the cut turn always reads as interrupted. No stored history or SQLite schema changes.
+
+Owned files: `codex-rs/thread-store/src/local/{mid_turn_fork.rs,mid_turn_fork_tests.rs}` and `codex-rs/app-server/tests/suite/v2/thread_fork_through_item_tests.rs`; `paginated_fork.rs` carries the boundary arm and the shared turn-start fix. No upstream issue or PR has been submitted.

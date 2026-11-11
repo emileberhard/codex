@@ -687,6 +687,15 @@ pub struct ThreadForkParams {
     #[ts(optional = nullable)]
     pub last_turn_id: Option<String>,
 
+    /// Optional assistant message item of `last_turn_id` to fork through, inclusive.
+    ///
+    /// When specified, everything after this item is omitted from the fork and the
+    /// cut turn reads as interrupted. The turn may still be in progress. Requires
+    /// `last_turn_id` and a paginated source thread.
+    #[experimental("thread/fork.lastItemId")]
+    #[ts(optional = nullable)]
+    pub last_item_id: Option<String>,
+
     /// Optional turn id to fork before, excluding that turn and all later turns.
     /// Cannot be combined with `last_turn_id`.
     #[experimental("thread/fork.beforeTurnId")]

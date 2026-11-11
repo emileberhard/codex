@@ -164,6 +164,8 @@ mod thread_environments;
 mod thread_fork;
 #[path = "thread_fork_multi_agent_tests.rs"]
 mod thread_fork_multi_agent;
+#[path = "thread_fork_through_item_tests.rs"]
+mod thread_fork_through_item;
 mod thread_goal_empty_responses;
 mod thread_inject_items;
 mod thread_list;
